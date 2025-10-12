@@ -350,20 +350,47 @@ function setupRoleBasedUI() {
 }
 
 async function loadDepartments() {
-  console.log("[v0] Cargando departamentos")
+  console.log("[v0] ==========================================")
+  console.log("[v0] 🏢 INICIANDO CARGA DE DEPARTAMENTOS")
+  console.log("[v0] ==========================================")
 
-  const { data, error } = await supabaseClient.from("products").select("departamento").not("departamento", "is", null)
+  const { data, error, count } = await supabaseClient
+    .from("products")
+    .select("departamento", { count: "exact" })
+    .not("departamento", "is", null)
+    .limit(10000) // Asegurar que obtenemos todos los productos
 
   if (error) {
-    console.error("[v0] Error cargando departamentos:", error)
+    console.error("[v0] ❌ Error cargando departamentos:", error)
+    console.error("[v0] Código:", error.code)
+    console.error("[v0] Mensaje:", error.message)
     return
   }
 
-  const uniqueDepts = [...new Set(data.map((p) => p.departamento))].filter((d) => d).sort()
-  state.departments = uniqueDepts
+  console.log("[v0] 📊 Total de productos en la base de datos:", count)
+  console.log("[v0] 📦 Productos obtenidos para departamentos:", data.length)
+  console.log(
+    "[v0] 🔍 Primeros 10 departamentos raw:",
+    data.slice(0, 10).map((p) => p.departamento),
+  )
 
-  console.log("[v0] Departamentos únicos encontrados:", uniqueDepts.length)
-  console.log("[v0] Departamentos:", uniqueDepts)
+  // Extraer departamentos únicos
+  const allDepartamentos = data.map((p) => p.departamento).filter((d) => d && d.trim() !== "")
+
+  console.log("[v0] 📋 Total de departamentos (con duplicados):", allDepartamentos.length)
+  console.log("[v0] 🔍 Todos los departamentos raw:", allDepartamentos)
+
+  const uniqueDepts = [...new Set(allDepartamentos)].sort()
+
+  console.log("[v0] ==========================================")
+  console.log("[v0] ✅ DEPARTAMENTOS ÚNICOS ENCONTRADOS:", uniqueDepts.length)
+  console.log("[v0] 📝 Lista completa de departamentos:")
+  uniqueDepts.forEach((dept, index) => {
+    console.log(`[v0]    ${index + 1}. "${dept}"`)
+  })
+  console.log("[v0] ==========================================")
+
+  state.departments = uniqueDepts
   renderDepartments()
 }
 
