@@ -3,12 +3,14 @@
 const state = {
   user: null,
   userRole: null, // Ahora será texto: "cliente", "distribuidor", "admin"
+  userName: null, // Agregando nombre de usuario
   products: [],
   departments: [],
   currentDepartment: "all",
   cart: [],
   searchQuery: "",
   deptSearchQuery: "",
+  pendingProduct: null, // Para el modal de cantidad
 }
 
 // Obtener el cliente de Supabase desde la configuración global
@@ -25,6 +27,7 @@ async function handleLogout() {
     console.log("[v0] Sesión cerrada exitosamente")
     state.user = null
     state.userRole = null
+    state.userName = null // Reiniciar nombre de usuario
     state.cart = []
     showLoginScreen()
   }
@@ -90,6 +93,16 @@ function setupEventListeners() {
   document.getElementById("open-sidebar").addEventListener("click", openSidebar)
   document.getElementById("close-sidebar").addEventListener("click", closeSidebar)
   document.getElementById("sidebar-overlay").addEventListener("click", closeSidebar)
+
+  document.getElementById("close-quantity-modal").addEventListener("click", closeQuantityModal)
+  document.getElementById("cancel-quantity").addEventListener("click", closeQuantityModal)
+  document.getElementById("confirm-quantity").addEventListener("click", confirmQuantity)
+
+  document.getElementById("quantity-input").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      confirmQuantity()
+    }
+  })
 }
 
 function showLoginForm() {
@@ -216,49 +229,47 @@ async function handleUserSession(user) {
 
   state.user = user
 
-  console.log("[v0] 🔍 Intentando obtener rol de la base de datos...")
+  console.log("[v0] 🔍 Intentando obtener rol y nombre de la base de datos...")
 
-  const { data: userData, error } = await supabaseClient.from("users").select("role").eq("id", user.id).single()
+  const { data: userData, error } = await supabaseClient.from("users").select("role, name").eq("id", user.id).single()
 
   if (error) {
-    console.error("[v0] ❌ Error obteniendo rol de la base de datos:", error)
+    console.error("[v0] ❌ Error obteniendo datos de la base de datos:", error)
     console.error("[v0] Código de error:", error.code)
     console.error("[v0] Mensaje:", error.message)
     console.error("[v0] Detalles:", error.details)
 
     let fallbackRole = user.user_metadata?.role || "cliente"
 
-    // Convertir roles numéricos a texto si es necesario
     if (fallbackRole === 1 || fallbackRole === "1") fallbackRole = "cliente"
     if (fallbackRole === 2 || fallbackRole === "2") fallbackRole = "distribuidor"
     if (fallbackRole === 3 || fallbackRole === "3") fallbackRole = "admin"
 
     state.userRole = fallbackRole
-    console.log("[v0] ⚠️ Usando rol de metadatos como fallback:", state.userRole)
-    console.log("[v0] Metadatos completos:", user.user_metadata)
+    state.userName = user.user_metadata?.name || "Usuario"
+    console.log("[v0] ⚠️ Usando datos de metadatos como fallback")
   } else {
     let dbRole = userData.role
 
-    // Convertir roles numéricos a texto si es necesario
     if (dbRole === 1 || dbRole === "1") dbRole = "cliente"
     if (dbRole === 2 || dbRole === "2") dbRole = "distribuidor"
     if (dbRole === 3 || dbRole === "3") dbRole = "admin"
 
     state.userRole = dbRole
-    console.log("[v0] ✅ Rol obtenido exitosamente de la base de datos:", state.userRole)
-    console.log("[v0] Datos completos del usuario:", userData)
+    state.userName = userData.name || "Usuario"
+    console.log("[v0] ✅ Datos obtenidos exitosamente de la base de datos")
+    console.log("[v0] Nombre:", state.userName)
+    console.log("[v0] Rol:", state.userRole)
   }
 
   console.log("[v0] ==========================================")
   console.log("[v0] 📋 ROL FINAL ASIGNADO:", state.userRole)
-  console.log("[v0] 📋 TIPO DE DATO:", typeof state.userRole)
+  console.log("[v0] 👤 NOMBRE FINAL:", state.userName)
   console.log("[v0] ==========================================")
 
-  // Cargar datos
   await loadDepartments()
   await loadProducts()
 
-  // Mostrar aplicación
   showAppScreen()
 }
 
@@ -341,18 +352,18 @@ function setupRoleBasedUI() {
 async function loadDepartments() {
   console.log("[v0] Cargando departamentos")
 
-  const { data, error } = await supabaseClient.from("products").select("departamento").order("departamento")
+  const { data, error } = await supabaseClient.from("products").select("departamento").not("departamento", "is", null)
 
   if (error) {
     console.error("[v0] Error cargando departamentos:", error)
     return
   }
 
-  // Obtener departamentos únicos
-  const uniqueDepts = [...new Set(data.map((p) => p.departamento))].filter((d) => d)
+  const uniqueDepts = [...new Set(data.map((p) => p.departamento))].filter((d) => d).sort()
   state.departments = uniqueDepts
 
-  console.log("[v0] Departamentos cargados:", uniqueDepts.length)
+  console.log("[v0] Departamentos únicos encontrados:", uniqueDepts.length)
+  console.log("[v0] Departamentos:", uniqueDepts)
   renderDepartments()
 }
 
@@ -539,7 +550,6 @@ function createProductCard(product) {
       </div>
     `
   } else {
-    // Admin: Todos los precios
     pricesHTML = `
       <div class="space-y-1">
         <div class="flex items-center justify-between">
@@ -593,38 +603,79 @@ function createProductCard(product) {
         </div>
     `
 
-  // Event listener para agregar al carrito
   card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
     const price = Number.parseFloat(e.currentTarget.dataset.price)
-    addToCart({ ...product, cartPrice: price })
+    openQuantityModal({ ...product, cartPrice: price })
   })
 
   return card
 }
 
-function addToCart(product) {
-  console.log("[v0] Agregando al carrito:", product.nombre)
+function openQuantityModal(product) {
+  state.pendingProduct = product
+
+  const modal = document.getElementById("quantity-modal")
+  const productInfo = document.getElementById("quantity-product-info")
+  const quantityInput = document.getElementById("quantity-input")
+
+  productInfo.innerHTML = `
+    <div class="flex items-center space-x-4">
+      <img src="${product.imagen_url || "/generic-product-display.png"}" 
+           alt="${product.nombre}" 
+           class="w-20 h-20 object-cover rounded-lg"
+           onerror="this.src='/generic-product-display.png'">
+      <div class="flex-1">
+        <h3 class="font-bold text-gray-800 mb-1">${product.nombre}</h3>
+        <p class="text-red-600 font-bold text-lg">$${product.cartPrice.toFixed(2)}</p>
+      </div>
+    </div>
+  `
+
+  quantityInput.value = 1
+  quantityInput.focus()
+  quantityInput.select()
+
+  modal.classList.remove("hidden")
+}
+
+function closeQuantityModal() {
+  document.getElementById("quantity-modal").classList.add("hidden")
+  state.pendingProduct = null
+}
+
+function confirmQuantity() {
+  const quantity = Number.parseInt(document.getElementById("quantity-input").value)
+
+  if (!state.pendingProduct || quantity < 1) {
+    return
+  }
+
+  addToCart(state.pendingProduct, quantity)
+  closeQuantityModal()
+}
+
+function addToCart(product, quantity = 1) {
+  console.log("[v0] Agregando al carrito:", product.nombre, "Cantidad:", quantity)
 
   const price = product.cartPrice || product.precio_cliente
 
-  // Verificar si ya existe en el carrito
   const existingItem = state.cart.find((item) => item.id === product.id)
 
   if (existingItem) {
-    existingItem.quantity++
+    existingItem.quantity += quantity
   } else {
     state.cart.push({
       id: product.id,
       nombre: product.nombre,
+      descripcion: product.descripcion || "",
       price: price,
-      quantity: 1,
+      quantity: quantity,
       imagen_url: product.imagen_url,
     })
   }
 
   updateCartUI()
 
-  // Animación de pulso en el botón del carrito
   const cartButton = document.getElementById("cart-button")
   cartButton.classList.add("cart-pulse")
   setTimeout(() => cartButton.classList.remove("cart-pulse"), 300)
@@ -757,37 +808,31 @@ function sendWhatsAppOrder() {
   console.log("[v0] Generando mensaje de WhatsApp")
 
   let message = "🛒 *Nuevo Pedido - SONIMAx MÓVIL*\n\n"
-  message += `👤 Cliente: ${state.user.email}\n`
-
-  let roleText = ""
-  if (state.userRole === "admin") roleText = "Administrador"
-  else if (state.userRole === "distribuidor") roleText = "Distribuidor"
-  else roleText = "Cliente"
-
-  message += `📋 Rol: ${roleText}\n\n`
+  message += `👤 Cliente: ${state.userName}\n\n`
   message += "*Productos:*\n"
 
   let total = 0
   state.cart.forEach((item, index) => {
     const subtotal = item.price * item.quantity
     total += subtotal
-    message += `${index + 1}. ${item.nombre}\n`
-    message += `   Cantidad: ${item.quantity}\n`
-    message += `   Precio: $${item.price.toFixed(2)}\n`
-    message += `   Subtotal: $${subtotal.toFixed(2)}\n\n`
+    message += `${index + 1}. *${item.nombre}*\n`
+    if (item.descripcion) {
+      message += `   📝 ${item.descripcion}\n`
+    }
+    message += `   📦 Cantidad: ${item.quantity}\n`
+    message += `   💵 Precio: $${item.price.toFixed(2)}\n`
+    message += `   💰 Subtotal: $${subtotal.toFixed(2)}\n\n`
   })
 
-  message += `💰 *Total: $${total.toFixed(2)}*\n\n`
+  message += `*TOTAL: $${total.toFixed(2)}*\n\n`
   message += "¡Gracias por tu pedido! 🎉"
 
   const encodedMessage = encodeURIComponent(message)
-  // Sin número específico - el usuario elige a quién enviar
   const whatsappURL = `https://wa.me/?text=${encodedMessage}`
 
   console.log("[v0] Abriendo WhatsApp para elegir contacto")
   window.open(whatsappURL, "_blank")
 
-  // Limpiar carrito después de enviar
   state.cart = []
   updateCartUI()
   closeCart()
