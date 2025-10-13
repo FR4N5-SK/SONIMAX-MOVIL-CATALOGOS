@@ -13,6 +13,39 @@ const state = {
   pendingProduct: null, // Para el modal de cantidad
 }
 
+function saveCartToLocalStorage() {
+  try {
+    localStorage.setItem("sonimax_cart", JSON.stringify(state.cart))
+    console.log("[v0] Carrito guardado en localStorage:", state.cart.length, "items")
+  } catch (error) {
+    console.error("[v0] Error guardando carrito:", error)
+  }
+}
+
+function loadCartFromLocalStorage() {
+  try {
+    const savedCart = localStorage.getItem("sonimax_cart")
+    if (savedCart) {
+      state.cart = JSON.parse(savedCart)
+      console.log("[v0] Carrito cargado desde localStorage:", state.cart.length, "items")
+      updateCartUI()
+    }
+  } catch (error) {
+    console.error("[v0] Error cargando carrito:", error)
+    state.cart = []
+  }
+}
+
+function clearCartFromLocalStorage() {
+  try {
+    localStorage.removeItem("sonimax_cart")
+    console.log("[v0] Carrito eliminado de localStorage")
+  } catch (error) {
+    console.error("[v0] Error eliminando carrito:", error)
+  }
+}
+// </CHANGE>
+
 // Obtener el cliente de Supabase desde la configuración global
 const supabaseClient = window.supabaseClient
 
@@ -27,8 +60,10 @@ async function handleLogout() {
     console.log("[v0] Sesión cerrada exitosamente")
     state.user = null
     state.userRole = null
-    state.userName = null // Reiniciar nombre de usuario
-    state.cart = []
+    state.userName = null
+    // state.cart = [] // REMOVIDO
+    console.log("[v0] Carrito mantenido después de cerrar sesión")
+    // </CHANGE>
     showLoginScreen()
   }
 }
@@ -36,6 +71,8 @@ async function handleLogout() {
 // Inicialización
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("[v0] Iniciando aplicación SONIMAx MÓVIL")
+  loadCartFromLocalStorage()
+  // </CHANGE>
   await initApp()
 })
 
@@ -676,6 +713,9 @@ function addToCart(product, quantity = 1) {
     })
   }
 
+  saveCartToLocalStorage()
+  // </CHANGE>
+
   updateCartUI()
 
   const cartButton = document.getElementById("cart-button")
@@ -789,6 +829,8 @@ function changeQuantity(productId, change) {
     if (item.quantity <= 0) {
       removeFromCart(productId)
     } else {
+      saveCartToLocalStorage()
+      // </CHANGE>
       updateCartUI()
       renderCart()
     }
@@ -797,6 +839,8 @@ function changeQuantity(productId, change) {
 
 function removeFromCart(productId) {
   state.cart = state.cart.filter((item) => item.id !== productId)
+  saveCartToLocalStorage()
+  // </CHANGE>
   updateCartUI()
   renderCart()
 }
@@ -836,6 +880,10 @@ function sendWhatsAppOrder() {
   window.open(whatsappURL, "_blank")
 
   state.cart = []
+  clearCartFromLocalStorage()
+  console.log("[v0] Carrito vaciado después de enviar pedido")
+  // </CHANGE>
+
   updateCartUI()
   closeCart()
 }
