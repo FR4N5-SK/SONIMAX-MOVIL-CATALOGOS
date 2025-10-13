@@ -1,67 +1,79 @@
-Botón Admin (solo visible para admin) 
-        <div id="admin-section" class="hidden container mx-auto px-4 mb-6">
-             Added user management button for admin 
-            <div class="flex flex-wrap gap-4">
-                <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-medium shadow-lg flex items-center space-x-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
-                    <span>Subir CSV de Productos</span>
-                </button>
-                
-                <button id="manage-users-button" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-lg flex items-center space-x-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-                    </svg>
-                    <span>Administrar Usuarios</span>
-                </button>
-            </div>
-        </div>
-
-
-         Modal de Seleccionar Cantidad 
-        <div id="quantity-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-        </div>
-
-         Added user management modal for admin 
-         Modal de Administración de Usuarios 
-        <div id="users-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full my-8">
-                <div class="p-6 border-b border-gray-200 sticky top-0 bg-white rounded-t-2xl">
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-2xl font-bold text-gray-800">Administrar Usuarios</h2>
-                        <button id="close-users-modal" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <p class="text-gray-600 mt-2">Gestiona los roles de todos los usuarios registrados</p>
-                </div>
-                
-                <div class="p-6">
-                    <div id="users-list" class="space-y-4">
-                         Lista de usuarios se carga dinámicamente 
-                    </div>
-                    
-                    <div id="users-loading" class="text-center py-12">
-                        <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto mb-4"></div>
-                        <p class="text-gray-600">Cargando usuarios...</p>
-                    </div>
-                    
-                    <div id="users-error" class="hidden text-center py-12">
-                        <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        <p class="text-red-600 font-medium">Error al cargar usuarios</p>
-                        <p class="text-gray-500 text-sm mt-2">Verifica tu conexión e intenta nuevamente</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SONIMAx MÓVIL - Catálogo de Productos</title>
+    <!-- Added Tailwind CSS CDN for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Added custom styles link -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+    <!-- Botón Admin (solo visible para admin) -->
+    <div id="admin-section" class="hidden container mx-auto px-4 mb-6">
+      <!-- Added user management button for admin -->
+      <div class="flex flex-wrap gap-4">
+        <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-medium shadow-lg flex items-center space-x-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+          </svg>
+          <span>Subir CSV de Productos</span>
+        </button>
+        
+        <button id="manage-users-button" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-lg flex items-center space-x-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+          </svg>
+          <span>Administrar Usuarios</span>
+        </button>
+      </div>
     </div>
 
+    <!-- Modal de Seleccionar Cantidad -->
+    <div id="quantity-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    </div>
+
+    <!-- Added user management modal for admin -->
+    <!-- Modal de Administración de Usuarios -->
+    <div id="users-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full my-8">
+        <div class="p-6 border-b border-gray-200 sticky top-0 bg-white rounded-t-2xl">
+          <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-800">Administrar Usuarios</h2>
+            <button id="close-users-modal" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+          <p class="text-gray-600 mt-2">Gestiona los roles de todos los usuarios registrados</p>
+        </div>
+        
+        <div class="p-6">
+          <div id="users-list" class="space-y-4">
+            <!-- Lista de usuarios se carga dinámicamente -->
+          </div>
+          
+          <div id="users-loading" class="text-center py-12">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto mb-4"></div>
+            <p class="text-gray-600">Cargando usuarios...</p>
+          </div>
+          
+          <div id="users-error" class="hidden text-center py-12">
+            <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <p class="text-red-600 font-medium">Error al cargar usuarios</p>
+            <p class="text-gray-500 text-sm mt-2">Verifica tu conexión e intenta nuevamente</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Added Supabase CDN before supabase-config.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
     <script src="app.js"></script>
-</body>
+  </body>
 </html>
