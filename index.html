@@ -1,79 +1,331 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SONIMAx MÓVIL - Catálogo de Productos</title>
-    <!-- Added Tailwind CSS CDN for utility classes -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Added custom styles link -->
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
-    <!-- Botón Admin (solo visible para admin) -->
-    <div id="admin-section" class="hidden container mx-auto px-4 mb-6">
-      <!-- Added user management button for admin -->
-      <div class="flex flex-wrap gap-4">
-        <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-medium shadow-lg flex items-center space-x-2">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-          </svg>
-          <span>Subir CSV de Productos</span>
-        </button>
-        
-        <button id="manage-users-button" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-lg flex items-center space-x-2">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-          </svg>
-          <span>Administrar Usuarios</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Modal de Seleccionar Cantidad -->
-    <div id="quantity-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-    </div>
-
-    <!-- Added user management modal for admin -->
-    <!-- Modal de Administración de Usuarios -->
-    <div id="users-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full my-8">
-        <div class="p-6 border-b border-gray-200 sticky top-0 bg-white rounded-t-2xl">
-          <div class="flex items-center justify-between">
-            <h2 class="text-2xl font-bold text-gray-800">Administrar Usuarios</h2>
-            <button id="close-users-modal" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-          </div>
-          <p class="text-gray-600 mt-2">Gestiona los roles de todos los usuarios registrados</p>
-        </div>
-        
-        <div class="p-6">
-          <div id="users-list" class="space-y-4">
-            <!-- Lista de usuarios se carga dinámicamente -->
-          </div>
-          
-          <div id="users-loading" class="text-center py-12">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto mb-4"></div>
-            <p class="text-gray-600">Cargando usuarios...</p>
-          </div>
-          
-          <div id="users-error" class="hidden text-center py-12">
-            <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            <p class="text-red-600 font-medium">Error al cargar usuarios</p>
-            <p class="text-gray-500 text-sm mt-2">Verifica tu conexión e intenta nuevamente</p>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Added Supabase CDN before supabase-config.js -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-gray-50">
+    <!-- Pantalla de Carga -->
+    <div id="loading-screen" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-red-600 mx-auto mb-4"></div>
+            <p class="text-gray-600 text-lg">Cargando SONIMAx MÓVIL...</p>
+        </div>
+    </div>
+
+    <!-- Pantalla de Login -->
+    <div id="login-screen" class="hidden fixed inset-0 bg-gradient-to-br from-red-900 to-black z-40 flex items-center justify-center p-4">
+        <div class="glass-card max-w-md w-full p-8 rounded-2xl shadow-2xl">
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold text-white mb-2">SONIMAx MÓVIL</h1>
+                <p class="text-red-100">Catálogo de Productos</p>
+            </div>
+            
+            <!-- Agregado toggle entre Login y Registro -->
+            <div class="flex mb-6 bg-white/10 rounded-lg p-1">
+                <button id="show-login-btn" class="flex-1 py-2 rounded-md text-white font-medium transition-all auth-tab-active">
+                    Iniciar Sesión
+                </button>
+                <button id="show-register-btn" class="flex-1 py-2 rounded-md text-white/70 font-medium transition-all hover:text-white">
+                    Registrarse
+                </button>
+            </div>
+
+            <!-- Formulario de Login -->
+            <form id="login-form" class="space-y-6">
+                <div>
+                    <label class="block text-white text-sm font-medium mb-2">Correo Electrónico</label>
+                    <input type="email" id="login-email" required
+                        class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                        placeholder="tu@email.com">
+                </div>
+                
+                <div>
+                    <label class="block text-white text-sm font-medium mb-2">Contraseña</label>
+                    <input type="password" id="login-password" required
+                        class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                        placeholder="••••••••">
+                </div>
+                
+                <button type="submit" 
+                    class="w-full bg-white text-red-600 font-semibold py-3 rounded-lg hover:bg-red-50 transition-all transform hover:scale-105 shadow-lg">
+                    Iniciar Sesión
+                </button>
+            </form>
+
+            <!-- Formulario de Registro (nuevo) -->
+            <form id="register-form" class="hidden space-y-6">
+                <div>
+                    <label class="block text-white text-sm font-medium mb-2">Nombre Completo</label>
+                    <input type="text" id="register-name" required
+                        class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                        placeholder="Tu nombre">
+                </div>
+
+                <div>
+                    <label class="block text-white text-sm font-medium mb-2">Correo Electrónico</label>
+                    <input type="email" id="register-email" required
+                        class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                        placeholder="tu@email.com">
+                </div>
+                
+                <div>
+                    <label class="block text-white text-sm font-medium mb-2">Contraseña</label>
+                    <input type="password" id="register-password" required minlength="6"
+                        class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                        placeholder="Mínimo 6 caracteres">
+                </div>
+
+                <p class="text-white/70 text-sm text-center">
+                    Te registrarás como Cliente. El administrador puede cambiar tu rol si es necesario.
+                </p>
+                
+                <button type="submit" 
+                    class="w-full bg-white text-red-600 font-semibold py-3 rounded-lg hover:bg-red-50 transition-all transform hover:scale-105 shadow-lg">
+                    Crear Cuenta
+                </button>
+            </form>
+            
+            <div id="auth-error" class="hidden mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-white text-sm"></div>
+            <div id="auth-success" class="hidden mt-4 p-3 bg-green-500/20 border border-green-500/50 rounded-lg text-white text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Aplicación Principal -->
+    <div id="app-screen" class="hidden">
+        <!-- Menú Lateral de Departamentos -->
+        <div id="sidebar-menu" class="fixed inset-y-0 left-0 w-80 bg-black text-white transform -translate-x-full transition-transform duration-300 ease-in-out z-50 overflow-y-auto">
+            <div class="p-6">
+                <div class="flex items-center justify-between mb-8">
+                    <h2 class="text-2xl font-bold">Departamentos</h2>
+                    <button id="close-sidebar" class="p-2 hover:bg-white/10 rounded-lg transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <nav class="space-y-2">
+                    <button data-dept="all" class="sidebar-dept-btn w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 transition-all font-medium">
+                        Todos los Productos
+                    </button>
+                    <div id="sidebar-departments">
+                        <!-- Departamentos se cargan dinámicamente -->
+                    </div>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Overlay para cerrar el menú -->
+        <div id="sidebar-overlay" class="hidden fixed inset-0 bg-black/50 z-40"></div>
+
+        <!-- Header -->
+        <header class="sticky top-0 z-30 bg-white shadow-md border-b-4 border-red-600">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <!-- Botón Hamburguesa -->
+                        <button id="open-sidebar" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
+                            <svg class="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                            </svg>
+                        </button>
+                        
+                        <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-red-600 to-black bg-clip-text text-transparent">
+                            SONIMAx MÓVIL
+                        </h1>
+                        <span id="user-role-badge" class="hidden px-3 py-1 rounded-full text-xs font-semibold"></span>
+                    </div>
+                    
+                    <div class="flex items-center space-x-4">
+                        <button id="cart-button" class="relative p-2 hover:bg-red-50 rounded-lg transition-all group">
+                            <svg class="w-6 h-6 text-red-600 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                            </svg>
+                            <span id="cart-count" class="absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold shadow-lg">0</span>
+                        </button>
+                        
+                        <button id="logout-button" class="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg hover:from-red-700 hover:to-red-800 transition-all text-sm font-medium shadow-lg">
+                            Cerrar Sesión
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Búsqueda Global -->
+                <div class="mt-4">
+                    <div class="relative">
+                        <input type="text" id="global-search" 
+                            class="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-200 focus:outline-none focus:border-red-500 transition-all shadow-sm"
+                            placeholder="Buscar productos en todos los departamentos...">
+                        <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navegación de Departamentos -->
+        <nav class="container mx-auto px-4 py-6">
+            <div class="flex items-center space-x-4 overflow-x-auto pb-2 scrollbar-hide">
+                <button data-dept="all" class="dept-button active whitespace-nowrap px-6 py-3 rounded-lg font-medium transition-all">
+                    Todos
+                </button>
+                <div id="departments-nav" class="flex space-x-4">
+                    <!-- Departamentos se cargan dinámicamente -->
+                </div>
+            </div>
+        </nav>
+
+        <!-- Búsqueda por Departamento -->
+        <div id="dept-search-container" class="hidden container mx-auto px-4 mb-6">
+            <div class="relative max-w-2xl">
+                <input type="text" id="dept-search" 
+                    class="w-full px-4 py-3 pl-12 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all"
+                    placeholder="Buscar en este departamento...">
+                <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Botón Admin (solo visible para admin) -->
+        <div id="admin-section" class="hidden container mx-auto px-4 mb-6">
+            <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-medium shadow-lg flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                <span>Subir CSV de Productos</span>
+            </button>
+        </div>
+
+        <!-- Grid de Productos -->
+        <main class="container mx-auto px-4 pb-20">
+            <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <!-- Productos se cargan dinámicamente -->
+            </div>
+            
+            <div id="no-products" class="hidden text-center py-20">
+                <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 00-.707.293h-3.172a1 1 0 00-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                </svg>
+                <p class="text-gray-500 text-lg">No se encontraron productos</p>
+            </div>
+        </main>
+
+        <!-- Modal del Carrito -->
+        <div id="cart-modal" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="p-6 border-b border-gray-200">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-2xl font-bold text-gray-800">Carrito de Compras</h2>
+                        <button id="close-cart" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="cart-items" class="flex-1 overflow-y-auto p-6">
+                    <!-- Items del carrito se cargan dinámicamente -->
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 bg-gray-50">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-lg font-semibold text-gray-700">Total:</span>
+                        <span id="cart-total" class="text-2xl font-bold text-red-600">$0.00</span>
+                    </div>
+                    <button id="send-whatsapp" class="w-full bg-green-500 text-white font-semibold py-4 rounded-lg hover:bg-green-600 transition-all flex items-center justify-center space-x-2 shadow-lg">
+                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                        </svg>
+                        <span>Enviar Pedido por WhatsApp</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal de Subida CSV -->
+        <div id="csv-modal" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Subir Productos CSV</h2>
+                    <button id="close-csv-modal" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="mb-6">
+                    <p class="text-gray-600 mb-4">Formato CSV esperado:</p>
+                    <code class="block bg-gray-100 p-4 rounded-lg text-sm overflow-x-auto">
+                        nombre,descripcion,precio_cliente,precio_distribuidor,departamento,imagen_url<br>
+                        Producto 1,Descripción,100.00,80.00,Electrónica,https://...
+                    </code>
+                </div>
+                
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4">
+                    <input type="file" id="csv-file-input" accept=".csv" class="hidden">
+                    <label for="csv-file-input" class="cursor-pointer">
+                        <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                        <p class="text-gray-600 font-medium">Haz clic para seleccionar archivo CSV</p>
+                        <p class="text-gray-400 text-sm mt-2">o arrastra y suelta aquí</p>
+                    </label>
+                </div>
+                
+                <div id="csv-file-name" class="hidden mb-4 p-3 bg-blue-50 rounded-lg text-blue-700 text-sm"></div>
+                
+                <button id="upload-csv-submit" class="w-full bg-red-600 text-white font-semibold py-3 rounded-lg hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                    Subir y Procesar CSV
+                </button>
+                
+                <div id="csv-status" class="hidden mt-4 p-4 rounded-lg text-sm"></div>
+            </div>
+        </div>
+
+        <!-- Modal de Seleccionar Cantidad -->
+        <div id="quantity-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Seleccionar Cantidad</h2>
+                    <button id="close-quantity-modal" class="p-2 hover:bg-gray-100 rounded-lg transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div id="quantity-product-info" class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <!-- Info del producto se carga dinámicamente -->
+                </div>
+                
+                <div class="mb-6">
+                    <label class="block text-gray-700 font-medium mb-2">Cantidad:</label>
+                    <input type="number" id="quantity-input" min="1" value="1" 
+                        class="w-full px-4 py-3 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:outline-none focus:border-red-500 transition-all">
+                </div>
+                
+                <div class="flex space-x-3">
+                    <button id="cancel-quantity" class="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all font-medium">
+                        Cancelar
+                    </button>
+                    <button id="confirm-quantity" class="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all font-medium shadow-lg">
+                        Agregar al Carrito
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="supabase-config.js"></script>
     <script src="app.js"></script>
-  </body>
+</body>
 </html>
