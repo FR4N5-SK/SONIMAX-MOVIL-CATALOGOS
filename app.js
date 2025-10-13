@@ -49,13 +49,11 @@ function normalizeText(text) {
   if (!text) return ""
   return text
     .toLowerCase()
-    .normalize("NFD") // Descompone caracteres con acentos
-    .replace(/[\u0300-\u036f]/g, "") // Elimina los acentos
-    .replace(/\s+/g, " ") // Reemplaza múltiples espacios por uno solo
-    .trim() // Elimina espacios al inicio y final
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
 }
-
-// </CHANGE>
 
 // Obtener el cliente de Supabase desde la configuración global
 const supabaseClient = window.supabaseClient
@@ -72,9 +70,7 @@ async function handleLogout() {
     state.user = null
     state.userRole = null
     state.userName = null
-    // state.cart = [] // REMOVIDO
     console.log("[v0] Carrito mantenido después de cerrar sesión")
-    // </CHANGE>
     showLoginScreen()
   }
 }
@@ -83,7 +79,6 @@ async function handleLogout() {
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("[v0] Iniciando aplicación SONIMAx MÓVIL")
   loadCartFromLocalStorage()
-  // </CHANGE>
   await initApp()
 })
 
@@ -400,7 +395,6 @@ function setupRoleBasedUI() {
 async function loadDepartments() {
   console.log("[v0] Cargando departamentos usando función SQL...")
 
-  // Usar la función SQL para obtener departamentos únicos directamente
   const { data, error } = await supabaseClient.rpc("get_distinct_departments")
 
   if (error) {
@@ -418,19 +412,66 @@ async function loadDepartments() {
 }
 
 async function loadProducts() {
-  console.log("[v0] Cargando productos")
+  console.log("[v0] ==========================================")
+  console.log("[v0] Iniciando carga de productos con paginación...")
 
-  const { data, error } = await supabaseClient.from("products").select("*").limit(10000).order("nombre")
+  try {
+    // Primero obtener el conteo total
+    const { count, error: countError } = await supabaseClient
+      .from("products")
+      .select("*", { count: "exact", head: true })
 
-  if (error) {
-    console.error("[v0] Error cargando productos:", error)
-    return
+    if (countError) {
+      console.error("[v0] Error obteniendo conteo:", countError)
+      return
+    }
+
+    console.log("[v0] Total de productos en la base de datos:", count)
+
+    // Cargar todos los productos en lotes de 1000
+    const pageSize = 1000
+    const totalPages = Math.ceil(count / pageSize)
+    let allProducts = []
+
+    console.log("[v0] Cargando", totalPages, "páginas de productos...")
+
+    for (let page = 0; page < totalPages; page++) {
+      const from = page * pageSize
+      const to = from + pageSize - 1
+
+      console.log(`[v0] Cargando página ${page + 1}/${totalPages} (registros ${from}-${to})...`)
+
+      const { data, error } = await supabaseClient.from("products").select("*").order("nombre").range(from, to)
+
+      if (error) {
+        console.error(`[v0] Error cargando página ${page + 1}:`, error)
+        continue
+      }
+
+      allProducts = allProducts.concat(data)
+      console.log(`[v0] Página ${page + 1} cargada: ${data.length} productos`)
+    }
+
+    state.products = allProducts
+    console.log("[v0] ==========================================")
+    console.log("[v0] ✅ Carga completa exitosa")
+    console.log("[v0] Total esperado:", count)
+    console.log("[v0] Total cargado:", allProducts.length)
+    console.log("[v0] ==========================================")
+
+    if (allProducts.length < count) {
+      console.warn("[v0] ⚠️ ADVERTENCIA: Faltan productos!")
+      console.warn("[v0] Diferencia:", count - allProducts.length, "productos")
+    } else {
+      console.log("[v0] ✅ Todos los productos cargados correctamente")
+    }
+
+    renderProducts()
+  } catch (error) {
+    console.error("[v0] Error en loadProducts:", error)
   }
-
-  state.products = data
-  console.log("[v0] Productos cargados:", data.length)
-  renderProducts()
 }
+// </CHANGE>
 
 function renderDepartments() {
   const container = document.getElementById("departments-nav")
@@ -529,7 +570,6 @@ function renderProducts() {
 
   let filteredProducts = state.products
 
-  // Si hay búsqueda global, buscar en TODOS los productos (ignorar departamento)
   if (state.searchQuery) {
     const normalizedQuery = normalizeText(state.searchQuery)
     console.log("[v0] ==========================================")
@@ -538,44 +578,19 @@ function renderProducts() {
     console.log("[v0] Texto normalizado:", normalizedQuery)
     console.log("[v0] Total de productos a buscar:", state.products.length)
 
-    // Mostrar ejemplos de productos antes de filtrar
-    console.log("[v0] Ejemplos de productos (primeros 5):")
-    state.products.slice(0, 5).forEach((p, idx) => {
-      console.log(`[v0]   ${idx + 1}. "${p.nombre}" (normalizado: "${normalizeText(p.nombre)}")`)
-    })
-
     filteredProducts = filteredProducts.filter((p) => {
       const normalizedNombre = normalizeText(p.nombre)
       const normalizedDescripcion = normalizeText(p.descripcion)
       const normalizedDepartamento = normalizeText(p.departamento)
 
-      const matchesNombre = normalizedNombre.includes(normalizedQuery)
-      const matchesDescripcion = normalizedDescripcion.includes(normalizedQuery)
-      const matchesDepartamento = normalizedDepartamento.includes(normalizedQuery)
-
-      return matchesNombre || matchesDescripcion || matchesDepartamento
+      return (
+        normalizedNombre.includes(normalizedQuery) ||
+        normalizedDescripcion.includes(normalizedQuery) ||
+        normalizedDepartamento.includes(normalizedQuery)
+      )
     })
 
     console.log("[v0] Productos encontrados:", filteredProducts.length)
-
-    // Mostrar los primeros resultados
-    if (filteredProducts.length > 0) {
-      console.log("[v0] Primeros resultados (máximo 5):")
-      filteredProducts.slice(0, 5).forEach((p, idx) => {
-        console.log(`[v0]   ${idx + 1}. "${p.nombre}"`)
-      })
-    } else {
-      console.log("[v0] ⚠️ NO SE ENCONTRARON PRODUCTOS")
-      console.log("[v0] Mostrando productos que NO coincidieron (primeros 10):")
-      state.products.slice(0, 10).forEach((p, idx) => {
-        const normalizedNombre = normalizeText(p.nombre)
-        console.log(`[v0]   ${idx + 1}. "${p.nombre}"`)
-        console.log(`[v0]      Normalizado: "${normalizedNombre}"`)
-        console.log(
-          `[v0]      ¿Contiene "${normalizeText(state.searchQuery)}"? ${normalizedNombre.includes(normalizeText(state.searchQuery))}`,
-        )
-      })
-    }
     console.log("[v0] ==========================================")
   } else {
     // Solo aplicar filtro de departamento si NO hay búsqueda global
@@ -583,10 +598,9 @@ function renderProducts() {
       filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
     }
 
-    // Búsqueda por departamento (solo cuando estamos en un departamento específico)
+    // Búsqueda por departamento
     if (state.deptSearchQuery && state.currentDepartment !== "all") {
       const normalizedDeptQuery = normalizeText(state.deptSearchQuery)
-      console.log("[v0] Búsqueda por departamento normalizada:", normalizedDeptQuery)
 
       filteredProducts = filteredProducts.filter((p) => {
         const normalizedNombre = normalizeText(p.nombre)
@@ -596,9 +610,6 @@ function renderProducts() {
       })
     }
   }
-
-  console.log("[v0] Productos filtrados:", filteredProducts.length)
-  console.log("[v0] Total de productos en estado:", state.products.length)
   // </CHANGE>
 
   if (filteredProducts.length === 0) {
