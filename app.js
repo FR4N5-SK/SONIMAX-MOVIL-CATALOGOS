@@ -27,14 +27,17 @@ function loadCartFromLocalStorage() {
     const savedCart = localStorage.getItem("sonimax_cart")
     if (savedCart) {
       state.cart = JSON.parse(savedCart)
-      console.log("[v0] Carrito cargado desde localStorage:", state.cart.length, "items")
-      updateCartUI()
+      console.log("[v0] ✅ Carrito cargado desde localStorage:", state.cart.length, "items")
+      console.log("[v0] Contenido del carrito:", state.cart)
+    } else {
+      console.log("[v0] No hay carrito guardado en localStorage")
     }
   } catch (error) {
-    console.error("[v0] Error cargando carrito:", error)
+    console.error("[v0] ❌ Error cargando carrito:", error)
     state.cart = []
   }
 }
+// </CHANGE>
 
 function clearCartFromLocalStorage() {
   try {
@@ -44,7 +47,6 @@ function clearCartFromLocalStorage() {
     console.error("[v0] Error eliminando carrito:", error)
   }
 }
-// </CHANGE>
 
 // Obtener el cliente de Supabase desde la configuración global
 const supabaseClient = window.supabaseClient
@@ -68,13 +70,22 @@ async function handleLogout() {
   }
 }
 
-// Inicialización
 document.addEventListener("DOMContentLoaded", async () => {
-  console.log("[v0] Iniciando aplicación SONIMAx MÓVIL")
+  console.log("[v0] ==========================================")
+  console.log("[v0] 🚀 Iniciando aplicación SONIMAx MÓVIL")
+  console.log("[v0] ==========================================")
+
+  // Cargar carrito ANTES de inicializar la app
   loadCartFromLocalStorage()
-  // </CHANGE>
+
   await initApp()
+
+  // Actualizar UI del carrito después de que todo esté listo
+  updateCartUI()
+  console.log("[v0] ✅ Aplicación inicializada completamente")
+  console.log("[v0] ==========================================")
 })
+// </CHANGE>
 
 async function initApp() {
   // Verificar sesión existente
@@ -308,6 +319,10 @@ async function handleUserSession(user) {
   await loadProducts()
 
   showAppScreen()
+
+  updateCartUI()
+  console.log("[v0] 🛒 Carrito actualizado después de iniciar sesión")
+  // </CHANGE>
 }
 
 // Pantallas
@@ -1036,8 +1051,16 @@ async function handleCSVUpload() {
 
 function updateCartUI() {
   const cartCount = document.getElementById("cart-count")
+
+  if (!cartCount) {
+    console.log("[v0] ⚠️ Elemento cart-count no encontrado, esperando...")
+    return
+  }
+
   const totalItems = state.cart.reduce((sum, item) => sum + item.quantity, 0)
   cartCount.textContent = totalItems
+
+  console.log("[v0] 🛒 UI del carrito actualizada:", totalItems, "items")
 
   if (totalItems > 0) {
     cartCount.classList.add("animate-pulse")
@@ -1045,6 +1068,7 @@ function updateCartUI() {
     cartCount.classList.remove("animate-pulse")
   }
 }
+// </CHANGE>
 
 function openSidebar() {
   document.getElementById("sidebar-menu").classList.add("open")
