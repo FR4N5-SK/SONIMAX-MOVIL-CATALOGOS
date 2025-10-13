@@ -1,5 +1,5 @@
--- Script de Configuración LIMPIA para SONIMAx MÓVIL
--- Este script elimina todo lo existente y crea desde cero
+-- Script de Configuración COMPLETA para SONIMAx MÓVIL
+-- Este script configura todo desde cero y asigna admin a fran19062005@gmail.com
 -- Ejecutar en el SQL Editor de Supabase
 
 -- ============================================
@@ -15,6 +15,7 @@ DROP TRIGGER IF EXISTS update_metadata_updated_at ON metadata;
 -- Eliminar funciones
 DROP FUNCTION IF EXISTS public.handle_new_user();
 DROP FUNCTION IF EXISTS update_updated_at_column();
+DROP FUNCTION IF EXISTS get_distinct_departments();
 
 -- Eliminar políticas RLS de products
 DROP POLICY IF EXISTS "Todos pueden leer productos" ON products;
@@ -28,6 +29,7 @@ DROP POLICY IF EXISTS "Admin puede leer todos los usuarios" ON users;
 DROP POLICY IF EXISTS "Permitir inserción de nuevos usuarios" ON users;
 DROP POLICY IF EXISTS "Los usuarios pueden actualizar su propia información" ON users;
 DROP POLICY IF EXISTS "Solo admin puede cambiar roles" ON users;
+DROP POLICY IF EXISTS "Admin puede actualizar todos los usuarios" ON users;
 
 -- Eliminar políticas RLS de metadata
 DROP POLICY IF EXISTS "Todos pueden leer metadata" ON metadata;
@@ -79,6 +81,7 @@ CREATE TABLE metadata (
 CREATE INDEX idx_products_departamento ON products(departamento);
 CREATE INDEX idx_products_nombre ON products(nombre);
 CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_email ON users(email);
 
 -- 5. Habilitar RLS
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
@@ -124,7 +127,7 @@ CREATE POLICY "Solo admin puede eliminar productos"
         )
     );
 
--- 7. Políticas RLS para users
+-- 7. Políticas RLS para users (ACTUALIZADAS PARA PERMITIR ADMIN GESTIONAR ROLES)
 CREATE POLICY "Los usuarios pueden leer su propia información"
     ON users FOR SELECT
     TO authenticated
@@ -150,12 +153,23 @@ CREATE POLICY "Los usuarios pueden actualizar su propia información"
     ON users FOR UPDATE
     TO authenticated
     USING (auth.uid() = id)
-    WITH CHECK (auth.uid() = id);
+    WITH CHECK (
+        auth.uid() = id 
+        AND role = (SELECT role FROM users WHERE id = auth.uid())
+    );
 
-CREATE POLICY "Solo admin puede cambiar roles"
+-- Nueva política para que admin pueda actualizar roles de cualquier usuario
+CREATE POLICY "Admin puede actualizar todos los usuarios"
     ON users FOR UPDATE
     TO authenticated
     USING (
+        EXISTS (
+            SELECT 1 FROM users
+            WHERE users.id = auth.uid()
+            AND users.role = 'admin'
+        )
+    )
+    WITH CHECK (
         EXISTS (
             SELECT 1 FROM users
             WHERE users.id = auth.uid()
@@ -226,9 +240,60 @@ CREATE TRIGGER update_metadata_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+-- 13. Función para obtener departamentos únicos
+CREATE OR REPLACE FUNCTION get_distinct_departments()
+RETURNS TABLE(departamento TEXT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT DISTINCT p.departamento
+    FROM products p
+    WHERE p.departamento IS NOT NULL AND p.departamento != ''
+    ORDER BY p.departamento;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ============================================
--- LISTO! Ahora puedes:
--- 1. Registrarte en la aplicación
--- 2. Ejecutar: UPDATE users SET role = 'admin' WHERE email = 'tu-email@ejemplo.com';
--- 3. Recargar la página y tendrás acceso admin
+-- PASO 3: ASIGNAR ADMIN A fran19062005@gmail.com
+-- ============================================
+
+-- Deshabilitar RLS temporalmente para asegurar que el UPDATE funcione
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+
+-- Actualizar el rol a admin para fran19062005@gmail.com
+UPDATE users 
+SET role = 'admin' 
+WHERE email = 'fran19062005@gmail.com';
+
+-- Si el usuario no existe aún (no se ha registrado), esta consulta no hará nada
+-- El usuario debe registrarse primero, luego ejecutar este script
+
+-- Volver a habilitar RLS
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- VERIFICACIÓN FINAL
+-- ============================================
+
+-- Ver todos los usuarios y sus roles
+SELECT 
+    id, 
+    email, 
+    name,
+    role,
+    CASE 
+        WHEN role = 'admin' THEN 'ADMINISTRADOR'
+        WHEN role = 'distribuidor' THEN 'DISTRIBUIDOR'
+        ELSE 'CLIENTE'
+    END as rol_texto,
+    created_at
+FROM users 
+ORDER BY created_at DESC;
+
+-- ============================================
+-- INSTRUCCIONES FINALES
+-- ============================================
+-- 1. Si fran19062005@gmail.com aún no se ha registrado, debe hacerlo primero
+-- 2. Después de registrarse, ejecuta este script completo
+-- 3. Cierra sesión y vuelve a iniciar sesión
+-- 4. Deberías ver el badge "Administrador" y los botones de admin
 -- ============================================
