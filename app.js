@@ -27,17 +27,14 @@ function loadCartFromLocalStorage() {
     const savedCart = localStorage.getItem("sonimax_cart")
     if (savedCart) {
       state.cart = JSON.parse(savedCart)
-      console.log("[v0] ✅ Carrito cargado desde localStorage:", state.cart.length, "items")
-      console.log("[v0] Contenido del carrito:", state.cart)
-    } else {
-      console.log("[v0] No hay carrito guardado en localStorage")
+      console.log("[v0] Carrito cargado desde localStorage:", state.cart.length, "items")
+      updateCartUI()
     }
   } catch (error) {
-    console.error("[v0] ❌ Error cargando carrito:", error)
+    console.error("[v0] Error cargando carrito:", error)
     state.cart = []
   }
 }
-// </CHANGE>
 
 function clearCartFromLocalStorage() {
   try {
@@ -47,6 +44,18 @@ function clearCartFromLocalStorage() {
     console.error("[v0] Error eliminando carrito:", error)
   }
 }
+
+function normalizeText(text) {
+  if (!text) return ""
+  return text
+    .toLowerCase()
+    .normalize("NFD") // Descompone caracteres con acentos
+    .replace(/[\u0300-\u036f]/g, "") // Elimina los acentos
+    .replace(/\s+/g, " ") // Reemplaza múltiples espacios por uno solo
+    .trim() // Elimina espacios al inicio y final
+}
+
+// </CHANGE>
 
 // Obtener el cliente de Supabase desde la configuración global
 const supabaseClient = window.supabaseClient
@@ -70,22 +79,13 @@ async function handleLogout() {
   }
 }
 
+// Inicialización
 document.addEventListener("DOMContentLoaded", async () => {
-  console.log("[v0] ==========================================")
-  console.log("[v0] 🚀 Iniciando aplicación SONIMAx MÓVIL")
-  console.log("[v0] ==========================================")
-
-  // Cargar carrito ANTES de inicializar la app
+  console.log("[v0] Iniciando aplicación SONIMAx MÓVIL")
   loadCartFromLocalStorage()
-
+  // </CHANGE>
   await initApp()
-
-  // Actualizar UI del carrito después de que todo esté listo
-  updateCartUI()
-  console.log("[v0] ✅ Aplicación inicializada completamente")
-  console.log("[v0] ==========================================")
 })
-// </CHANGE>
 
 async function initApp() {
   // Verificar sesión existente
@@ -319,10 +319,6 @@ async function handleUserSession(user) {
   await loadProducts()
 
   showAppScreen()
-
-  updateCartUI()
-  console.log("[v0] 🛒 Carrito actualizado después de iniciar sesión")
-  // </CHANGE>
 }
 
 // Pantallas
@@ -531,34 +527,47 @@ function renderProducts() {
   const container = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  // Filtrar productos
   let filteredProducts = state.products
 
-  // Filtro por departamento
-  if (state.currentDepartment !== "all") {
-    filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
-  }
-
-  // Búsqueda global
+  // Si hay búsqueda global, buscar en TODOS los productos (ignorar departamento)
   if (state.searchQuery) {
-    filteredProducts = filteredProducts.filter(
-      (p) =>
-        p.nombre.toLowerCase().includes(state.searchQuery) ||
-        p.descripcion?.toLowerCase().includes(state.searchQuery) ||
-        p.departamento?.toLowerCase().includes(state.searchQuery),
-    )
-  }
+    const normalizedQuery = normalizeText(state.searchQuery)
+    console.log("[v0] Búsqueda global normalizada:", normalizedQuery)
 
-  // Búsqueda por departamento
-  if (state.deptSearchQuery && state.currentDepartment !== "all") {
-    filteredProducts = filteredProducts.filter(
-      (p) =>
-        p.nombre.toLowerCase().includes(state.deptSearchQuery) ||
-        p.descripcion?.toLowerCase().includes(state.deptSearchQuery),
-    )
+    filteredProducts = filteredProducts.filter((p) => {
+      const normalizedNombre = normalizeText(p.nombre)
+      const normalizedDescripcion = normalizeText(p.descripcion)
+      const normalizedDepartamento = normalizeText(p.departamento)
+
+      return (
+        normalizedNombre.includes(normalizedQuery) ||
+        normalizedDescripcion.includes(normalizedQuery) ||
+        normalizedDepartamento.includes(normalizedQuery)
+      )
+    })
+  } else {
+    // Solo aplicar filtro de departamento si NO hay búsqueda global
+    if (state.currentDepartment !== "all") {
+      filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
+    }
+
+    // Búsqueda por departamento (solo cuando estamos en un departamento específico)
+    if (state.deptSearchQuery && state.currentDepartment !== "all") {
+      const normalizedDeptQuery = normalizeText(state.deptSearchQuery)
+      console.log("[v0] Búsqueda por departamento normalizada:", normalizedDeptQuery)
+
+      filteredProducts = filteredProducts.filter((p) => {
+        const normalizedNombre = normalizeText(p.nombre)
+        const normalizedDescripcion = normalizeText(p.descripcion)
+
+        return normalizedNombre.includes(normalizedDeptQuery) || normalizedDescripcion.includes(normalizedDeptQuery)
+      })
+    }
   }
 
   console.log("[v0] Productos filtrados:", filteredProducts.length)
+  console.log("[v0] Total de productos en estado:", state.products.length)
+  // </CHANGE>
 
   if (filteredProducts.length === 0) {
     container.innerHTML = ""
@@ -729,8 +738,6 @@ function addToCart(product, quantity = 1) {
   }
 
   saveCartToLocalStorage()
-  // </CHANGE>
-
   updateCartUI()
 
   const cartButton = document.getElementById("cart-button")
@@ -761,6 +768,7 @@ function renderCart() {
                 <p class="text-gray-500 text-lg">Tu carrito está vacío</p>
             </div>
         `
+
     totalElement.textContent = "$0.00"
     return
   }
@@ -845,7 +853,6 @@ function changeQuantity(productId, change) {
       removeFromCart(productId)
     } else {
       saveCartToLocalStorage()
-      // </CHANGE>
       updateCartUI()
       renderCart()
     }
@@ -855,7 +862,6 @@ function changeQuantity(productId, change) {
 function removeFromCart(productId) {
   state.cart = state.cart.filter((item) => item.id !== productId)
   saveCartToLocalStorage()
-  // </CHANGE>
   updateCartUI()
   renderCart()
 }
@@ -897,7 +903,6 @@ function sendWhatsAppOrder() {
   state.cart = []
   clearCartFromLocalStorage()
   console.log("[v0] Carrito vaciado después de enviar pedido")
-  // </CHANGE>
 
   updateCartUI()
   closeCart()
@@ -1051,16 +1056,8 @@ async function handleCSVUpload() {
 
 function updateCartUI() {
   const cartCount = document.getElementById("cart-count")
-
-  if (!cartCount) {
-    console.log("[v0] ⚠️ Elemento cart-count no encontrado, esperando...")
-    return
-  }
-
   const totalItems = state.cart.reduce((sum, item) => sum + item.quantity, 0)
   cartCount.textContent = totalItems
-
-  console.log("[v0] 🛒 UI del carrito actualizada:", totalItems, "items")
 
   if (totalItems > 0) {
     cartCount.classList.add("animate-pulse")
@@ -1068,7 +1065,6 @@ function updateCartUI() {
     cartCount.classList.remove("animate-pulse")
   }
 }
-// </CHANGE>
 
 function openSidebar() {
   document.getElementById("sidebar-menu").classList.add("open")
