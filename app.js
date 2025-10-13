@@ -420,7 +420,7 @@ async function loadDepartments() {
 async function loadProducts() {
   console.log("[v0] Cargando productos")
 
-  const { data, error } = await supabaseClient.from("products").select("*").order("nombre")
+  const { data, error } = await supabaseClient.from("products").select("*").limit(10000).order("nombre")
 
   if (error) {
     console.error("[v0] Error cargando productos:", error)
@@ -532,19 +532,51 @@ function renderProducts() {
   // Si hay búsqueda global, buscar en TODOS los productos (ignorar departamento)
   if (state.searchQuery) {
     const normalizedQuery = normalizeText(state.searchQuery)
-    console.log("[v0] Búsqueda global normalizada:", normalizedQuery)
+    console.log("[v0] ==========================================")
+    console.log("[v0] BÚSQUEDA GLOBAL ACTIVA")
+    console.log("[v0] Texto original:", state.searchQuery)
+    console.log("[v0] Texto normalizado:", normalizedQuery)
+    console.log("[v0] Total de productos a buscar:", state.products.length)
+
+    // Mostrar ejemplos de productos antes de filtrar
+    console.log("[v0] Ejemplos de productos (primeros 5):")
+    state.products.slice(0, 5).forEach((p, idx) => {
+      console.log(`[v0]   ${idx + 1}. "${p.nombre}" (normalizado: "${normalizeText(p.nombre)}")`)
+    })
 
     filteredProducts = filteredProducts.filter((p) => {
       const normalizedNombre = normalizeText(p.nombre)
       const normalizedDescripcion = normalizeText(p.descripcion)
       const normalizedDepartamento = normalizeText(p.departamento)
 
-      return (
-        normalizedNombre.includes(normalizedQuery) ||
-        normalizedDescripcion.includes(normalizedQuery) ||
-        normalizedDepartamento.includes(normalizedQuery)
-      )
+      const matchesNombre = normalizedNombre.includes(normalizedQuery)
+      const matchesDescripcion = normalizedDescripcion.includes(normalizedQuery)
+      const matchesDepartamento = normalizedDepartamento.includes(normalizedQuery)
+
+      return matchesNombre || matchesDescripcion || matchesDepartamento
     })
+
+    console.log("[v0] Productos encontrados:", filteredProducts.length)
+
+    // Mostrar los primeros resultados
+    if (filteredProducts.length > 0) {
+      console.log("[v0] Primeros resultados (máximo 5):")
+      filteredProducts.slice(0, 5).forEach((p, idx) => {
+        console.log(`[v0]   ${idx + 1}. "${p.nombre}"`)
+      })
+    } else {
+      console.log("[v0] ⚠️ NO SE ENCONTRARON PRODUCTOS")
+      console.log("[v0] Mostrando productos que NO coincidieron (primeros 10):")
+      state.products.slice(0, 10).forEach((p, idx) => {
+        const normalizedNombre = normalizeText(p.nombre)
+        console.log(`[v0]   ${idx + 1}. "${p.nombre}"`)
+        console.log(`[v0]      Normalizado: "${normalizedNombre}"`)
+        console.log(
+          `[v0]      ¿Contiene "${normalizeText(state.searchQuery)}"? ${normalizedNombre.includes(normalizeText(state.searchQuery))}`,
+        )
+      })
+    }
+    console.log("[v0] ==========================================")
   } else {
     // Solo aplicar filtro de departamento si NO hay búsqueda global
     if (state.currentDepartment !== "all") {
