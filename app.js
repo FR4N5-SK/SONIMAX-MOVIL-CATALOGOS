@@ -2,21 +2,33 @@
 // Estado Global
 const state = {
   user: null,
-  userRole: null, // Ahora será texto: "cliente", "distribuidor", "admin"
-  userName: null, // Agregando nombre de usuario
+  userRole: null,
+  userName: null,
   products: [],
   departments: [],
   currentDepartment: "all",
   cart: [],
   searchQuery: "",
   deptSearchQuery: "",
-  pendingProduct: null, // Para el modal de cantidad
+  pendingProduct: null,
 }
+
+function debounce(func, wait) {
+  let timeout
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout)
+      func(...args)
+    }
+    clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+// </CHANGE>
 
 function saveCartToLocalStorage() {
   try {
     localStorage.setItem("sonimax_cart", JSON.stringify(state.cart))
-    console.log("[v0] Carrito guardado en localStorage:", state.cart.length, "items")
   } catch (error) {
     console.error("[v0] Error guardando carrito:", error)
   }
@@ -27,7 +39,6 @@ function loadCartFromLocalStorage() {
     const savedCart = localStorage.getItem("sonimax_cart")
     if (savedCart) {
       state.cart = JSON.parse(savedCart)
-      console.log("[v0] Carrito cargado desde localStorage:", state.cart.length, "items")
       updateCartUI()
     }
   } catch (error) {
@@ -39,7 +50,6 @@ function loadCartFromLocalStorage() {
 function clearCartFromLocalStorage() {
   try {
     localStorage.removeItem("sonimax_cart")
-    console.log("[v0] Carrito eliminado de localStorage")
   } catch (error) {
     console.error("[v0] Error eliminando carrito:", error)
   }
@@ -55,79 +65,73 @@ function normalizeText(text) {
     .trim()
 }
 
-// Obtener el cliente de Supabase desde la configuración global
 const supabaseClient = window.supabaseClient
 
-// Función para manejar el cierre de sesión
 async function handleLogout() {
-  console.log("[v0] Cerrando sesión")
   const { error } = await supabaseClient.auth.signOut()
 
   if (error) {
     console.error("[v0] Error cerrando sesión:", error)
   } else {
-    console.log("[v0] Sesión cerrada exitosamente")
     state.user = null
     state.userRole = null
     state.userName = null
-    console.log("[v0] Carrito mantenido después de cerrar sesión")
     showLoginScreen()
   }
 }
 
-// Inicialización
 document.addEventListener("DOMContentLoaded", async () => {
-  console.log("[v0] Iniciando aplicación SONIMAx MÓVIL")
   loadCartFromLocalStorage()
   await initApp()
 })
 
 async function initApp() {
-  // Verificar sesión existente
   const {
     data: { session },
   } = await supabaseClient.auth.getSession()
 
   if (session) {
-    console.log("[v0] Sesión existente encontrada")
     await handleUserSession(session.user)
   } else {
     showLoginScreen()
   }
 
-  // Event Listeners
   setupEventListeners()
 }
+
+const debouncedGlobalSearch = debounce((value) => {
+  state.searchQuery = value.toLowerCase()
+  renderProducts()
+}, 300)
+
+const debouncedDeptSearch = debounce((value) => {
+  state.deptSearchQuery = value.toLowerCase()
+  renderProducts()
+}, 300)
+// </CHANGE>
 
 function setupEventListeners() {
   document.getElementById("show-login-btn").addEventListener("click", showLoginForm)
   document.getElementById("show-register-btn").addEventListener("click", showRegisterForm)
 
-  // Login y Registro
   document.getElementById("login-form").addEventListener("submit", handleLogin)
   document.getElementById("register-form").addEventListener("submit", handleRegister)
 
-  // Logout
   document.getElementById("logout-button").addEventListener("click", handleLogout)
 
-  // Búsqueda Global
   document.getElementById("global-search").addEventListener("input", (e) => {
-    state.searchQuery = e.target.value.toLowerCase()
-    renderProducts()
+    debouncedGlobalSearch(e.target.value)
   })
 
-  // Búsqueda por Departamento
   document.getElementById("dept-search").addEventListener("input", (e) => {
-    state.deptSearchQuery = e.target.value.toLowerCase()
-    renderProducts()
+    debouncedDeptSearch(e.target.value)
   })
+  // </CHANGE>
 
-  // Carrito
   document.getElementById("cart-button").addEventListener("click", openCart)
   document.getElementById("close-cart").addEventListener("click", closeCart)
   document.getElementById("send-whatsapp").addEventListener("click", sendWhatsAppOrder)
 
-  // CSV Upload (Admin)
   document.getElementById("upload-csv-button")?.addEventListener("click", openCSVModal)
   document.getElementById("close-csv-modal")?.addEventListener("click", closeCSVModal)
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
@@ -173,7 +177,6 @@ function hideAuthMessages() {
   document.getElementById("auth-success").classList.add("hidden")
 }
 
-// Autenticación
 async function handleLogin(e) {
   e.preventDefault()
 
@@ -182,7 +185,6 @@ async function handleLogin(e) {
   const errorDiv = document.getElementById("auth-error")
 
   try {
-    console.log("[v0] Intentando login...")
     const { data, error } = await supabaseClient.auth.signInWithPassword({
       email,
       password,
@@ -190,7 +192,6 @@ async function handleLogin(e) {
 
     if (error) throw error
 
-    console.log("[v0] Login exitoso")
     await handleUserSession(data.user)
   } catch (error) {
     console.error("[v0] Error en login:", error)
@@ -209,8 +210,6 @@ async function handleRegister(e) {
   const successDiv = document.getElementById("auth-success")
 
   try {
-    console.log("[v0] Intentando registrar usuario...")
-
     const { data: authData, error: authError } = await supabaseClient.auth.signUp({
       email,
       password,
@@ -224,14 +223,6 @@ async function handleRegister(e) {
     })
 
     if (authError) throw authError
-
-    console.log("[v0] Usuario creado en Auth:", authData.user.id)
-
-    if (authData.user && !authData.user.email_confirmed_at) {
-      console.log("[v0] Confirmando email automáticamente...")
-      // Nota: La confirmación automática se maneja mejor desde el servidor
-      // Por ahora, el usuario puede iniciar sesión inmediatamente
-    }
 
     const { error: dbError } = await supabaseClient.from("users").insert([
       {
@@ -250,8 +241,6 @@ async function handleRegister(e) {
     successDiv.classList.remove("hidden")
     errorDiv.classList.add("hidden")
 
-    console.log("[v0] Registro exitoso, iniciando sesión automáticamente")
-
     setTimeout(async () => {
       await handleUserSession(authData.user)
     }, 1500)
@@ -264,51 +253,26 @@ async function handleRegister(e) {
 }
 
 async function handleUserSession(user) {
-  console.log("[v0] ==========================================")
-  console.log("[v0] Configurando sesión de usuario")
-  console.log("[v0] ID de usuario:", user.id)
-  console.log("[v0] Email:", user.email)
-  console.log("[v0] ==========================================")
-
   state.user = user
-
-  console.log("[v0] 🔍 Intentando obtener rol y nombre de la base de datos...")
 
   const { data: userData, error } = await supabaseClient.from("users").select("role, name").eq("id", user.id).single()
 
   if (error) {
-    console.error("[v0] ❌ Error obteniendo datos de la base de datos:", error)
-    console.error("[v0] Código de error:", error.code)
-    console.error("[v0] Mensaje:", error.message)
-    console.error("[v0] Detalles:", error.details)
-
+    console.error("[v0] Error obteniendo datos:", error)
     let fallbackRole = user.user_metadata?.role || "cliente"
-
     if (fallbackRole === 1 || fallbackRole === "1") fallbackRole = "cliente"
     if (fallbackRole === 2 || fallbackRole === "2") fallbackRole = "distribuidor"
     if (fallbackRole === 3 || fallbackRole === "3") fallbackRole = "admin"
-
     state.userRole = fallbackRole
     state.userName = user.user_metadata?.name || "Usuario"
-    console.log("[v0] ⚠️ Usando datos de metadatos como fallback")
   } else {
     let dbRole = userData.role
-
     if (dbRole === 1 || dbRole === "1") dbRole = "cliente"
     if (dbRole === 2 || dbRole === "2") dbRole = "distribuidor"
     if (dbRole === 3 || dbRole === "3") dbRole = "admin"
-
     state.userRole = dbRole
     state.userName = userData.name || "Usuario"
-    console.log("[v0] ✅ Datos obtenidos exitosamente de la base de datos")
-    console.log("[v0] Nombre:", state.userName)
-    console.log("[v0] Rol:", state.userRole)
   }
-
-  console.log("[v0] ==========================================")
-  console.log("[v0] 📋 ROL FINAL ASIGNADO:", state.userRole)
-  console.log("[v0] 👤 NOMBRE FINAL:", state.userName)
-  console.log("[v0] ==========================================")
 
   await loadDepartments()
   await loadProducts()
@@ -316,7 +280,6 @@ async function handleUserSession(user) {
   showAppScreen()
 }
 
-// Pantallas
 function showLoginScreen() {
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.remove("hidden")
@@ -329,7 +292,6 @@ function showAppScreen() {
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
 
-  // Configurar UI según rol
   setupRoleBasedUI()
 }
 
@@ -342,33 +304,17 @@ function setupRoleBasedUI() {
   let roleText = ""
   let roleClass = ""
 
-  console.log("[v0] ==========================================")
-  console.log("[v0] 🎨 Configurando UI para rol:", state.userRole)
-  console.log("[v0] 🎨 Comparación con 'admin':", state.userRole === "admin")
-  console.log("[v0] 🎨 Comparación con 'distribuidor':", state.userRole === "distribuidor")
-  console.log("[v0] 🎨 Comparación con 'cliente':", state.userRole === "cliente")
-  console.log("[v0] ==========================================")
-
-  if (!adminSection) {
-    console.error("[v0] ❌ ERROR: No se encontró el elemento 'admin-section' en el HTML")
-  } else {
-    console.log("[v0] ✅ Elemento 'admin-section' encontrado")
-  }
-
   switch (state.userRole) {
     case "admin":
       roleText = "Administrador"
       roleClass = "role-badge-admin"
-      console.log("[v0] ✅ ROL ADMIN DETECTADO - Mostrando sección de admin")
       if (adminSection) {
         adminSection.classList.remove("hidden")
-        console.log("[v0] ✅ Sección de admin visible")
       }
       break
     case "distribuidor":
       roleText = "Distribuidor"
       roleClass = "role-badge-distribuidor"
-      console.log("[v0] 📦 Rol: Distribuidor")
       if (adminSection) {
         adminSection.classList.add("hidden")
       }
@@ -377,7 +323,6 @@ function setupRoleBasedUI() {
     default:
       roleText = "Cliente"
       roleClass = "role-badge-cliente"
-      console.log("[v0] 👤 Rol: Cliente")
       if (adminSection) {
         adminSection.classList.add("hidden")
       }
@@ -386,15 +331,9 @@ function setupRoleBasedUI() {
 
   roleBadge.textContent = roleText
   roleBadge.className = `px-3 py-1 rounded-full text-xs font-semibold ${roleClass}`
-
-  console.log("[v0] 🎨 Badge configurado con texto:", roleText)
-  console.log("[v0] 🎨 Clases aplicadas:", roleClass)
-  console.log("[v0] ==========================================")
 }
 
 async function loadDepartments() {
-  console.log("[v0] Cargando departamentos usando función SQL...")
-
   const { data, error } = await supabaseClient.rpc("get_distinct_departments")
 
   if (error) {
@@ -404,67 +343,24 @@ async function loadDepartments() {
 
   const uniqueDepts = data.map((row) => row.departamento).filter((d) => d && d.trim() !== "")
 
-  console.log("[v0] Departamentos únicos encontrados:", uniqueDepts.length)
-  console.log("[v0] Lista de departamentos:", uniqueDepts)
-
   state.departments = uniqueDepts
   renderDepartments()
 }
 
 async function loadProducts() {
-  console.log("[v0] ==========================================")
-  console.log("[v0] Iniciando carga de productos con paginación...")
-
   try {
-    // Primero obtener el conteo total
-    const { count, error: countError } = await supabaseClient
-      .from("products")
-      .select("*", { count: "exact", head: true })
+    const { data, error } = await supabaseClient.from("products").select("*").order("nombre")
 
-    if (countError) {
-      console.error("[v0] Error obteniendo conteo:", countError)
+    if (error) {
+      console.error("[v0] Error cargando productos:", error)
       return
     }
 
-    console.log("[v0] Total de productos en la base de datos:", count)
-
-    // Cargar todos los productos en lotes de 1000
-    const pageSize = 1000
-    const totalPages = Math.ceil(count / pageSize)
-    let allProducts = []
-
-    console.log("[v0] Cargando", totalPages, "páginas de productos...")
-
-    for (let page = 0; page < totalPages; page++) {
-      const from = page * pageSize
-      const to = from + pageSize - 1
-
-      console.log(`[v0] Cargando página ${page + 1}/${totalPages} (registros ${from}-${to})...`)
-
-      const { data, error } = await supabaseClient.from("products").select("*").order("nombre").range(from, to)
-
-      if (error) {
-        console.error(`[v0] Error cargando página ${page + 1}:`, error)
-        continue
-      }
-
-      allProducts = allProducts.concat(data)
-      console.log(`[v0] Página ${page + 1} cargada: ${data.length} productos`)
-    }
-
-    state.products = allProducts
-    console.log("[v0] ==========================================")
-    console.log("[v0] ✅ Carga completa exitosa")
-    console.log("[v0] Total esperado:", count)
-    console.log("[v0] Total cargado:", allProducts.length)
-    console.log("[v0] ==========================================")
-
-    if (allProducts.length < count) {
-      console.warn("[v0] ⚠️ ADVERTENCIA: Faltan productos!")
-      console.warn("[v0] Diferencia:", count - allProducts.length, "productos")
-    } else {
-      console.log("[v0] ✅ Todos los productos cargados correctamente")
-    }
+    // Pre-calcular textos normalizados para búsquedas más rápidas
+    state.products = data.map((product) => ({
+      ...product,
+      _searchText: normalizeText(`${product.nombre} ${product.descripcion} ${product.departamento}`),
+    }))
 
     renderProducts()
   } catch (error) {
@@ -494,7 +390,6 @@ function renderDepartments() {
     container.appendChild(button)
   })
 
-  // Botón "Todos"
   document.querySelector('[data-dept="all"]').addEventListener("click", () => {
     state.currentDepartment = "all"
     state.deptSearchQuery = ""
@@ -526,7 +421,6 @@ function renderDepartments() {
     sidebarContainer.appendChild(button)
   })
 
-  // Botón "Todos"
   document.querySelector('[data-dept="all"]').addEventListener("click", () => {
     state.currentDepartment = "all"
     state.deptSearchQuery = ""
@@ -546,7 +440,6 @@ function updateDepartmentButtons() {
     }
   })
 
-  // Mostrar/ocultar búsqueda por departamento
   const deptSearchContainer = document.getElementById("dept-search-container")
   if (state.currentDepartment !== "all") {
     deptSearchContainer.classList.remove("hidden")
@@ -572,45 +465,17 @@ function renderProducts() {
 
   if (state.searchQuery) {
     const normalizedQuery = normalizeText(state.searchQuery)
-    console.log("[v0] ==========================================")
-    console.log("[v0] BÚSQUEDA GLOBAL ACTIVA")
-    console.log("[v0] Texto original:", state.searchQuery)
-    console.log("[v0] Texto normalizado:", normalizedQuery)
-    console.log("[v0] Total de productos a buscar:", state.products.length)
-
-    filteredProducts = filteredProducts.filter((p) => {
-      const normalizedNombre = normalizeText(p.nombre)
-      const normalizedDescripcion = normalizeText(p.descripcion)
-      const normalizedDepartamento = normalizeText(p.departamento)
-
-      return (
-        normalizedNombre.includes(normalizedQuery) ||
-        normalizedDescripcion.includes(normalizedQuery) ||
-        normalizedDepartamento.includes(normalizedQuery)
-      )
-    })
-
-    console.log("[v0] Productos encontrados:", filteredProducts.length)
-    console.log("[v0] ==========================================")
+    filteredProducts = filteredProducts.filter((p) => p._searchText.includes(normalizedQuery))
   } else {
-    // Solo aplicar filtro de departamento si NO hay búsqueda global
     if (state.currentDepartment !== "all") {
       filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
     }
 
-    // Búsqueda por departamento
     if (state.deptSearchQuery && state.currentDepartment !== "all") {
       const normalizedDeptQuery = normalizeText(state.deptSearchQuery)
-
-      filteredProducts = filteredProducts.filter((p) => {
-        const normalizedNombre = normalizeText(p.nombre)
-        const normalizedDescripcion = normalizeText(p.descripcion)
-
-        return normalizedNombre.includes(normalizedDeptQuery) || normalizedDescripcion.includes(normalizedDeptQuery)
-      })
+      filteredProducts = filteredProducts.filter((p) => p._searchText.includes(normalizedDeptQuery))
     }
   }
-  // </CHANGE>
 
   if (filteredProducts.length === 0) {
     container.innerHTML = ""
@@ -621,20 +486,25 @@ function renderProducts() {
   noProducts.classList.add("hidden")
   container.innerHTML = ""
 
+  // Usar DocumentFragment para mejor rendimiento
+  const fragment = document.createDocumentFragment()
+
   filteredProducts.forEach((product) => {
     const card = createProductCard(product)
-    container.appendChild(card)
+    fragment.appendChild(card)
   })
+
+  container.appendChild(fragment)
 }
+// </CHANGE>
 
 function createProductCard(product) {
   const card = document.createElement("div")
-  card.className = "product-card"
+  card.className = "product-card fade-in"
 
   let pricesHTML = ""
 
   if (state.userRole === "cliente") {
-    // Cliente: Solo precio detal
     pricesHTML = `
       <div>
         <span class="text-xs text-gray-500">Detal</span>
@@ -642,7 +512,6 @@ function createProductCard(product) {
       </div>
     `
   } else if (state.userRole === "distribuidor") {
-    // Distribuidor: Detal y Mayor
     pricesHTML = `
       <div class="space-y-1">
         <div class="flex items-center justify-between">
@@ -688,6 +557,7 @@ function createProductCard(product) {
             <img src="${product.imagen_url || "/generic-product-display.png"}" 
                  alt="${product.nombre}" 
                  class="product-image"
+                 loading="lazy"
                  onerror="this.src='/generic-product-display.png'">
         </div>
         <div class="p-4">
@@ -708,6 +578,7 @@ function createProductCard(product) {
             </div>
         </div>
     `
+  // </CHANGE>
 
   card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
     const price = Number.parseFloat(e.currentTarget.dataset.price)
@@ -729,6 +600,7 @@ function openQuantityModal(product) {
       <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
            class="w-20 h-20 object-cover rounded-lg"
+           loading="lazy"
            onerror="this.src='/generic-product-display.png'">
       <div class="flex-1">
         <h3 class="font-bold text-gray-800 mb-1">${product.nombre}</h3>
@@ -761,8 +633,6 @@ function confirmQuantity() {
 }
 
 function addToCart(product, quantity = 1) {
-  console.log("[v0] Agregando al carrito:", product.nombre, "Cantidad:", quantity)
-
   const price = product.cartPrice || product.precio_cliente
 
   const existingItem = state.cart.find((item) => item.id === product.id)
@@ -789,7 +659,6 @@ function addToCart(product, quantity = 1) {
 }
 
 function openCart() {
-  console.log("[v0] Abriendo carrito")
   renderCart()
   document.getElementById("cart-modal").classList.remove("hidden")
 }
@@ -830,6 +699,7 @@ function renderCart() {
                 <img src="${item.imagen_url || "/generic-product-display.png"}" 
                      alt="${item.nombre}" 
                      class="w-20 h-20 object-cover rounded-lg"
+                     loading="lazy"
                      onerror="this.src='/generic-product-display.png'">
                 <div class="flex-1">
                     <h4 class="font-semibold text-gray-800 mb-1">${item.nombre}</h4>
@@ -863,7 +733,6 @@ function renderCart() {
     container.appendChild(cartItem)
   })
 
-  // Event listeners para botones del carrito
   container.querySelectorAll(".increase-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const productId = Number.parseInt(e.currentTarget.dataset.productId)
@@ -915,41 +784,32 @@ function sendWhatsAppOrder() {
     return
   }
 
-  console.log("[v0] Generando mensaje de WhatsApp")
+  let message = "NUEVO PEDIDO - SONIMAX MOVIL\n\n"
+  message += `Cliente: ${state.userName}\n\n`
+  message += "PRODUCTOS:\n"
 
-  let message = "🛒 *Nuevo Pedido - SONIMAx MÓVIL*\n\n"
-  message += `👤 Cliente: ${state.userName}\n\n`
-  message += "*Productos:*\n"
-
-  let total = 0
   state.cart.forEach((item, index) => {
-    const subtotal = item.price * item.quantity
-    total += subtotal
-    message += `${index + 1}. *${item.nombre}*\n`
+    message += `${index + 1}. ${item.nombre}\n`
     if (item.descripcion) {
-      message += `   📝 ${item.descripcion}\n`
+      message += `   ${item.descripcion}\n`
     }
-    message += `   📦 Cantidad: ${item.quantity}\n`
-    message += `   💵 Precio: $${item.price.toFixed(2)}\n`
-    message += `   💰 Subtotal: $${subtotal.toFixed(2)}\n\n`
+    message += `   Cantidad: ${item.quantity}\n\n`
   })
 
-  message += `*TOTAL: $${total.toFixed(2)}*\n\n`
-  message += "¡Gracias por tu pedido! 🎉"
+  message += "Gracias por tu pedido"
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://wa.me/?text=${encodedMessage}`
 
-  console.log("[v0] Abriendo WhatsApp para elegir contacto")
   window.open(whatsappURL, "_blank")
 
   state.cart = []
   clearCartFromLocalStorage()
-  console.log("[v0] Carrito vaciado después de enviar pedido")
 
   updateCartUI()
   closeCart()
 }
+// </CHANGE>
 
 function openCSVModal() {
   document.getElementById("csv-modal").classList.remove("hidden")
@@ -966,7 +826,7 @@ function handleCSVFileSelect(e) {
   const file = e.target.files[0]
   if (file) {
     const fileNameDiv = document.getElementById("csv-file-name")
-    fileNameDiv.textContent = `📄 Archivo seleccionado: ${file.name}`
+    fileNameDiv.textContent = `Archivo seleccionado: ${file.name}`
     fileNameDiv.classList.remove("hidden")
   }
 }
@@ -987,8 +847,6 @@ async function handleCSVUpload() {
     return
   }
 
-  console.log("[v0] Procesando archivo CSV:", file.name)
-
   submitBtn.disabled = true
   submitBtn.textContent = "Procesando..."
 
@@ -1000,7 +858,6 @@ async function handleCSVUpload() {
       throw new Error("El archivo CSV está vacío o no tiene datos")
     }
 
-    // Parsear encabezados
     const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
 
     const codigoIdx = headers.findIndex((h) => h === "codigo")
@@ -1011,29 +868,16 @@ async function handleCSVUpload() {
     const departamentoIdx = headers.findIndex((h) => h === "departamento")
     const urlIdx = headers.findIndex((h) => h === "url")
 
-    console.log("[v0] Índices de columnas encontrados:", {
-      codigo: codigoIdx,
-      descripcion: descripcionIdx,
-      detal: detalIdx,
-      mayor: mayorIdx,
-      gmayor: gmayorIdx,
-      departamento: departamentoIdx,
-      url: urlIdx,
-    })
-
-    // Validar que existan las columnas requeridas
     if (codigoIdx === -1 || descripcionIdx === -1 || detalIdx === -1 || mayorIdx === -1 || gmayorIdx === -1) {
       throw new Error("El CSV debe contener las columnas: codigo, descripcion, detal, mayor, gmayor")
     }
 
     const products = []
 
-    // Procesar cada línea
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(",").map((v) => v.trim())
 
       if (values.length < Math.max(codigoIdx, descripcionIdx, detalIdx, mayorIdx, gmayorIdx) + 1) {
-        console.warn(`[v0] Línea ${i + 1} tiene menos columnas de las esperadas, saltando...`)
         continue
       }
 
@@ -1050,21 +894,15 @@ async function handleCSVUpload() {
       products.push(product)
     }
 
-    console.log("[v0] Productos parseados:", products.length)
-
     if (products.length === 0) {
       throw new Error("No se pudieron parsear productos del CSV")
     }
 
-    console.log("[v0] Eliminando productos existentes...")
     const { error: deleteError } = await supabaseClient.from("products").delete().neq("id", 0)
 
     if (deleteError) {
-      console.error("[v0] Error eliminando productos:", deleteError)
       throw new Error("Error al eliminar productos existentes: " + deleteError.message)
     }
-
-    console.log("[v0] Productos existentes eliminados, insertando nuevos...")
 
     const batchSize = 100
     for (let i = 0; i < products.length; i += batchSize) {
@@ -1072,11 +910,9 @@ async function handleCSVUpload() {
       const { error } = await supabaseClient.from("products").insert(batch)
 
       if (error) throw error
-
-      console.log(`[v0] Lote ${Math.floor(i / batchSize) + 1} insertado (${batch.length} productos)`)
     }
 
-    statusDiv.textContent = `✅ ¡Éxito! ${products.length} productos cargados correctamente (productos anteriores reemplazados)`
+    statusDiv.textContent = `Éxito! ${products.length} productos cargados correctamente`
     statusDiv.className = "mt-4 p-4 rounded-lg text-sm bg-green-50 text-green-700 border border-green-200"
     statusDiv.classList.remove("hidden")
 
@@ -1088,7 +924,7 @@ async function handleCSVUpload() {
     }, 2000)
   } catch (error) {
     console.error("[v0] Error procesando CSV:", error)
-    statusDiv.textContent = `❌ Error: ${error.message}`
+    statusDiv.textContent = `Error: ${error.message}`
     statusDiv.className = "mt-4 p-4 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200"
     statusDiv.classList.remove("hidden")
   } finally {
