@@ -1,7 +1,6 @@
 // Configuración de Supabase
 const SUPABASE_URL = "https://ebkmhvrffajaodsrmgfd.supabase.co"
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVia21odnJmZmFqYW9kc3JtZ2ZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyNzcxMzAsImV4cCI6MjA3NTg1MzEzMH0.bCkXUogywYWQjDAjDZfKh-0QZ-0w_jKE93KNI-Fj3nU"
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVia21odnJmZmFqYW9kc3JtZ2ZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyNzcxMzAsImV4cCI6MjA3NTg1MzEzMH0.bCkXUogywYWQjDAjDZfKh-0QZ-0w_jKE93KNI-Fj3nU"
 
 if (SUPABASE_URL === "TU_SUPABASE_URL_AQUI" || SUPABASE_ANON_KEY === "TU_SUPABASE_ANON_KEY_AQUI") {
   console.error("❌ ERROR: Debes configurar tus credenciales de Supabase")
