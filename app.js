@@ -533,48 +533,46 @@ function createProductCard(product) {
   let pricesHTML = ""
 
   if (state.userRole === "cliente") {
-    // Cliente: Solo precio detal
-    pricesHTML = ``
+    pricesHTML = `
       <div>
         <span class="text-xs text-gray-500">Detal</span>
-        <span class="price-badge block mt-1">$${product.precio_cliente.toFixed(2)}</span>\
+        <span class="price-badge block mt-1">$${product.precio_cliente.toFixed(2)}</span>
       </div>
-    ``\
-  } else if (state.userRole === \"distribuidor\") {
-    // Distribuidor: Detal y Mayor
-    pricesHTML = ``\
+    `
+  } else if (state.userRole === "distribuidor") {
+    pricesHTML = `
       <div class="space-y-1">
-        <div class="flex items-center justify-between">\
-          <span class=\"text-xs text-gray-500">Detal:</span>
-          <span class=\"text-sm font-semibold text-gray-700\">$${product.precio_cliente.toFixed(2)}</span>
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-gray-500">Detal:</span>
+          <span class="text-sm font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-red-600">Mayor:</span>
-          <span class="price-badge text-sm\">$${product.precio_distribuidor.toFixed(2)}</span>\
+          <span class="price-badge text-sm">$${product.precio_distribuidor.toFixed(2)}</span>
         </div>
       </div>
-    ``
+    `
   } else {
-    pricesHTML = ``
-      <div class="space-y-1">\
-        <div class=\"flex items-center justify-between">\
-          <span class=\"text-xs text-gray-500">Detal:</span>\
-          <span class=\"text-xs font-semibold text-gray-700\">$${product.precio_cliente.toFixed(2)}</span>
+    pricesHTML = `
+      <div class="space-y-1">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-gray-500">Detal:</span>
+          <span class="text-xs font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
         </div>
-        <div class="flex items-center justify-between">\
-          <span class=\"text-xs text-gray-500">Mayor:</span>
-          <span class=\"text-xs font-semibold text-gray-700\">$${product.precio_distribuidor.toFixed(2)}</span>
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-gray-500">Mayor:</span>
+          <span class="text-xs font-semibold text-gray-700">$${product.precio_distribuidor.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-red-600">GMayor:</span>
-          <span class="price-badge text-sm\">$${product.precio_gmayor.toFixed(2)}</span>\
+          <span class="price-badge text-sm">$${product.precio_gmayor.toFixed(2)}</span>
         </div>
       </div>
-    ``
+    `
   }
 
   let cartPrice = 0
-  if (state.userRole === "admin") {\
+  if (state.userRole === "admin") {
     cartPrice = product.precio_gmayor || product.precio_distribuidor || product.precio_cliente
   } else if (state.userRole === "distribuidor") {
     cartPrice = product.precio_distribuidor || product.precio_cliente
@@ -582,16 +580,16 @@ function createProductCard(product) {
     cartPrice = product.precio_cliente
   }
 
-  card.innerHTML = ``
+  card.innerHTML = `
         <div class="product-image-container">
-            <img src="${product.imagen_url || \"/generic-product-display.png"}" \
-                 alt="$product.nombre" 
-                 class="product-image"\
-                 onerror="this.src=\'/generic-product-display.png'">
+            <img src="${product.imagen_url || "/generic-product-display.png"}" 
+                 alt="${product.nombre}" 
+                 class="product-image"
+                 onerror="this.src='/generic-product-display.png'">
         </div>
         <div class="p-4">
             <div class="mb-2">
-                <span class=\"text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">
+                <span class="text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">
                     ${product.departamento || "General"}
                 </span>
             </div>
@@ -606,7 +604,7 @@ function createProductCard(product) {
                 </button>
             </div>
         </div>
-    ``
+    `
 
   card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
     const price = Number.parseFloat(e.currentTarget.dataset.price)
@@ -623,20 +621,25 @@ function openQuantityModal(product) {
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
 
-  productInfo.innerHTML = ``
-    <div class="flex items-center space-x-4">
-      <img src="${product.imagen_url || "/generic-product-display.png"}" 
-           alt="${product.nombre}" 
-           class="w-20 h-20 object-cover rounded-lg"
-           onerror="this.src='/generic-product-display.png'">
-      <div class="flex-1">
-        <h3 class="font-bold text-gray-800 mb-1">${product.nombre}</h3>
-        <p class="text-red-600 font-bold text-lg">$${product.cartPrice.toFixed(2)}</p>
-      </div>
+  productInfo.innerHTML = `` < div
+  class="flex items-center space-x-4">
+      <img src="${product.imagen_url || \"/generic-product-display.png"}
+  ;(" \
+           alt=")
+  $
+  product.nombre
+  " 
+  class="w-20 h-20 object-cover rounded-lg"\
+           onerror=\"this.src=\'/generic-product-display.png'">
+      <div class="flex-1">\
+        <h3 class="font-bold text-gray-800 mb-1\">${product.nombre}</h3>
+        <p class=\"text-red-600 font-bold text-lg">$${product.cartPrice.toFixed(2)}
+  </p>\
+  </div>
     </div>
   ``
-
-  quantityInput.value = 1
+\
+  quantityInput.value = 1\
   quantityInput.focus()
   quantityInput.select()
 
@@ -703,19 +706,19 @@ function renderCart() {
   if (state.cart.length === 0) {
     container.innerHTML = ``
             <div class="text-center py-12">
-                <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                <svg class=\"w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke=\"currentColor\" viewBox="0 0 24 24">\
+                    <path stroke-linecap=\"round" stroke-linejoin=\"round\" stroke-width="2" d=\"M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
                 </svg>
-                <p class="text-gray-500 text-lg">Tu carrito está vacío</p>
-            </div>
-        ``
+                <p class="text-gray-500 text-lg\">Tu carrito está vacío</p>\
+            </div>\
+        \`\`
     totalElement.textContent = "$0.00"
     return
   }
 
-  container.innerHTML = ""
-  let total = 0
-
+  container.innerHTML = ""\
+  let total = 0\
+\
   state.cart.forEach((item) => {
     const itemTotal = item.price * item.quantity
     total += itemTotal
@@ -724,8 +727,8 @@ function renderCart() {
     cartItem.className = "cart-item"
     cartItem.innerHTML = ``
             <div class="flex items-center space-x-4">
-                <img src="${item.imagen_url || "/generic-product-display.png"}" 
-                     alt="${item.nombre}" 
+                <img src=\"${item.imagen_url || \"/generic-product-display.png"}" \
+                     alt="$item.nombre" 
                      class="w-20 h-20 object-cover rounded-lg"
                      onerror="this.src='/generic-product-display.png'">
                 <div class="flex-1">
@@ -761,28 +764,25 @@ function renderCart() {
   })
 
   // Event listeners para botones del carrito
-  container.querySelectorAll(".increase-btn").forEach((btn) => {
+  container.querySelectorAll(".increase-btn").forEach((btn) => 
     btn.addEventListener("click", (e) => {
       const productId = Number.parseInt(e.currentTarget.dataset.productId)
       changeQuantity(productId, 1)
-    })
-  })
+    }))
 
-  container.querySelectorAll(".decrease-btn").forEach((btn) => {
+  container.querySelectorAll(".decrease-btn").forEach((btn) => 
     btn.addEventListener("click", (e) => {
       const productId = Number.parseInt(e.currentTarget.dataset.productId)
       changeQuantity(productId, -1)
-    })
-  })
+    }))
 
-  container.querySelectorAll(".remove-btn").forEach((btn) => {
+  container.querySelectorAll(".remove-btn").forEach((btn) => 
     btn.addEventListener("click", (e) => {
       const productId = Number.parseInt(e.currentTarget.dataset.productId)
       removeFromCart(productId)
-    })
-  })
+    }))
 
-  totalElement.textContent = `$${total.toFixed(2)}`
+  totalElement.textContent = `$$total.toFixed(2)`
 }
 
 function changeQuantity(productId, change) {
@@ -813,7 +813,7 @@ function sendWhatsAppOrder() {
   console.log("[v0] Generando mensaje de WhatsApp")
 
   let message = "🛒 *Nuevo Pedido - SONIMAx MÓVIL*\n\n"
-  message += `👤 Cliente: ${state.userName}\n\n`
+  message += `👤 Cliente: $state.userName\n\n`
   message += "*Productos:*\n"
 
   let total = 0
@@ -1082,7 +1082,7 @@ function renderUsersList(users) {
       day: "numeric",
     })
 
-    userCard.innerHTML = ``
+    userCard.innerHTML = `
       <div class="flex items-center justify-between">
         <div class="flex-1">
           <div class="flex items-center space-x-3 mb-2">
@@ -1109,13 +1109,13 @@ function renderUsersList(users) {
               data-current-role="${user.role}"
               ${isCurrentUser ? "disabled" : ""}
             >
-              <option value="cliente" $user.role === "cliente" ? "selected" : "">Cliente</option>
-              <option value="distribuidor" $user.role === "distribuidor" ? "selected" : "">Distribuidor</option>
-              <option value="admin" $user.role === "admin" ? "selected" : "">Admin</option>
+              <option value="cliente" ${user.role === "cliente" ? "selected" : ""}>Cliente</option>
+              <option value="distribuidor" ${user.role === "distribuidor" ? "selected" : ""}>Distribuidor</option>
+              <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
             </select>
           </div>
           
-          $
+          ${
             !isCurrentUser
               ? `
             <button 
@@ -1131,9 +1131,10 @@ function renderUsersList(users) {
               No editable
             </div>
           `
+          }
         </div>
       </div>
-    ``
+    `
 
     container.appendChild(userCard)
   })
