@@ -90,6 +90,9 @@ function setupEventListeners() {
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
 
+  document.getElementById("manage-users-button")?.addEventListener("click", openUsersModal)
+  document.getElementById("close-users-modal")?.addEventListener("click", closeUsersModal)
+
   document.getElementById("open-sidebar").addEventListener("click", openSidebar)
   document.getElementById("close-sidebar").addEventListener("click", closeSidebar)
   document.getElementById("sidebar-overlay").addEventListener("click", closeSidebar)
@@ -531,47 +534,47 @@ function createProductCard(product) {
 
   if (state.userRole === "cliente") {
     // Cliente: Solo precio detal
-    pricesHTML = `
+    pricesHTML = ``
       <div>
         <span class="text-xs text-gray-500">Detal</span>
-        <span class="price-badge block mt-1">$${product.precio_cliente.toFixed(2)}</span>
+        <span class="price-badge block mt-1">$${product.precio_cliente.toFixed(2)}</span>\
       </div>
-    `
-  } else if (state.userRole === "distribuidor") {
+    ``\
+  } else if (state.userRole === \"distribuidor\") {
     // Distribuidor: Detal y Mayor
-    pricesHTML = `
+    pricesHTML = ``\
       <div class="space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Detal:</span>
-          <span class="text-sm font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
+        <div class="flex items-center justify-between">\
+          <span class=\"text-xs text-gray-500">Detal:</span>
+          <span class=\"text-sm font-semibold text-gray-700\">$${product.precio_cliente.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-red-600">Mayor:</span>
-          <span class="price-badge text-sm">$${product.precio_distribuidor.toFixed(2)}</span>
+          <span class="price-badge text-sm\">$${product.precio_distribuidor.toFixed(2)}</span>\
         </div>
       </div>
-    `
+    ``
   } else {
-    pricesHTML = `
-      <div class="space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Detal:</span>
-          <span class="text-xs font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
+    pricesHTML = ``
+      <div class="space-y-1">\
+        <div class=\"flex items-center justify-between">\
+          <span class=\"text-xs text-gray-500">Detal:</span>\
+          <span class=\"text-xs font-semibold text-gray-700\">$${product.precio_cliente.toFixed(2)}</span>
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Mayor:</span>
-          <span class="text-xs font-semibold text-gray-700">$${product.precio_distribuidor.toFixed(2)}</span>
+        <div class="flex items-center justify-between">\
+          <span class=\"text-xs text-gray-500">Mayor:</span>
+          <span class=\"text-xs font-semibold text-gray-700\">$${product.precio_distribuidor.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-red-600">GMayor:</span>
-          <span class="price-badge text-sm">$${product.precio_gmayor.toFixed(2)}</span>
+          <span class="price-badge text-sm\">$${product.precio_gmayor.toFixed(2)}</span>\
         </div>
       </div>
-    `
+    ``
   }
 
   let cartPrice = 0
-  if (state.userRole === "admin") {
+  if (state.userRole === "admin") {\
     cartPrice = product.precio_gmayor || product.precio_distribuidor || product.precio_cliente
   } else if (state.userRole === "distribuidor") {
     cartPrice = product.precio_distribuidor || product.precio_cliente
@@ -579,16 +582,16 @@ function createProductCard(product) {
     cartPrice = product.precio_cliente
   }
 
-  card.innerHTML = `
+  card.innerHTML = ``
         <div class="product-image-container">
-            <img src="${product.imagen_url || "/generic-product-display.png"}" 
-                 alt="${product.nombre}" 
-                 class="product-image"
-                 onerror="this.src='/generic-product-display.png'">
+            <img src="${product.imagen_url || \"/generic-product-display.png"}" \
+                 alt="$product.nombre" 
+                 class="product-image"\
+                 onerror="this.src=\'/generic-product-display.png'">
         </div>
         <div class="p-4">
             <div class="mb-2">
-                <span class="text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">
+                <span class=\"text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">
                     ${product.departamento || "General"}
                 </span>
             </div>
@@ -603,7 +606,7 @@ function createProductCard(product) {
                 </button>
             </div>
         </div>
-    `
+    ``
 
   card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
     const price = Number.parseFloat(e.currentTarget.dataset.price)
@@ -620,7 +623,7 @@ function openQuantityModal(product) {
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
 
-  productInfo.innerHTML = `
+  productInfo.innerHTML = ``
     <div class="flex items-center space-x-4">
       <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
@@ -631,7 +634,7 @@ function openQuantityModal(product) {
         <p class="text-red-600 font-bold text-lg">$${product.cartPrice.toFixed(2)}</p>
       </div>
     </div>
-  `
+  ``
 
   quantityInput.value = 1
   quantityInput.focus()
@@ -698,14 +701,14 @@ function renderCart() {
   const totalElement = document.getElementById("cart-total")
 
   if (state.cart.length === 0) {
-    container.innerHTML = `
+    container.innerHTML = ``
             <div class="text-center py-12">
                 <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
                 </svg>
                 <p class="text-gray-500 text-lg">Tu carrito está vacío</p>
             </div>
-        `
+        ``
     totalElement.textContent = "$0.00"
     return
   }
@@ -719,7 +722,7 @@ function renderCart() {
 
     const cartItem = document.createElement("div")
     cartItem.className = "cart-item"
-    cartItem.innerHTML = `
+    cartItem.innerHTML = ``
             <div class="flex items-center space-x-4">
                 <img src="${item.imagen_url || "/generic-product-display.png"}" 
                      alt="${item.nombre}" 
@@ -752,7 +755,7 @@ function renderCart() {
                 <span class="text-sm text-gray-600">Subtotal: </span>
                 <span class="font-bold text-gray-800">$${itemTotal.toFixed(2)}</span>
             </div>
-        `
+        ``
 
     container.appendChild(cartItem)
   })
@@ -1008,4 +1011,212 @@ function closeSidebar() {
   document.getElementById("sidebar-menu").classList.remove("open")
   document.getElementById("sidebar-overlay").classList.add("hidden")
   document.body.style.overflow = "auto"
+}
+
+// ==========================================
+// FUNCIONES DE ADMINISTRACIÓN DE USUARIOS
+// ==========================================
+
+async function openUsersModal() {
+  if (state.userRole !== "admin") {
+    alert("Solo el administrador puede gestionar usuarios")
+    return
+  }
+
+  console.log("[v0] Abriendo modal de administración de usuarios")
+  document.getElementById("users-modal").classList.remove("hidden")
+  document.getElementById("users-loading").classList.remove("hidden")
+  document.getElementById("users-error").classList.add("hidden")
+  document.getElementById("users-list").innerHTML = ""
+
+  await loadAllUsers()
+}
+
+function closeUsersModal() {
+  document.getElementById("users-modal").classList.add("hidden")
+}
+
+async function loadAllUsers() {
+  console.log("[v0] Cargando todos los usuarios...")
+
+  try {
+    const { data: users, error } = await supabaseClient
+      .from("users")
+      .select("id, email, name, role, created_at")
+      .order("created_at", { ascending: false })
+
+    if (error) throw error
+
+    console.log("[v0] Usuarios cargados:", users.length)
+
+    document.getElementById("users-loading").classList.add("hidden")
+
+    if (users.length === 0) {
+      document.getElementById("users-list").innerHTML = ``
+        <div class="text-center py-12">
+          <p class="text-gray-500">No hay usuarios registrados</p>
+        </div>
+      ``
+      return
+    }
+
+    renderUsersList(users)
+  } catch (error) 
+    console.error("[v0] Error cargando usuarios:", error)
+    document.getElementById("users-loading").classList.add("hidden")
+    document.getElementById("users-error").classList.remove("hidden")
+}
+
+function renderUsersList(users) {
+  const container = document.getElementById("users-list")
+  container.innerHTML = ""
+
+  users.forEach((user) => {
+    const userCard = document.createElement("div")
+    userCard.className = "bg-gray-50 rounded-lg p-4 border border-gray-200 hover:border-blue-300 transition-all"
+
+    const isCurrentUser = user.id === state.user.id
+    const createdDate = new Date(user.created_at).toLocaleDateString("es-ES", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })
+
+    userCard.innerHTML = ``
+      <div class="flex items-center justify-between">
+        <div class="flex-1">
+          <div class="flex items-center space-x-3 mb-2">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+              ${(user.name || user.email).charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h3 class="font-semibold text-gray-800">
+                ${user.name || "Sin nombre"}
+                ${isCurrentUser ? '<span class="text-xs text-blue-600 ml-2">(Tú)</span>' : ""}
+              </h3>
+              <p class="text-sm text-gray-600">${user.email}</p>
+            </div>
+          </div>
+          <p class="text-xs text-gray-500 ml-13">Registrado: ${createdDate}</p>
+        </div>
+        
+        <div class="flex items-center space-x-4">
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">Rol:</label>
+            <select 
+              class="role-selector px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-blue-500 transition-all font-medium ${getRoleColorClass(user.role)}"
+              data-user-id="${user.id}"
+              data-current-role="${user.role}"
+              ${isCurrentUser ? "disabled" : ""}
+            >
+              <option value="cliente" $user.role === "cliente" ? "selected" : "">Cliente</option>
+              <option value="distribuidor" $user.role === "distribuidor" ? "selected" : "">Distribuidor</option>
+              <option value="admin" $user.role === "admin" ? "selected" : "">Admin</option>
+            </select>
+          </div>
+          
+          $
+            !isCurrentUser
+              ? `
+            <button 
+              class="save-role-btn px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-medium shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              data-user-id="${user.id}"
+              disabled
+            >
+              Guardar
+            </button>
+          `
+              : `
+            <div class="px-4 py-2 bg-gray-200 text-gray-500 rounded-lg font-medium cursor-not-allowed">
+              No editable
+            </div>
+          `
+        </div>
+      </div>
+    ``
+
+    container.appendChild(userCard)
+  })
+
+  // Event listeners para los selectores de rol
+  container.querySelectorAll(".role-selector").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const userId = e.target.dataset.userId
+      const currentRole = e.target.dataset.currentRole
+      const newRole = e.target.value
+      const saveBtn = container.querySelector(`.save-role-btn[data-user-id="${userId}"]`)
+
+      if (saveBtn) {
+        saveBtn.disabled = newRole === currentRole
+      }
+
+      // Cambiar color del selector según el rol
+      e.target.className = `role-selector px-4 py-2 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-blue-500 transition-all font-medium ${getRoleColorClass(newRole)}`
+    })
+  })
+
+  // Event listeners para los botones de guardar
+  container.querySelectorAll(".save-role-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const userId = e.target.dataset.userId
+      const select = container.querySelector(`.role-selector[data-user-id="${userId}"]`)
+      const newRole = select.value
+
+      await updateUserRole(userId, newRole, e.target, select)
+    })
+  })
+}
+
+function getRoleColorClass(role) {
+  switch (role) {
+    case "admin":
+      return "bg-red-50 text-red-700 border-red-300"
+    case "distribuidor":
+      return "bg-yellow-50 text-yellow-700 border-yellow-300"
+    case "cliente":
+    default:
+      return "bg-green-50 text-green-700 border-green-300"
+  }
+}
+
+async function updateUserRole(userId, newRole, button, select) {
+  console.log("[v0] Actualizando rol de usuario:", userId, "a", newRole)
+
+  button.disabled = true
+  button.textContent = "Guardando..."
+
+  try {
+    const { error } = await supabaseClient.from("users").update({ role: newRole }).eq("id", userId)
+
+    if (error) throw error
+
+    console.log("[v0] Rol actualizado exitosamente")
+
+    // Actualizar el data-current-role
+    select.dataset.currentRole = newRole
+
+    // Mostrar feedback visual
+    button.textContent = "✓ Guardado"
+    button.classList.remove("bg-blue-600", "hover:bg-blue-700")
+    button.classList.add("bg-green-600")
+
+    setTimeout(() => {
+      button.textContent = "Guardar"
+      button.classList.remove("bg-green-600")
+      button.classList.add("bg-blue-600", "hover:bg-blue-700")
+      button.disabled = true
+    }, 2000)
+  } catch (error) {
+    console.error("[v0] Error actualizando rol:", error)
+    alert("Error al actualizar el rol: " + error.message)
+
+    button.textContent = "✗ Error"
+    button.classList.add("bg-red-600")
+
+    setTimeout(() => {
+      button.textContent = "Guardar"
+      button.classList.remove("bg-red-600")
+      button.disabled = false
+    }, 2000)
+  }
 }
