@@ -379,7 +379,6 @@ async function loadProducts() {
 
       currentBatch++
 
-      // Salir si no hay más productos
       if (data.length < batchSize) break
     }
 
@@ -393,7 +392,6 @@ async function loadProducts() {
       console.log(`[v0] 🎉 ¡Todos los productos cargados exitosamente!`)
     }
 
-    // Pre-calcular textos de búsqueda para mejor rendimiento
     console.log("[v0] 🔍 Pre-calculando textos de búsqueda...")
     const processStart = performance.now()
 
@@ -434,7 +432,6 @@ function renderDepartments() {
   sidebarContainer.innerHTML = ""
 
   state.departments.forEach((dept) => {
-    // Botón en navbar
     const button = document.createElement("button")
     button.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
     button.textContent = dept
@@ -442,7 +439,6 @@ function renderDepartments() {
     button.addEventListener("click", () => selectDepartment(dept))
     container.appendChild(button)
 
-    // Botón en sidebar
     const sidebarBtn = document.createElement("button")
     sidebarBtn.className =
       "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
@@ -486,12 +482,10 @@ function renderProducts() {
   console.log(`[v0] 🔍 Iniciando filtrado de productos...`)
   console.log(`[v0] 📦 Total de productos antes de filtrar: ${filteredProducts.length}`)
 
-  // Búsqueda global
   if (state.searchQuery) {
     filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.searchQuery))
     console.log(`[v0] 🔎 Búsqueda global: "${state.searchQuery}" - Resultados: ${filteredProducts.length}`)
   } else {
-    // Filtro por departamento
     if (state.currentDepartment !== "all") {
       const beforeDeptFilter = filteredProducts.length
       filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
@@ -500,7 +494,6 @@ function renderProducts() {
       )
     }
 
-    // Búsqueda dentro del departamento
     if (state.deptSearchQuery && state.currentDepartment !== "all") {
       const beforeDeptSearch = filteredProducts.length
       filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.deptSearchQuery))
@@ -825,10 +818,14 @@ function sendWhatsAppOrder() {
   state.cart.forEach((item) => {
     const itemTotal = item.price * item.quantity
     total += itemTotal
-    message += `${item.quantity}x ${item.nombre} - $${itemTotal.toFixed(2)}\n`
+    message += `${item.quantity}x ${item.nombre}\n`
+    if (item.descripcion && item.descripcion.trim() !== "") {
+      message += `${item.descripcion}\n`
+    }
+    message += `Precio: $${itemTotal.toFixed(2)}\n\n`
   })
 
-  message += `\nTotal: $${total.toFixed(2)}\n\n`
+  message += `Total: $${total.toFixed(2)}\n\n`
   message += `Mi nombre: ${state.userName}\n\n`
   message += "Por favor, contáctame para el pedido."
 
@@ -1020,7 +1017,6 @@ function openPDFModal() {
   const modal = document.getElementById("pdf-modal")
   const select = document.getElementById("pdf-department-select")
 
-  // Llenar el select con los departamentos
   select.innerHTML = '<option value="">Selecciona un departamento...</option>'
   state.departments.forEach((dept) => {
     const option = document.createElement("option")
@@ -1059,7 +1055,6 @@ async function generatePDF() {
   try {
     console.log(`[v0] 📄 Iniciando generación de PDF para departamento: ${selectedDept}`)
 
-    // Filtrar productos por departamento
     const deptProducts = state.products.filter((p) => p.departamento === selectedDept)
     console.log(`[v0] 📦 Productos encontrados: ${deptProducts.length}`)
 
@@ -1071,11 +1066,9 @@ async function generatePDF() {
     statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200"
     statusDiv.classList.remove("hidden")
 
-    // Crear el PDF
     const { jsPDF } = window.jspdf
     const doc = new jsPDF()
 
-    // Título
     doc.setFontSize(20)
     doc.setFont(undefined, "bold")
     doc.text("SONIMAX MÓVIL", 105, 15, { align: "center" })
@@ -1095,38 +1088,32 @@ async function generatePDF() {
     for (let i = 0; i < deptProducts.length; i++) {
       const product = deptProducts[i]
 
-      // Verificar si necesitamos una nueva página
       if (yPosition + productHeight > pageHeight - margin) {
         doc.addPage()
         yPosition = 20
       }
 
-      // Dibujar borde del producto
       doc.setDrawColor(200, 200, 200)
       doc.rect(margin, yPosition, 180, productHeight - 5)
 
-      // Intentar cargar la imagen
       if (product.imagen_url) {
         try {
           const imgData = await loadImageAsBase64(product.imagen_url)
           doc.addImage(imgData, "JPEG", margin + 5, yPosition + 5, 30, 30)
         } catch (error) {
           console.warn(`[v0] ⚠️ No se pudo cargar imagen para ${product.nombre}`)
-          // Dibujar placeholder
           doc.setFillColor(240, 240, 240)
           doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
           doc.setFontSize(8)
           doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
         }
       } else {
-        // Dibujar placeholder
         doc.setFillColor(240, 240, 240)
         doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
         doc.setFontSize(8)
         doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
       }
 
-      // Información del producto
       const textX = margin + 40
 
       doc.setFontSize(11)
@@ -1140,7 +1127,6 @@ async function generatePDF() {
       const shortDesc = description.length > 60 ? description.substring(0, 60) + "..." : description
       doc.text(shortDesc, textX, yPosition + 17)
 
-      // Precios
       doc.setFontSize(10)
       doc.setFont(undefined, "bold")
       doc.text(`Detal: $${product.precio_cliente.toFixed(2)}`, textX, yPosition + 25)
@@ -1154,13 +1140,11 @@ async function generatePDF() {
 
       yPosition += productHeight
 
-      // Actualizar progreso
       if (i % 5 === 0) {
         statusDiv.textContent = `Procesando ${i + 1}/${deptProducts.length} productos...`
       }
     }
 
-    // Guardar el PDF
     const fileName = `SONIMAX_${selectedDept.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`
     doc.save(fileName)
 
@@ -1188,7 +1172,6 @@ async function generatePDF() {
   }
 }
 
-// Función auxiliar para cargar imágenes como base64
 function loadImageAsBase64(url) {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -1214,10 +1197,8 @@ function loadImageAsBase64(url) {
       reject(new Error("No se pudo cargar la imagen"))
     }
 
-    // Intentar cargar la imagen
     img.src = url
 
-    // Timeout de 5 segundos
     setTimeout(() => {
       reject(new Error("Timeout cargando imagen"))
     }, 5000)
