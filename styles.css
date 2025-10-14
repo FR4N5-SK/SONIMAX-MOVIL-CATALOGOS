@@ -1,4 +1,6 @@
-/* Estilos Personalizados para SONIMAx MÓVIL */
+/* SONIMAX MÓVIL - Estilos Optimizados */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 * {
   margin: 0;
@@ -6,32 +8,25 @@
   box-sizing: border-box;
 }
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
-
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Efectos de Glassmorphism */
+/* Glassmorphism */
 .glass-card {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
-.glass-header {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  padding: 0.75rem 0;
-}
-
-/* Animaciones */
+/* Animaciones Optimizadas */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -42,7 +37,7 @@ body {
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(-20px);
+    transform: translateX(-10px);
   }
   to {
     opacity: 1;
@@ -53,40 +48,11 @@ body {
 @keyframes scaleIn {
   from {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
     transform: scale(1);
-  }
-}
-
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%) translateY(-100%) rotate(45deg);
-  }
-  100% {
-    transform: translateX(100%) translateY(100%) rotate(45deg);
   }
 }
 
@@ -96,12 +62,12 @@ body {
     transform: scale(1);
   }
   50% {
-    transform: scale(1.1);
+    transform: scale(1.05);
   }
 }
 
 .fade-in {
-  animation: fadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .slide-in {
@@ -112,77 +78,99 @@ body {
   animation: scaleIn 0.3s ease-out;
 }
 
-.slide-in-right {
-  animation: slideInRight 0.3s ease-out;
-}
-
-/* Tarjetas de Producto */
+/* Tarjetas de Producto Mejoradas */
 .product-card {
   background: white;
   border-radius: 1.5rem;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  animation: fadeIn 0.5s ease-out;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  animation: fadeIn 0.4s ease-out;
+  will-change: transform;
 }
 
 .product-card:hover {
-  transform: translateY(-12px) scale(1.02);
-  box-shadow: 0 20px 40px rgba(220, 38, 38, 0.25);
-  border-color: rgba(220, 38, 38, 0.2);
+  transform: translateY(-8px);
+  box-shadow: 0 12px 32px rgba(220, 38, 38, 0.2);
+  border-color: rgba(220, 38, 38, 0.3);
 }
 
 .product-image {
   width: 100%;
-  height: 240px;
+  height: 220px;
   object-fit: cover;
-  background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
-  transition: transform 0.5s ease;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  transition: transform 0.4s ease;
 }
 
 .product-card:hover .product-image {
-  transform: scale(1.1);
+  transform: scale(1.08);
+}
+
+.product-image-container {
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+}
+
+/* Skeleton Loading */
+.product-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* Botones de Departamento */
 .dept-button {
   background: white;
-  color: #4b5563;
+  color: #6b7280;
   border: 2px solid #e5e7eb;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+  font-weight: 600;
 }
 
 .dept-button:hover {
-  background: #f3f4f6;
+  background: #fef2f2;
   border-color: #dc2626;
   color: #dc2626;
+  transform: translateY(-2px);
 }
 
 .dept-button.active {
-  background: #dc2626;
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
   color: white;
   border-color: #dc2626;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
 }
 
-/* Agregado estilos para tabs de autenticación */
+/* Tabs de Autenticación */
 .auth-tab-active {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
-/* </CHANGE> */
 
-/* Menú lateral hamburguesa */
+/* Menú Lateral */
 .sidebar-dept-btn.active {
   background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
   color: white;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
 #sidebar-menu.open {
   transform: translateX(0);
 }
 
-/* Scrollbar personalizado */
+/* Scrollbar Personalizado */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
@@ -193,8 +181,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -203,57 +191,68 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+  background: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
 }
 
 /* Items del Carrito */
 .cart-item {
   background: white;
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   padding: 1rem;
   margin-bottom: 1rem;
   border: 1px solid #e5e7eb;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   animation: slideIn 0.3s ease-out;
 }
 
 .cart-item:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateX(4px);
 }
 
 /* Badges de Rol */
 .role-badge-cliente {
   background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
   color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
 }
 
 .role-badge-distribuidor {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
 }
 
 .role-badge-admin {
   background: linear-gradient(135deg, #1f2937 0%, #000000 100%);
   color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
 }
 
 /* Botones de Cantidad */
 .quantity-button {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #f3f4f6;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   transition: all 0.2s ease;
   cursor: pointer;
   user-select: none;
+  font-weight: 600;
 }
 
 .quantity-button:hover {
@@ -265,10 +264,11 @@ body {
   transform: scale(0.95);
 }
 
-/* Botones mejorados */
+/* Botón Agregar al Carrito */
 .add-to-cart-btn {
   position: relative;
   overflow: hidden;
+  font-weight: 600;
 }
 
 .add-to-cart-btn::before {
@@ -281,7 +281,7 @@ body {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.3);
   transform: translate(-50%, -50%);
-  transition: width 0.6s, height 0.6s;
+  transition: width 0.5s, height 0.5s;
 }
 
 .add-to-cart-btn:hover::before {
@@ -289,35 +289,45 @@ body {
   height: 300px;
 }
 
-/* Badges de precio mejorados */
+/* Badge de Precio */
 .price-badge {
-  background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
   color: white;
   padding: 0.5rem 1rem;
   border-radius: 0.75rem;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 1.125rem;
   display: inline-block;
-  box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4);
-  position: relative;
-  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
 }
 
-.price-badge::before {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  transform: rotate(45deg);
-  animation: shimmer 3s infinite;
-}
-
-/* Animación de pulso para el carrito */
+/* Animación de Pulso para Carrito */
 .cart-pulse {
   animation: pulse 0.3s ease-in-out;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #dc2626;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Transiciones Suaves */
+.transition-all {
+  transition: all 0.3s ease;
 }
 
 /* Responsive */
@@ -325,33 +335,26 @@ body {
   .product-card {
     margin-bottom: 1rem;
   }
+
+  .product-image {
+    height: 200px;
+  }
+
+  h1 {
+    font-size: 1.25rem;
+  }
 }
 
-/* Estados de carga */
-.loading-spinner {
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #dc2626;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
+/* Optimización de Rendimiento */
+.product-card,
+.dept-button,
+.cart-item {
+  contain: layout style paint;
 }
 
-/* Transiciones suaves */
-.transition-all {
-  transition: all 0.3s ease;
-}
-
-/* Efectos de hover en imágenes */
-.product-image-container {
-  overflow: hidden;
-  position: relative;
-}
-
-.product-image-container img {
-  transition: transform 0.5s ease;
-}
-
-.product-image-container:hover img {
-  transform: scale(1.1);
+/* Mejora de Accesibilidad */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
 }
