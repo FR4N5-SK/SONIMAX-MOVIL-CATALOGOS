@@ -167,6 +167,10 @@ function setupEventListeners() {
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
 
+  document.getElementById("export-pdf-button")?.addEventListener("click", openPDFModal)
+  document.getElementById("close-pdf-modal")?.addEventListener("click", closePDFModal)
+  document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
+
   document.getElementById("open-sidebar").addEventListener("click", openSidebar)
   document.getElementById("close-sidebar").addEventListener("click", closeSidebar)
   document.getElementById("sidebar-overlay").addEventListener("click", closeSidebar)
@@ -815,28 +819,18 @@ function sendWhatsAppOrder() {
     return
   }
 
-  let message = "🛒 *NUEVO PEDIDO - SONIMAX MÓVIL*\n\n"
-  message += `👤 *Cliente:* ${state.userName}\n`
-  message += `📋 *Rol:* ${state.userRole}\n\n`
-  message += "*PRODUCTOS:*\n"
-  message += "━━━━━━━━━━━━━━━━\n\n"
+  let message = "Hola, quiero comprar los siguientes productos:\n\n"
 
   let total = 0
-  state.cart.forEach((item, index) => {
+  state.cart.forEach((item) => {
     const itemTotal = item.price * item.quantity
     total += itemTotal
-    message += `${index + 1}. *${item.nombre}*\n`
-    if (item.descripcion) {
-      message += `   ${item.descripcion}\n`
-    }
-    message += `   💰 Precio: $${item.price.toFixed(2)}\n`
-    message += `   📦 Cantidad: ${item.quantity}\n`
-    message += `   💵 Subtotal: $${itemTotal.toFixed(2)}\n\n`
+    message += `${item.quantity}x ${item.nombre} - $${itemTotal.toFixed(2)}\n`
   })
 
-  message += "━━━━━━━━━━━━━━━━\n"
-  message += `*TOTAL: $${total.toFixed(2)}*\n\n`
-  message += "¡Gracias por tu pedido! 🙏"
+  message += `\nTotal: $${total.toFixed(2)}\n\n`
+  message += `Mi nombre: ${state.userName}\n\n`
+  message += "Por favor, contáctame para el pedido."
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://wa.me/?text=${encodedMessage}`
@@ -1020,4 +1014,212 @@ function closeSidebar() {
   document.getElementById("sidebar-menu").classList.remove("open")
   document.getElementById("sidebar-overlay").classList.add("hidden")
   document.body.style.overflow = "auto"
+}
+
+function openPDFModal() {
+  const modal = document.getElementById("pdf-modal")
+  const select = document.getElementById("pdf-department-select")
+
+  // Llenar el select con los departamentos
+  select.innerHTML = '<option value="">Selecciona un departamento...</option>'
+  state.departments.forEach((dept) => {
+    const option = document.createElement("option")
+    option.value = dept
+    option.textContent = dept
+    select.appendChild(option)
+  })
+
+  modal.classList.remove("hidden")
+}
+
+function closePDFModal() {
+  document.getElementById("pdf-modal").classList.add("hidden")
+  document.getElementById("pdf-status").classList.add("hidden")
+}
+
+async function generatePDF() {
+  const select = document.getElementById("pdf-department-select")
+  const selectedDept = select.value
+  const statusDiv = document.getElementById("pdf-status")
+  const generateBtn = document.getElementById("generate-pdf-button")
+
+  if (!selectedDept) {
+    statusDiv.textContent = "Por favor selecciona un departamento"
+    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
+    statusDiv.classList.remove("hidden")
+    return
+  }
+
+  generateBtn.disabled = true
+  generateBtn.innerHTML = `
+    <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+    <span>Generando PDF...</span>
+  `
+
+  try {
+    console.log(`[v0] 📄 Iniciando generación de PDF para departamento: ${selectedDept}`)
+
+    // Filtrar productos por departamento
+    const deptProducts = state.products.filter((p) => p.departamento === selectedDept)
+    console.log(`[v0] 📦 Productos encontrados: ${deptProducts.length}`)
+
+    if (deptProducts.length === 0) {
+      throw new Error("No hay productos en este departamento")
+    }
+
+    statusDiv.textContent = `Procesando ${deptProducts.length} productos...`
+    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200"
+    statusDiv.classList.remove("hidden")
+
+    // Crear el PDF
+    const { jsPDF } = window.jspdf
+    const doc = new jsPDF()
+
+    // Título
+    doc.setFontSize(20)
+    doc.setFont(undefined, "bold")
+    doc.text("SONIMAX MÓVIL", 105, 15, { align: "center" })
+
+    doc.setFontSize(14)
+    doc.text(`Catálogo - ${selectedDept}`, 105, 23, { align: "center" })
+
+    doc.setFontSize(10)
+    doc.setFont(undefined, "normal")
+    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 105, 30, { align: "center" })
+
+    let yPosition = 40
+    const pageHeight = doc.internal.pageSize.height
+    const margin = 15
+    const productHeight = 45
+
+    for (let i = 0; i < deptProducts.length; i++) {
+      const product = deptProducts[i]
+
+      // Verificar si necesitamos una nueva página
+      if (yPosition + productHeight > pageHeight - margin) {
+        doc.addPage()
+        yPosition = 20
+      }
+
+      // Dibujar borde del producto
+      doc.setDrawColor(200, 200, 200)
+      doc.rect(margin, yPosition, 180, productHeight - 5)
+
+      // Intentar cargar la imagen
+      if (product.imagen_url) {
+        try {
+          const imgData = await loadImageAsBase64(product.imagen_url)
+          doc.addImage(imgData, "JPEG", margin + 5, yPosition + 5, 30, 30)
+        } catch (error) {
+          console.warn(`[v0] ⚠️ No se pudo cargar imagen para ${product.nombre}`)
+          // Dibujar placeholder
+          doc.setFillColor(240, 240, 240)
+          doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
+          doc.setFontSize(8)
+          doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
+        }
+      } else {
+        // Dibujar placeholder
+        doc.setFillColor(240, 240, 240)
+        doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
+        doc.setFontSize(8)
+        doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
+      }
+
+      // Información del producto
+      const textX = margin + 40
+
+      doc.setFontSize(11)
+      doc.setFont(undefined, "bold")
+      const productName = product.nombre.length > 50 ? product.nombre.substring(0, 50) + "..." : product.nombre
+      doc.text(productName, textX, yPosition + 10)
+
+      doc.setFontSize(9)
+      doc.setFont(undefined, "normal")
+      const description = product.descripcion || "Sin descripción"
+      const shortDesc = description.length > 60 ? description.substring(0, 60) + "..." : description
+      doc.text(shortDesc, textX, yPosition + 17)
+
+      // Precios
+      doc.setFontSize(10)
+      doc.setFont(undefined, "bold")
+      doc.text(`Detal: $${product.precio_cliente.toFixed(2)}`, textX, yPosition + 25)
+      doc.text(`Mayor: $${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}`, textX, yPosition + 31)
+
+      if (product.precio_gmayor && product.precio_gmayor > 0) {
+        doc.setTextColor(220, 38, 38)
+        doc.text(`GMayor: $${product.precio_gmayor.toFixed(2)}`, textX + 60, yPosition + 31)
+        doc.setTextColor(0, 0, 0)
+      }
+
+      yPosition += productHeight
+
+      // Actualizar progreso
+      if (i % 5 === 0) {
+        statusDiv.textContent = `Procesando ${i + 1}/${deptProducts.length} productos...`
+      }
+    }
+
+    // Guardar el PDF
+    const fileName = `SONIMAX_${selectedDept.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`
+    doc.save(fileName)
+
+    console.log(`[v0] ✅ PDF generado exitosamente: ${fileName}`)
+
+    statusDiv.textContent = `¡PDF generado exitosamente! (${deptProducts.length} productos)`
+    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-green-50 text-green-700 border border-green-200"
+
+    setTimeout(() => {
+      closePDFModal()
+    }, 2000)
+  } catch (error) {
+    console.error("[v0] ❌ Error generando PDF:", error)
+    statusDiv.textContent = `Error: ${error.message}`
+    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
+    statusDiv.classList.remove("hidden")
+  } finally {
+    generateBtn.disabled = false
+    generateBtn.innerHTML = `
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+      </svg>
+      <span>Generar y Descargar PDF</span>
+    `
+  }
+}
+
+// Función auxiliar para cargar imágenes como base64
+function loadImageAsBase64(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = "Anonymous"
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = img.width
+      canvas.height = img.height
+
+      const ctx = canvas.getContext("2d")
+      ctx.drawImage(img, 0, 0)
+
+      try {
+        const dataURL = canvas.toDataURL("image/jpeg", 0.8)
+        resolve(dataURL)
+      } catch (error) {
+        reject(error)
+      }
+    }
+
+    img.onerror = () => {
+      reject(new Error("No se pudo cargar la imagen"))
+    }
+
+    // Intentar cargar la imagen
+    img.src = url
+
+    // Timeout de 5 segundos
+    setTimeout(() => {
+      reject(new Error("Timeout cargando imagen"))
+    }, 5000)
+  })
 }
