@@ -1,5 +1,5 @@
-// SONIMAx MÓVIL - Aplicación Principal
-// Estado Global
+// SONIMAX MÓVIL - Aplicación Optimizada
+
 const state = {
   user: null,
   userRole: null,
@@ -11,8 +11,10 @@ const state = {
   searchQuery: "",
   deptSearchQuery: "",
   pendingProduct: null,
+  isLoading: false,
 }
 
+// Función de debounce mejorada
 function debounce(func, wait) {
   let timeout
   return function executedFunction(...args) {
@@ -24,8 +26,50 @@ function debounce(func, wait) {
     timeout = setTimeout(later, wait)
   }
 }
-// </CHANGE>
 
+// Normalización de texto mejorada para búsqueda
+function normalizeText(text) {
+  if (!text) return ""
+  return text
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+// Parser CSV mejorado que maneja comillas y comas dentro de campos
+function parseCSVLine(line) {
+  const result = []
+  let current = ""
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    const nextChar = line[i + 1]
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim())
+      current = ""
+    } else {
+      current += char
+    }
+  }
+
+  result.push(current.trim())
+  return result
+}
+
+// Gestión del carrito en localStorage
 function saveCartToLocalStorage() {
   try {
     localStorage.setItem("sonimax_cart", JSON.stringify(state.cart))
@@ -55,21 +99,10 @@ function clearCartFromLocalStorage() {
   }
 }
 
-function normalizeText(text) {
-  if (!text) return ""
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
 const supabaseClient = window.supabaseClient
 
 async function handleLogout() {
   const { error } = await supabaseClient.auth.signOut()
-
   if (error) {
     console.error("[v0] Error cerrando sesión:", error)
   } else {
@@ -99,24 +132,22 @@ async function initApp() {
   setupEventListeners()
 }
 
+// Búsquedas con debounce
 const debouncedGlobalSearch = debounce((value) => {
-  state.searchQuery = value.toLowerCase()
+  state.searchQuery = normalizeText(value)
   renderProducts()
 }, 300)
 
 const debouncedDeptSearch = debounce((value) => {
-  state.deptSearchQuery = value.toLowerCase()
+  state.deptSearchQuery = normalizeText(value)
   renderProducts()
 }, 300)
-// </CHANGE>
 
 function setupEventListeners() {
   document.getElementById("show-login-btn").addEventListener("click", showLoginForm)
   document.getElementById("show-register-btn").addEventListener("click", showRegisterForm)
-
   document.getElementById("login-form").addEventListener("submit", handleLogin)
   document.getElementById("register-form").addEventListener("submit", handleRegister)
-
   document.getElementById("logout-button").addEventListener("click", handleLogout)
 
   document.getElementById("global-search").addEventListener("input", (e) => {
@@ -126,7 +157,6 @@ function setupEventListeners() {
   document.getElementById("dept-search").addEventListener("input", (e) => {
     debouncedDeptSearch(e.target.value)
   })
-  // </CHANGE>
 
   document.getElementById("cart-button").addEventListener("click", openCart)
   document.getElementById("close-cart").addEventListener("click", closeCart)
@@ -146,9 +176,7 @@ function setupEventListeners() {
   document.getElementById("confirm-quantity").addEventListener("click", confirmQuantity)
 
   document.getElementById("quantity-input").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") {
-      confirmQuantity()
-    }
+    if (e.key === "Enter") confirmQuantity()
   })
 }
 
@@ -157,8 +185,6 @@ function showLoginForm() {
   document.getElementById("register-form").classList.add("hidden")
   document.getElementById("show-login-btn").classList.add("auth-tab-active")
   document.getElementById("show-register-btn").classList.remove("auth-tab-active")
-  document.getElementById("show-login-btn").classList.remove("text-white/70")
-  document.getElementById("show-register-btn").classList.add("text-white/70")
   hideAuthMessages()
 }
 
@@ -167,8 +193,6 @@ function showRegisterForm() {
   document.getElementById("register-form").classList.remove("hidden")
   document.getElementById("show-register-btn").classList.add("auth-tab-active")
   document.getElementById("show-login-btn").classList.remove("auth-tab-active")
-  document.getElementById("show-register-btn").classList.remove("text-white/70")
-  document.getElementById("show-login-btn").classList.add("text-white/70")
   hideAuthMessages()
 }
 
@@ -179,19 +203,13 @@ function hideAuthMessages() {
 
 async function handleLogin(e) {
   e.preventDefault()
-
   const email = document.getElementById("login-email").value
   const password = document.getElementById("login-password").value
   const errorDiv = document.getElementById("auth-error")
 
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-      email,
-      password,
-    })
-
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password })
     if (error) throw error
-
     await handleUserSession(data.user)
   } catch (error) {
     console.error("[v0] Error en login:", error)
@@ -202,7 +220,6 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
   e.preventDefault()
-
   const name = document.getElementById("register-name").value
   const email = document.getElementById("register-email").value
   const password = document.getElementById("register-password").value
@@ -214,10 +231,7 @@ async function handleRegister(e) {
       email,
       password,
       options: {
-        data: {
-          name: name,
-          role: "cliente",
-        },
+        data: { name, role: "cliente" },
         emailRedirectTo: window.location.origin,
       },
     })
@@ -227,17 +241,15 @@ async function handleRegister(e) {
     const { error: dbError } = await supabaseClient.from("users").insert([
       {
         id: authData.user.id,
-        email: email,
-        name: name,
+        email,
+        name,
         role: "cliente",
       },
     ])
 
-    if (dbError) {
-      console.error("[v0] Error insertando en tabla users:", dbError)
-    }
+    if (dbError) console.error("[v0] Error insertando en users:", dbError)
 
-    successDiv.textContent = "¡Cuenta creada exitosamente como Cliente! Iniciando sesión..."
+    successDiv.textContent = "¡Cuenta creada exitosamente! Iniciando sesión..."
     successDiv.classList.remove("hidden")
     errorDiv.classList.add("hidden")
 
@@ -259,24 +271,15 @@ async function handleUserSession(user) {
 
   if (error) {
     console.error("[v0] Error obteniendo datos:", error)
-    let fallbackRole = user.user_metadata?.role || "cliente"
-    if (fallbackRole === 1 || fallbackRole === "1") fallbackRole = "cliente"
-    if (fallbackRole === 2 || fallbackRole === "2") fallbackRole = "distribuidor"
-    if (fallbackRole === 3 || fallbackRole === "3") fallbackRole = "admin"
-    state.userRole = fallbackRole
+    state.userRole = user.user_metadata?.role || "cliente"
     state.userName = user.user_metadata?.name || "Usuario"
   } else {
-    let dbRole = userData.role
-    if (dbRole === 1 || dbRole === "1") dbRole = "cliente"
-    if (dbRole === 2 || dbRole === "2") dbRole = "distribuidor"
-    if (dbRole === 3 || dbRole === "3") dbRole = "admin"
-    state.userRole = dbRole
+    state.userRole = userData.role
     state.userName = userData.name || "Usuario"
   }
 
   await loadDepartments()
   await loadProducts()
-
   showAppScreen()
 }
 
@@ -291,7 +294,6 @@ function showAppScreen() {
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
-
   setupRoleBasedUI()
 }
 
@@ -301,36 +303,19 @@ function setupRoleBasedUI() {
 
   roleBadge.classList.remove("hidden")
 
-  let roleText = ""
-  let roleClass = ""
-
-  switch (state.userRole) {
-    case "admin":
-      roleText = "Administrador"
-      roleClass = "role-badge-admin"
-      if (adminSection) {
-        adminSection.classList.remove("hidden")
-      }
-      break
-    case "distribuidor":
-      roleText = "Distribuidor"
-      roleClass = "role-badge-distribuidor"
-      if (adminSection) {
-        adminSection.classList.add("hidden")
-      }
-      break
-    case "cliente":
-    default:
-      roleText = "Cliente"
-      roleClass = "role-badge-cliente"
-      if (adminSection) {
-        adminSection.classList.add("hidden")
-      }
-      break
+  const roleConfig = {
+    admin: { text: "👑 Admin", class: "role-badge-admin", showAdmin: true },
+    distribuidor: { text: "📦 Distribuidor", class: "role-badge-distribuidor", showAdmin: false },
+    cliente: { text: "🛒 Cliente", class: "role-badge-cliente", showAdmin: false },
   }
 
-  roleBadge.textContent = roleText
-  roleBadge.className = `px-3 py-1 rounded-full text-xs font-semibold ${roleClass}`
+  const config = roleConfig[state.userRole] || roleConfig.cliente
+  roleBadge.textContent = config.text
+  roleBadge.className = config.class
+
+  if (adminSection) {
+    adminSection.classList.toggle("hidden", !config.showAdmin)
+  }
 }
 
 async function loadDepartments() {
@@ -341,152 +326,200 @@ async function loadDepartments() {
     return
   }
 
-  const uniqueDepts = data.map((row) => row.departamento).filter((d) => d && d.trim() !== "")
+  state.departments = data.map((row) => row.departamento).filter((d) => d && d.trim() !== "")
 
-  state.departments = uniqueDepts
   renderDepartments()
 }
 
 async function loadProducts() {
   try {
-    const { data, error } = await supabaseClient.from("products").select("*").order("nombre")
+    state.isLoading = true
+    showProductsLoading()
 
-    if (error) {
-      console.error("[v0] Error cargando productos:", error)
+    console.log("[v0] 🔄 Iniciando carga de productos desde Supabase...")
+    const startTime = performance.now()
+
+    const { count, error: countError } = await supabaseClient
+      .from("products")
+      .select("*", { count: "exact", head: true })
+
+    if (countError) {
+      console.error("[v0] ❌ Error obteniendo conteo:", countError)
       return
     }
 
-    // Pre-calcular textos normalizados para búsquedas más rápidas
-    state.products = data.map((product) => ({
+    console.log(`[v0] 📊 Total de productos en base de datos: ${count}`)
+
+    const batchSize = 1000
+    const allProducts = []
+    let currentBatch = 0
+
+    while (allProducts.length < count) {
+      const start = currentBatch * batchSize
+      const end = start + batchSize - 1
+
+      console.log(`[v0] 📦 Cargando lote ${currentBatch + 1}: productos ${start + 1} a ${Math.min(end + 1, count)}`)
+
+      const { data, error } = await supabaseClient.from("products").select("*").order("nombre").range(start, end)
+
+      if (error) {
+        console.error(`[v0] ❌ Error cargando lote ${currentBatch + 1}:`, error)
+        break
+      }
+
+      allProducts.push(...data)
+      console.log(`[v0] ✅ Lote ${currentBatch + 1} cargado: ${data.length} productos`)
+      console.log(
+        `[v0] 📈 Progreso: ${allProducts.length}/${count} productos (${((allProducts.length / count) * 100).toFixed(1)}%)`,
+      )
+
+      currentBatch++
+
+      // Salir si no hay más productos
+      if (data.length < batchSize) break
+    }
+
+    const fetchTime = performance.now() - startTime
+    console.log(`[v0] ✅ Productos obtenidos de Supabase: ${allProducts.length}`)
+    console.log(`[v0] ⏱️ Tiempo de carga total: ${fetchTime.toFixed(2)}ms`)
+
+    if (allProducts.length < count) {
+      console.warn(`[v0] ⚠️ ADVERTENCIA: Solo se cargaron ${allProducts.length} de ${count} productos`)
+    } else {
+      console.log(`[v0] 🎉 ¡Todos los productos cargados exitosamente!`)
+    }
+
+    // Pre-calcular textos de búsqueda para mejor rendimiento
+    console.log("[v0] 🔍 Pre-calculando textos de búsqueda...")
+    const processStart = performance.now()
+
+    state.products = allProducts.map((product) => ({
       ...product,
-      _searchText: normalizeText(`${product.nombre} ${product.descripcion} ${product.departamento}`),
+      _searchText: normalizeText(`${product.nombre} ${product.descripcion || ""} ${product.departamento || ""}`),
     }))
 
+    const processTime = performance.now() - processStart
+    console.log(`[v0] ✅ Productos procesados: ${state.products.length}`)
+    console.log(`[v0] ⏱️ Tiempo de procesamiento: ${processTime.toFixed(2)}ms`)
+    console.log(`[v0] 🎉 Carga completa! Total de productos disponibles: ${state.products.length}`)
+
+    state.isLoading = false
     renderProducts()
   } catch (error) {
-    console.error("[v0] Error en loadProducts:", error)
+    console.error("[v0] ❌ Error crítico en loadProducts:", error)
+    state.isLoading = false
+    hideProductsLoading()
   }
 }
-// </CHANGE>
+
+function showProductsLoading() {
+  document.getElementById("products-loading").classList.remove("hidden")
+  document.getElementById("products-grid").classList.add("hidden")
+  document.getElementById("no-products").classList.add("hidden")
+}
+
+function hideProductsLoading() {
+  document.getElementById("products-loading").classList.add("hidden")
+}
 
 function renderDepartments() {
   const container = document.getElementById("departments-nav")
-  container.innerHTML = ""
-
-  state.departments.forEach((dept) => {
-    const button = document.createElement("button")
-    button.className = "dept-button whitespace-nowrap px-6 py-3 rounded-lg font-medium transition-all"
-    button.textContent = dept
-    button.dataset.dept = dept
-
-    button.addEventListener("click", () => {
-      state.currentDepartment = dept
-      state.deptSearchQuery = ""
-      document.getElementById("dept-search").value = ""
-      updateDepartmentButtons()
-      renderProducts()
-    })
-
-    container.appendChild(button)
-  })
-
-  document.querySelector('[data-dept="all"]').addEventListener("click", () => {
-    state.currentDepartment = "all"
-    state.deptSearchQuery = ""
-    document.getElementById("dept-search").value = ""
-    updateDepartmentButtons()
-    renderProducts()
-  })
-
-  updateDepartmentButtons()
-
   const sidebarContainer = document.getElementById("sidebar-departments")
+
+  container.innerHTML = ""
   sidebarContainer.innerHTML = ""
 
   state.departments.forEach((dept) => {
+    // Botón en navbar
     const button = document.createElement("button")
-    button.className =
-      "sidebar-dept-btn w-full text-left px-4 py-3 rounded-lg hover:bg-white/10 transition-all font-medium"
+    button.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
     button.textContent = dept
     button.dataset.dept = dept
+    button.addEventListener("click", () => selectDepartment(dept))
+    container.appendChild(button)
 
-    button.addEventListener("click", () => {
-      state.currentDepartment = dept
-      state.deptSearchQuery = ""
-      updateSidebarButtons()
-      renderProducts()
+    // Botón en sidebar
+    const sidebarBtn = document.createElement("button")
+    sidebarBtn.className =
+      "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
+    sidebarBtn.textContent = `📁 ${dept}`
+    sidebarBtn.dataset.dept = dept
+    sidebarBtn.addEventListener("click", () => {
+      selectDepartment(dept)
       closeSidebar()
     })
-
-    sidebarContainer.appendChild(button)
+    sidebarContainer.appendChild(sidebarBtn)
   })
 
-  document.querySelector('[data-dept="all"]').addEventListener("click", () => {
-    state.currentDepartment = "all"
-    state.deptSearchQuery = ""
-    updateSidebarButtons()
-    renderProducts()
-    closeSidebar()
-  })
+  updateDepartmentButtons()
+}
 
-  updateSidebarButtons()
+function selectDepartment(dept) {
+  state.currentDepartment = dept
+  state.deptSearchQuery = ""
+  document.getElementById("dept-search").value = ""
+  updateDepartmentButtons()
+  renderProducts()
 }
 
 function updateDepartmentButtons() {
-  document.querySelectorAll(".dept-button").forEach((btn) => {
-    btn.classList.remove("active")
-    if (btn.dataset.dept === state.currentDepartment) {
-      btn.classList.add("active")
-    }
+  document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.dept === state.currentDepartment)
   })
 
   const deptSearchContainer = document.getElementById("dept-search-container")
-  if (state.currentDepartment !== "all") {
-    deptSearchContainer.classList.remove("hidden")
-  } else {
-    deptSearchContainer.classList.add("hidden")
-  }
-}
-
-function updateSidebarButtons() {
-  document.querySelectorAll(".sidebar-dept-btn").forEach((btn) => {
-    btn.classList.remove("active")
-    if (btn.dataset.dept === state.currentDepartment) {
-      btn.classList.add("active")
-    }
-  })
+  deptSearchContainer.classList.toggle("hidden", state.currentDepartment === "all")
 }
 
 function renderProducts() {
   const container = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
+  hideProductsLoading()
+
   let filteredProducts = state.products
 
+  console.log(`[v0] 🔍 Iniciando filtrado de productos...`)
+  console.log(`[v0] 📦 Total de productos antes de filtrar: ${filteredProducts.length}`)
+
+  // Búsqueda global
   if (state.searchQuery) {
-    const normalizedQuery = normalizeText(state.searchQuery)
-    filteredProducts = filteredProducts.filter((p) => p._searchText.includes(normalizedQuery))
+    filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.searchQuery))
+    console.log(`[v0] 🔎 Búsqueda global: "${state.searchQuery}" - Resultados: ${filteredProducts.length}`)
   } else {
+    // Filtro por departamento
     if (state.currentDepartment !== "all") {
+      const beforeDeptFilter = filteredProducts.length
       filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
+      console.log(
+        `[v0] 📁 Filtro por departamento: "${state.currentDepartment}" - ${beforeDeptFilter} → ${filteredProducts.length}`,
+      )
     }
 
+    // Búsqueda dentro del departamento
     if (state.deptSearchQuery && state.currentDepartment !== "all") {
-      const normalizedDeptQuery = normalizeText(state.deptSearchQuery)
-      filteredProducts = filteredProducts.filter((p) => p._searchText.includes(normalizedDeptQuery))
+      const beforeDeptSearch = filteredProducts.length
+      filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.deptSearchQuery))
+      console.log(
+        `[v0] 🔎 Búsqueda en departamento: "${state.deptSearchQuery}" - ${beforeDeptSearch} → ${filteredProducts.length}`,
+      )
     }
   }
 
+  console.log(`[v0] ✅ Productos a mostrar: ${filteredProducts.length}`)
+
   if (filteredProducts.length === 0) {
     container.innerHTML = ""
+    container.classList.add("hidden")
     noProducts.classList.remove("hidden")
+    console.log("[v0] ℹ️ No hay productos para mostrar")
     return
   }
 
   noProducts.classList.add("hidden")
+  container.classList.remove("hidden")
   container.innerHTML = ""
 
-  // Usar DocumentFragment para mejor rendimiento
   const fragment = document.createDocumentFragment()
 
   filteredProducts.forEach((product) => {
@@ -495,90 +528,87 @@ function renderProducts() {
   })
 
   container.appendChild(fragment)
+  console.log(`[v0] 🎨 Renderizado completo: ${filteredProducts.length} productos mostrados`)
 }
-// </CHANGE>
 
 function createProductCard(product) {
   const card = document.createElement("div")
   card.className = "product-card fade-in"
 
   let pricesHTML = ""
+  let cartPrice = 0
 
   if (state.userRole === "cliente") {
+    cartPrice = product.precio_cliente
     pricesHTML = `
       <div>
-        <span class="text-xs text-gray-500">Detal</span>
-        <span class="price-badge block mt-1">$${product.precio_cliente.toFixed(2)}</span>
+        <span class="text-xs text-gray-500 font-medium">Precio Detal</span>
+        <div class="price-badge mt-1">$${product.precio_cliente.toFixed(2)}</div>
       </div>
     `
-  } else if (state.userRole === "distribuidor") {
-    pricesHTML = `
-      <div class="space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Detal:</span>
-          <span class="text-sm font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-red-600">Mayor:</span>
-          <span class="price-badge text-sm">$${product.precio_distribuidor.toFixed(2)}</span>
-        </div>
-      </div>
-    `
-  } else {
-    pricesHTML = `
-      <div class="space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Detal:</span>
-          <span class="text-xs font-semibold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Mayor:</span>
-          <span class="text-xs font-semibold text-gray-700">$${product.precio_distribuidor.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-red-600">GMayor:</span>
-          <span class="price-badge text-sm">$${product.precio_gmayor.toFixed(2)}</span>
-        </div>
-      </div>
-    `
-  }
-
-  let cartPrice = 0
-  if (state.userRole === "admin") {
-    cartPrice = product.precio_gmayor || product.precio_distribuidor || product.precio_cliente
   } else if (state.userRole === "distribuidor") {
     cartPrice = product.precio_distribuidor || product.precio_cliente
+    pricesHTML = `
+      <div class="space-y-1">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-gray-500">Detal:</span>
+          <span class="text-sm font-bold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-red-600 font-semibold">Mayor:</span>
+          <div class="price-badge text-sm">$${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}</div>
+        </div>
+      </div>
+    `
   } else {
-    cartPrice = product.precio_cliente
+    cartPrice = product.precio_gmayor || product.precio_distribuidor || product.precio_cliente
+    pricesHTML = `
+      <div class="space-y-1 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-gray-500">Detal:</span>
+          <span class="font-bold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-gray-500">Mayor:</span>
+          <span class="font-bold text-gray-700">$${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-red-600 font-semibold">GMayor:</span>
+          <div class="price-badge text-xs py-1 px-2">$${(product.precio_gmayor || product.precio_distribuidor || product.precio_cliente).toFixed(2)}</div>
+        </div>
+      </div>
+    `
   }
 
+  const placeholderImage =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
+
   card.innerHTML = `
-        <div class="product-image-container">
-            <img src="${product.imagen_url || "/generic-product-display.png"}" 
-                 alt="${product.nombre}" 
-                 class="product-image"
-                 loading="lazy"
-                 onerror="this.src='/generic-product-display.png'">
-        </div>
-        <div class="p-4">
-            <div class="mb-2">
-                <span class="text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">
-                    ${product.departamento || "General"}
-                </span>
-            </div>
-            <h3 class="text-lg font-bold text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
-            <p class="text-sm text-gray-600 mb-4 line-clamp-2">${product.descripcion || "Sin descripción"}</p>
-            <div class="flex items-center justify-between">
-                ${pricesHTML}
-                <button class="add-to-cart-btn bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-all font-medium shadow-lg transform hover:scale-105"
-                        data-product-id="${product.id}"
-                        data-price="${cartPrice}">
-                    Agregar
-                </button>
-            </div>
-        </div>
-    `
-  // </CHANGE>
+    <div class="product-image-container">
+      <img src="${product.imagen_url || placeholderImage}" 
+           alt="${product.nombre}" 
+           class="product-image"
+           loading="lazy"
+           onerror="this.src='${placeholderImage}'">
+    </div>
+    <div class="p-4">
+      <div class="mb-2">
+        <span class="text-xs font-bold text-red-600 bg-red-50 px-3 py-1 rounded-full">
+          ${product.departamento || "General"}
+        </span>
+      </div>
+      <h3 class="text-base font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3rem]">${product.nombre}</h3>
+      <p class="text-sm text-gray-600 mb-4 line-clamp-2 min-h-[2.5rem]">${product.descripcion || "Sin descripción disponible"}</p>
+      <div class="flex items-end justify-between gap-3">
+        ${pricesHTML}
+        <button class="add-to-cart-btn bg-gradient-to-r from-red-600 to-red-700 text-white px-4 py-2.5 rounded-xl hover:from-red-700 hover:to-red-800 transition-all font-semibold shadow-lg transform hover:scale-105 text-sm whitespace-nowrap"
+                data-product-id="${product.id}"
+                data-price="${cartPrice}">
+          Agregar
+        </button>
+      </div>
+    </div>
+  `
 
   card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
     const price = Number.parseFloat(e.currentTarget.dataset.price)
@@ -595,16 +625,19 @@ function openQuantityModal(product) {
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
 
+  const placeholderImage =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
+
   productInfo.innerHTML = `
     <div class="flex items-center space-x-4">
-      <img src="${product.imagen_url || "/generic-product-display.png"}" 
+      <img src="${product.imagen_url || placeholderImage}" 
            alt="${product.nombre}" 
-           class="w-20 h-20 object-cover rounded-lg"
+           class="w-20 h-20 object-cover rounded-xl shadow-md"
            loading="lazy"
-           onerror="this.src='/generic-product-display.png'">
+           onerror="this.src='${placeholderImage}'">
       <div class="flex-1">
-        <h3 class="font-bold text-gray-800 mb-1">${product.nombre}</h3>
-        <p class="text-red-600 font-bold text-lg">$${product.cartPrice.toFixed(2)}</p>
+        <h3 class="font-bold text-gray-900 mb-1 text-sm">${product.nombre}</h3>
+        <p class="text-red-600 font-black text-xl">$${product.cartPrice.toFixed(2)}</p>
       </div>
     </div>
   `
@@ -624,9 +657,7 @@ function closeQuantityModal() {
 function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
 
-  if (!state.pendingProduct || quantity < 1) {
-    return
-  }
+  if (!state.pendingProduct || quantity < 1) return
 
   addToCart(state.pendingProduct, quantity)
   closeQuantityModal()
@@ -634,7 +665,6 @@ function confirmQuantity() {
 
 function addToCart(product, quantity = 1) {
   const price = product.cartPrice || product.precio_cliente
-
   const existingItem = state.cart.find((item) => item.id === product.id)
 
   if (existingItem) {
@@ -644,8 +674,8 @@ function addToCart(product, quantity = 1) {
       id: product.id,
       nombre: product.nombre,
       descripcion: product.descripcion || "",
-      price: price,
-      quantity: quantity,
+      price,
+      quantity,
       imagen_url: product.imagen_url,
     })
   }
@@ -673,20 +703,22 @@ function renderCart() {
 
   if (state.cart.length === 0) {
     container.innerHTML = `
-            <div class="text-center py-12">
-                <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                </svg>
-                <p class="text-gray-500 text-lg">Tu carrito está vacío</p>
-            </div>
-        `
-
+      <div class="text-center py-12">
+        <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
+        </svg>
+        <p class="text-gray-500 text-lg font-medium">Tu carrito está vacío</p>
+      </div>
+    `
     totalElement.textContent = "$0.00"
     return
   }
 
   container.innerHTML = ""
   let total = 0
+
+  const placeholderImage =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
 
   state.cart.forEach((item) => {
     const itemTotal = item.price * item.quantity
@@ -695,41 +727,40 @@ function renderCart() {
     const cartItem = document.createElement("div")
     cartItem.className = "cart-item"
     cartItem.innerHTML = `
-            <div class="flex items-center space-x-4">
-                <img src="${item.imagen_url || "/generic-product-display.png"}" 
-                     alt="${item.nombre}" 
-                     class="w-20 h-20 object-cover rounded-lg"
-                     loading="lazy"
-                     onerror="this.src='/generic-product-display.png'">
-                <div class="flex-1">
-                    <h4 class="font-semibold text-gray-800 mb-1">${item.nombre}</h4>
-                    <p class="text-red-600 font-bold">$${item.price.toFixed(2)}</p>
-                </div>
-                <div class="flex items-center space-x-3">
-                    <button class="quantity-button decrease-btn" data-product-id="${item.id}">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
-                        </svg>
-                    </button>
-                    <span class="font-semibold text-gray-800 w-8 text-center">${item.quantity}</span>
-                    <button class="quantity-button increase-btn" data-product-id="${item.id}">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                        </svg>
-                    </button>
-                    <button class="ml-2 p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all remove-btn" data-product-id="${item.id}">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <div class="mt-2 text-right">
-                <span class="text-sm text-gray-600">Subtotal: </span>
-                <span class="font-bold text-gray-800">$${itemTotal.toFixed(2)}</span>
-            </div>
-        `
-
+      <div class="flex items-center space-x-4">
+        <img src="${item.imagen_url || placeholderImage}" 
+             alt="${item.nombre}" 
+             class="w-20 h-20 object-cover rounded-xl shadow-sm"
+             loading="lazy"
+             onerror="this.src='${placeholderImage}'">
+        <div class="flex-1 min-w-0">
+          <h4 class="font-bold text-gray-900 mb-1 truncate">${item.nombre}</h4>
+          <p class="text-red-600 font-black text-lg">$${item.price.toFixed(2)}</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button class="quantity-button decrease-btn" data-product-id="${item.id}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+            </svg>
+          </button>
+          <span class="font-black text-gray-900 w-10 text-center text-lg">${item.quantity}</span>
+          <button class="quantity-button increase-btn" data-product-id="${item.id}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+          </button>
+          <button class="ml-2 p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all remove-btn" data-product-id="${item.id}">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="mt-3 text-right border-t border-gray-100 pt-2">
+        <span class="text-sm text-gray-600 font-medium">Subtotal: </span>
+        <span class="font-black text-gray-900 text-lg">$${itemTotal.toFixed(2)}</span>
+      </div>
+    `
     container.appendChild(cartItem)
   })
 
@@ -784,19 +815,28 @@ function sendWhatsAppOrder() {
     return
   }
 
-  let message = "NUEVO PEDIDO - SONIMAX MOVIL\n\n"
-  message += `Cliente: ${state.userName}\n\n`
-  message += "PRODUCTOS:\n"
+  let message = "🛒 *NUEVO PEDIDO - SONIMAX MÓVIL*\n\n"
+  message += `👤 *Cliente:* ${state.userName}\n`
+  message += `📋 *Rol:* ${state.userRole}\n\n`
+  message += "*PRODUCTOS:*\n"
+  message += "━━━━━━━━━━━━━━━━\n\n"
 
+  let total = 0
   state.cart.forEach((item, index) => {
-    message += `${index + 1}. ${item.nombre}\n`
+    const itemTotal = item.price * item.quantity
+    total += itemTotal
+    message += `${index + 1}. *${item.nombre}*\n`
     if (item.descripcion) {
       message += `   ${item.descripcion}\n`
     }
-    message += `   Cantidad: ${item.quantity}\n\n`
+    message += `   💰 Precio: $${item.price.toFixed(2)}\n`
+    message += `   📦 Cantidad: ${item.quantity}\n`
+    message += `   💵 Subtotal: $${itemTotal.toFixed(2)}\n\n`
   })
 
-  message += "Gracias por tu pedido"
+  message += "━━━━━━━━━━━━━━━━\n"
+  message += `*TOTAL: $${total.toFixed(2)}*\n\n`
+  message += "¡Gracias por tu pedido! 🙏"
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://wa.me/?text=${encodedMessage}`
@@ -805,11 +845,9 @@ function sendWhatsAppOrder() {
 
   state.cart = []
   clearCartFromLocalStorage()
-
   updateCartUI()
   closeCart()
 }
-// </CHANGE>
 
 function openCSVModal() {
   document.getElementById("csv-modal").classList.remove("hidden")
@@ -826,7 +864,7 @@ function handleCSVFileSelect(e) {
   const file = e.target.files[0]
   if (file) {
     const fileNameDiv = document.getElementById("csv-file-name")
-    fileNameDiv.textContent = `Archivo seleccionado: ${file.name}`
+    fileNameDiv.textContent = `📄 Archivo seleccionado: ${file.name}`
     fileNameDiv.classList.remove("hidden")
   }
 }
@@ -851,33 +889,43 @@ async function handleCSVUpload() {
   submitBtn.textContent = "Procesando..."
 
   try {
+    console.log("[v0] 📤 Iniciando carga de CSV...")
+    console.log(`[v0] 📄 Archivo: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`)
+
     const text = await file.text()
     const lines = text.split("\n").filter((line) => line.trim())
+
+    console.log(`[v0] 📋 Total de líneas en CSV: ${lines.length}`)
 
     if (lines.length < 2) {
       throw new Error("El archivo CSV está vacío o no tiene datos")
     }
 
-    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
+    const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase())
+    console.log(`[v0] 📊 Columnas detectadas: ${headers.join(", ")}`)
 
-    const codigoIdx = headers.findIndex((h) => h === "codigo")
-    const descripcionIdx = headers.findIndex((h) => h === "descripcion")
-    const detalIdx = headers.findIndex((h) => h === "detal")
-    const mayorIdx = headers.findIndex((h) => h === "mayor")
-    const gmayorIdx = headers.findIndex((h) => h === "gmayor")
-    const departamentoIdx = headers.findIndex((h) => h === "departamento")
-    const urlIdx = headers.findIndex((h) => h === "url")
+    const codigoIdx = headers.indexOf("codigo")
+    const descripcionIdx = headers.indexOf("descripcion")
+    const detalIdx = headers.indexOf("detal")
+    const mayorIdx = headers.indexOf("mayor")
+    const gmayorIdx = headers.indexOf("gmayor")
+    const departamentoIdx = headers.indexOf("departamento")
+    const urlIdx = headers.indexOf("url")
 
-    if (codigoIdx === -1 || descripcionIdx === -1 || detalIdx === -1 || mayorIdx === -1 || gmayorIdx === -1) {
-      throw new Error("El CSV debe contener las columnas: codigo, descripcion, detal, mayor, gmayor")
+    if (codigoIdx === -1 || descripcionIdx === -1 || detalIdx === -1 || mayorIdx === -1) {
+      throw new Error("El CSV debe contener: codigo, descripcion, detal, mayor")
     }
 
     const products = []
+    let skippedLines = 0
+
+    console.log("[v0] 🔄 Procesando productos del CSV...")
 
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(",").map((v) => v.trim())
+      const values = parseCSVLine(lines[i])
 
-      if (values.length < Math.max(codigoIdx, descripcionIdx, detalIdx, mayorIdx, gmayorIdx) + 1) {
+      if (values.length < 3) {
+        skippedLines++
         continue
       }
 
@@ -886,36 +934,53 @@ async function handleCSVUpload() {
         descripcion: values[descripcionIdx] || "",
         precio_cliente: Number.parseFloat(values[detalIdx]) || 0,
         precio_distribuidor: Number.parseFloat(values[mayorIdx]) || 0,
-        precio_gmayor: Number.parseFloat(values[gmayorIdx]) || 0,
+        precio_gmayor: gmayorIdx !== -1 ? Number.parseFloat(values[gmayorIdx]) || 0 : 0,
         departamento: departamentoIdx !== -1 ? values[departamentoIdx] || "General" : "General",
         imagen_url: urlIdx !== -1 ? values[urlIdx] || null : null,
       }
 
-      products.push(product)
+      if (product.precio_cliente > 0) {
+        products.push(product)
+      } else {
+        skippedLines++
+      }
     }
+
+    console.log(`[v0] ✅ Productos válidos parseados: ${products.length}`)
+    console.log(`[v0] ⚠️ Líneas omitidas: ${skippedLines}`)
 
     if (products.length === 0) {
-      throw new Error("No se pudieron parsear productos del CSV")
+      throw new Error("No se pudieron parsear productos válidos del CSV")
     }
 
+    console.log("[v0] 🗑️ Eliminando productos existentes...")
     const { error: deleteError } = await supabaseClient.from("products").delete().neq("id", 0)
 
     if (deleteError) {
-      throw new Error("Error al eliminar productos existentes: " + deleteError.message)
+      throw new Error("Error al eliminar productos: " + deleteError.message)
     }
 
+    console.log("[v0] 💾 Insertando nuevos productos en lotes de 100...")
     const batchSize = 100
+    let insertedCount = 0
+
     for (let i = 0; i < products.length; i += batchSize) {
       const batch = products.slice(i, i + batchSize)
       const { error } = await supabaseClient.from("products").insert(batch)
-
       if (error) throw error
+      insertedCount += batch.length
+      console.log(
+        `[v0] 📦 Lote ${Math.floor(i / batchSize) + 1}: ${insertedCount}/${products.length} productos insertados`,
+      )
     }
 
-    statusDiv.textContent = `Éxito! ${products.length} productos cargados correctamente`
-    statusDiv.className = "mt-4 p-4 rounded-lg text-sm bg-green-50 text-green-700 border border-green-200"
+    console.log(`[v0] 🎉 ¡Carga completa! Total insertado: ${insertedCount} productos`)
+
+    statusDiv.textContent = `✅ ¡Éxito! ${products.length} productos cargados correctamente`
+    statusDiv.className = "mt-4 p-4 rounded-xl text-sm font-medium bg-green-50 text-green-700 border border-green-200"
     statusDiv.classList.remove("hidden")
 
+    console.log("[v0] 🔄 Recargando departamentos y productos...")
     await loadDepartments()
     await loadProducts()
 
@@ -923,9 +988,9 @@ async function handleCSVUpload() {
       closeCSVModal()
     }, 2000)
   } catch (error) {
-    console.error("[v0] Error procesando CSV:", error)
-    statusDiv.textContent = `Error: ${error.message}`
-    statusDiv.className = "mt-4 p-4 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200"
+    console.error("[v0] ❌ Error procesando CSV:", error)
+    statusDiv.textContent = `❌ Error: ${error.message}`
+    statusDiv.className = "mt-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
     statusDiv.classList.remove("hidden")
   } finally {
     submitBtn.disabled = false
