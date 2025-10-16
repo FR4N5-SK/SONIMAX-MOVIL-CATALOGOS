@@ -9,6 +9,10 @@ let cart = []
 let currentDepartment = "all"
 let selectedProductForQuantity = null
 
+let currentPage = 1
+const PRODUCTS_PER_PAGE = 50
+let isLoadingMore = false
+
 // ============================================
 // INICIALIZACIÓN
 // ============================================
@@ -488,7 +492,6 @@ async function loadProducts() {
         allProducts = [...allProducts, ...data]
         console.log(`📦 Cargados ${allProducts.length} productos...`)
 
-        // Si recibimos menos de 1000, ya no hay más productos
         if (data.length < batchSize) {
           hasMore = false
         } else {
@@ -500,6 +503,7 @@ async function loadProducts() {
     }
 
     filteredProducts = allProducts
+    currentPage = 1
 
     console.log("[v0] Renderizando departamentos...")
     renderDepartments()
@@ -561,6 +565,8 @@ function filterByDepartment(dept) {
     filteredProducts = allProducts.filter((p) => p.departamento === dept)
   }
 
+  currentPage = 1
+
   // Actualizar botones activos
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
@@ -581,12 +587,15 @@ function filterByDepartment(dept) {
 }
 
 function renderProducts() {
-  console.log("[v0] Renderizando", filteredProducts.length, "productos")
+  console.log("[v0] Renderizando productos, página:", currentPage)
 
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  grid.innerHTML = ""
+  // Solo limpiar el grid si es la primera página
+  if (currentPage === 1) {
+    grid.innerHTML = ""
+  }
 
   if (filteredProducts.length === 0) {
     noProducts.classList.remove("hidden")
@@ -595,16 +604,59 @@ function renderProducts() {
 
   noProducts.classList.add("hidden")
 
-  filteredProducts.forEach((product) => {
+  const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE
+  const endIndex = startIndex + PRODUCTS_PER_PAGE
+  const productsToRender = filteredProducts.slice(startIndex, endIndex)
+
+  const fragment = document.createDocumentFragment()
+
+  productsToRender.forEach((product) => {
     try {
       const card = createProductCard(product)
-      grid.appendChild(card)
+      fragment.appendChild(card)
     } catch (error) {
       console.error("[v0] Error creando tarjeta para producto:", product.nombre, error)
     }
   })
 
-  console.log("[v0] Productos renderizados exitosamente")
+  grid.appendChild(fragment)
+
+  updateLoadMoreButton()
+
+  console.log("[v0] Productos renderizados:", productsToRender.length)
+}
+
+function updateLoadMoreButton() {
+  const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE)
+  let loadMoreBtn = document.getElementById("load-more-btn")
+
+  if (!loadMoreBtn) {
+    loadMoreBtn = document.createElement("button")
+    loadMoreBtn.id = "load-more-btn"
+    loadMoreBtn.className =
+      "w-full max-w-md mx-auto mt-8 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-4 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg"
+    loadMoreBtn.textContent = "Cargar más productos"
+    loadMoreBtn.addEventListener("click", loadMoreProducts)
+
+    const grid = document.getElementById("products-grid")
+    grid.parentElement.appendChild(loadMoreBtn)
+  }
+
+  if (currentPage >= totalPages) {
+    loadMoreBtn.classList.add("hidden")
+  } else {
+    loadMoreBtn.classList.remove("hidden")
+    loadMoreBtn.textContent = `Cargar más productos (${filteredProducts.length - currentPage * PRODUCTS_PER_PAGE} restantes)`
+  }
+}
+
+function loadMoreProducts() {
+  if (isLoadingMore) return
+
+  isLoadingMore = true
+  currentPage++
+  renderProducts()
+  isLoadingMore = false
 }
 
 function createProductCard(product) {
@@ -653,6 +705,7 @@ function createProductCard(product) {
       <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
            class="product-image"
+           loading="lazy"
            onerror="this.src='/generic-product-display.png'">
     </div>
     <div class="p-5">
@@ -1059,9 +1112,8 @@ function sendWhatsAppOrder() {
 
   message += `\n*TOTAL: $${total.toFixed(2)}*`
 
-  const whatsappNumber = "1234567890" // Cambiar por el número real
   const encodedMessage = encodeURIComponent(message)
-  const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`
+  const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
 
@@ -1078,6 +1130,7 @@ function sendWhatsAppOrder() {
 // ============================================
 
 let searchTimeout = null
+let deptSearchTimeout = null
 
 function handleGlobalSearch(e) {
   const query = e.target.value.toLowerCase().trim()
@@ -1086,6 +1139,7 @@ function handleGlobalSearch(e) {
 
   if (query === "") {
     filteredProducts = allProducts
+    currentPage = 1
     renderProducts()
     return
   }
@@ -1100,6 +1154,7 @@ function handleGlobalSearch(e) {
         (p.departamento && p.departamento.toLowerCase().includes(query)),
     )
 
+    currentPage = 1
     renderProducts()
     document.getElementById("search-loading").classList.add("hidden")
   }, 300)
@@ -1108,18 +1163,23 @@ function handleGlobalSearch(e) {
 function handleDeptSearch(e) {
   const query = e.target.value.toLowerCase().trim()
 
+  clearTimeout(deptSearchTimeout)
+
   if (query === "") {
     filterByDepartment(currentDepartment)
     return
   }
 
-  filteredProducts = allProducts.filter(
-    (p) =>
-      p.departamento === currentDepartment &&
-      (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
-  )
+  deptSearchTimeout = setTimeout(() => {
+    filteredProducts = allProducts.filter(
+      (p) =>
+        p.departamento === currentDepartment &&
+        (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
+    )
 
-  renderProducts()
+    currentPage = 1
+    renderProducts()
+  }, 300)
 }
 
 // ============================================
