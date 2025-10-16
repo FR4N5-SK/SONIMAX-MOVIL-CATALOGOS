@@ -721,25 +721,18 @@ function openQuantityModal(product) {
 
   let priceHTML = ""
   if (priceInfo.display === "single") {
-    priceHTML = `<p class="text-red-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
+    priceHTML = `<p class="text-red-600 font-black text-xl">${priceInfo.label}: $${priceInfo.price.toFixed(2)}</p>`
   } else {
-    // Distribuidor/Gestor: mostrar ambos precios y permitir elegir
     priceHTML = `
-      <div class="space-y-2 mb-4">
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
-          <div>
-            <span class="font-semibold text-gray-700">Precio Detal</span>
-            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
-          </div>
-          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
-        </label>
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
-          <div>
-            <span class="font-semibold text-gray-700">Precio Mayor</span>
-            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
-          </div>
-          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
-        </label>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+          <span class="font-semibold text-gray-700">Precio Detal:</span>
+          <span class="text-red-600 font-black text-lg">$${priceInfo.priceCliente.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+          <span class="font-semibold text-gray-700">Precio Mayor:</span>
+          <span class="text-green-600 font-black text-lg">$${priceInfo.priceMayor.toFixed(2)}</span>
+        </div>
       </div>
     `
   }
@@ -763,31 +756,26 @@ function confirmQuantity() {
     return
   }
 
-  const priceInfo = getPriceForRole(selectedProductForQuantity)
-  let selectedPrice
-
-  if (priceInfo.display === "dual") {
-    // Distribuidor/Gestor: obtener el precio seleccionado
-    const priceOption = document.querySelector('input[name="price-option"]:checked')?.value
-    selectedPrice = priceOption === "mayor" ? priceInfo.priceMayor : priceInfo.priceCliente
-  } else {
-    selectedPrice = priceInfo.price
-  }
-
-  addToCart(selectedProductForQuantity, quantity, selectedPrice)
+  addToCart(selectedProductForQuantity, quantity)
   document.getElementById("quantity-modal").classList.add("hidden")
 }
 
-function addToCart(product, quantity, price) {
-  const existingItem = cart.find((item) => item.id === product.id && item.price === price)
+function addToCart(product, quantity) {
+  const existingItem = cart.find((item) => item.id === product.id)
 
   if (existingItem) {
     existingItem.quantity += quantity
   } else {
     cart.push({
-      ...product,
+      id: product.id,
+      nombre: product.nombre,
+      descripcion: product.descripcion,
+      precio_cliente: product.precio_cliente,
+      precio_mayor: product.precio_mayor,
+      precio_gmayor: product.precio_gmayor,
+      departamento: product.departamento,
+      imagen_url: product.imagen_url,
       quantity: quantity,
-      price: price,
     })
   }
 
@@ -795,7 +783,7 @@ function addToCart(product, quantity, price) {
   updateCartCount()
   animateCartButton()
 
-  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}`)
+  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity}`)
 }
 
 function updateCartCount() {
@@ -822,7 +810,7 @@ function renderCart() {
         <p class="text-gray-500 text-lg font-medium">Tu carrito está vacío</p>
       </div>
     `
-    cartTotal.textContent = "$0.00"
+    cartTotal.innerHTML = ""
     return
   }
 
@@ -837,7 +825,7 @@ function renderCart() {
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
-          <p class="text-red-600 font-bold text-lg">$${item.price.toFixed(2)}</p>
+          <p class="text-sm text-gray-600">${item.departamento || ""}</p>
         </div>
       </div>
       <div class="flex items-center justify-between mt-4">
@@ -855,8 +843,45 @@ function renderCart() {
     )
     .join("")
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  cartTotal.textContent = `$${total.toFixed(2)}`
+  let totalHTML = ""
+
+  if (currentUserRole === "cliente") {
+    // Cliente: solo total en detal
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    totalHTML = `
+      <div class="text-right">
+        <p class="text-sm text-gray-600 mb-1">Total Detal:</p>
+        <p class="text-3xl font-black text-red-600">$${totalDetal.toFixed(2)}</p>
+      </div>
+    `
+  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
+    // Distribuidor/Gestor: total en detal Y total en mayor
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
+    totalHTML = `
+      <div class="space-y-3">
+        <div class="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+          <span class="font-semibold text-gray-700">Total Detal:</span>
+          <span class="text-2xl font-black text-red-600">$${totalDetal.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+          <span class="font-semibold text-gray-700">Total Mayor:</span>
+          <span class="text-2xl font-black text-green-600">$${totalMayor.toFixed(2)}</span>
+        </div>
+      </div>
+    `
+  } else if (currentUserRole === "admin") {
+    // Admin: total en gran mayor
+    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
+    totalHTML = `
+      <div class="text-right">
+        <p class="text-sm text-gray-600 mb-1">Total Gran Mayor:</p>
+        <p class="text-3xl font-black text-blue-600">$${totalGMayor.toFixed(2)}</p>
+      </div>
+    `
+  }
+
+  cartTotal.innerHTML = totalHTML
 }
 
 function updateCartItemQuantity(productId, change) {
@@ -891,7 +916,19 @@ function sendWhatsAppOrder() {
     return
   }
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  let totalsText = ""
+
+  if (currentUserRole === "cliente") {
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    totalsText = `*TOTAL DETAL: $${totalDetal.toFixed(2)}*`
+  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
+    totalsText = `*TOTAL DETAL: $${totalDetal.toFixed(2)}*\n*TOTAL MAYOR: $${totalMayor.toFixed(2)}*`
+  } else if (currentUserRole === "admin") {
+    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
+    totalsText = `*TOTAL GRAN MAYOR: $${totalGMayor.toFixed(2)}*`
+  }
 
   let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
   message += `*Cliente:* ${currentUser.name}\n`
@@ -902,24 +939,33 @@ function sendWhatsAppOrder() {
   cart.forEach((item, index) => {
     message += `\n${index + 1}. *${item.nombre}*\n`
     message += `   Cantidad: ${item.quantity}\n`
-    message += `   Precio: $${item.price.toFixed(2)}\n`
-    message += `   Subtotal: $${(item.price * item.quantity).toFixed(2)}\n`
+
+    // Mostrar precios según el rol
+    if (currentUserRole === "cliente") {
+      message += `   Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
+      message += `   Subtotal: $${(item.precio_cliente * item.quantity).toFixed(2)}\n`
+    } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
+      message += `   Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
+      message += `   Precio Mayor: $${item.precio_mayor.toFixed(2)}\n`
+      message += `   Subtotal Detal: $${(item.precio_cliente * item.quantity).toFixed(2)}\n`
+      message += `   Subtotal Mayor: $${(item.precio_mayor * item.quantity).toFixed(2)}\n`
+    } else if (currentUserRole === "admin") {
+      message += `   Precio Gran Mayor: $${item.precio_gmayor.toFixed(2)}\n`
+      message += `   Subtotal: $${(item.precio_gmayor * item.quantity).toFixed(2)}\n`
+    }
   })
 
-  message += `\n*TOTAL: $${total.toFixed(2)}*`
+  message += `\n${totalsText}`
 
-  const whatsappNumber = "1234567890" // Cambiar por el número real
-  const encodedMessage = encodeURIComponent(message)
-  const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`
+  const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`
 
   window.open(whatsappURL, "_blank")
 
   clearCart()
 
-  // Cerrar modal del carrito
   document.getElementById("cart-modal").classList.add("hidden")
 
-  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
+  alert("Pedido preparado para WhatsApp. Selecciona el contacto al que deseas enviarlo.")
 }
 
 // ============================================
