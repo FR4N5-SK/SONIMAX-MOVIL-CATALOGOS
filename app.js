@@ -916,46 +916,41 @@ function sendWhatsAppOrder() {
     return
   }
 
-  let totalsText = ""
+  let message = `Hola, quiero comprar los siguientes productos:\n\n`
 
-  if (currentUserRole === "cliente") {
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    totalsText = `*TOTAL DETAL: $${totalDetal.toFixed(2)}*`
-  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
-    totalsText = `*TOTAL DETAL: $${totalDetal.toFixed(2)}*\n*TOTAL MAYOR: $${totalMayor.toFixed(2)}*`
-  } else if (currentUserRole === "admin") {
-    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
-    totalsText = `*TOTAL GRAN MAYOR: $${totalGMayor.toFixed(2)}*`
-  }
+  // Agregar cada producto
+  cart.forEach((item) => {
+    const codigo = item.descripcion ? `${item.descripcion} ` : ""
+    message += `${item.quantity}x ${codigo}"${item.nombre}"\n`
 
-  let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
-  message += `*Cliente:* ${currentUser.name}\n`
-  message += `*Usuario:* ${currentUser.username}\n`
-  message += `*Rol:* ${currentUserRole}\n\n`
-  message += `*PRODUCTOS:*\n`
-
-  cart.forEach((item, index) => {
-    message += `\n${index + 1}. *${item.nombre}*\n`
-    message += `   Cantidad: ${item.quantity}\n`
-
-    // Mostrar precios según el rol
+    // Mostrar precio según el rol
     if (currentUserRole === "cliente") {
-      message += `   Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
-      message += `   Subtotal: $${(item.precio_cliente * item.quantity).toFixed(2)}\n`
+      message += `Precio: $${item.precio_cliente.toFixed(2)}\n\n`
     } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
-      message += `   Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
-      message += `   Precio Mayor: $${item.precio_mayor.toFixed(2)}\n`
-      message += `   Subtotal Detal: $${(item.precio_cliente * item.quantity).toFixed(2)}\n`
-      message += `   Subtotal Mayor: $${(item.precio_mayor * item.quantity).toFixed(2)}\n`
+      message += `Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
+      message += `Precio Mayor: $${item.precio_mayor.toFixed(2)}\n\n`
     } else if (currentUserRole === "admin") {
-      message += `   Precio Gran Mayor: $${item.precio_gmayor.toFixed(2)}\n`
-      message += `   Subtotal: $${(item.precio_gmayor * item.quantity).toFixed(2)}\n`
+      message += `Precio: $${item.precio_gmayor.toFixed(2)}\n\n`
     }
   })
 
-  message += `\n${totalsText}`
+  // Agregar totales según el rol
+  if (currentUserRole === "cliente") {
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    message += `Total: $${totalDetal.toFixed(2)}\n\n`
+  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
+    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
+    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
+    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+    message += `Total Mayor: $${totalMayor.toFixed(2)}\n\n`
+  } else if (currentUserRole === "admin") {
+    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
+    message += `Total: $${totalGMayor.toFixed(2)}\n\n`
+  }
+
+  // Agregar nombre del usuario y mensaje de cierre
+  message += `Mi nombre: ${currentUser.name}\n\n`
+  message += `Por favor, contáctame para el pedido.`
 
   const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`
 
