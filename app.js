@@ -8,6 +8,8 @@ let filteredProducts = []
 let cart = []
 let currentDepartment = "all"
 let selectedProductForQuantity = null
+let displayedProductsCount = 0
+const PRODUCTS_PER_BATCH = 50
 
 // ============================================
 // INICIALIZACIÓN
@@ -497,6 +499,9 @@ async function loadProducts() {
     filteredProducts = allProducts
 
     renderDepartments()
+    // Inicializar el contador de productos mostrados y el grid
+    displayedProductsCount = 0
+    document.getElementById("products-grid").innerHTML = ""
     renderProducts()
 
     console.log(`✅ ${allProducts.length} productos cargados en total`)
@@ -553,7 +558,8 @@ function filterByDepartment(dept) {
     filteredProducts = allProducts.filter((p) => p.departamento === dept)
   }
 
-  // Actualizar botones activos
+  displayedProductsCount = 0
+
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
     if (btn.dataset.dept === dept) {
@@ -561,7 +567,6 @@ function filterByDepartment(dept) {
     }
   })
 
-  // Mostrar/ocultar búsqueda por departamento
   const deptSearchContainer = document.getElementById("dept-search-container")
   if (dept === "all") {
     deptSearchContainer.classList.add("hidden")
@@ -569,6 +574,7 @@ function filterByDepartment(dept) {
     deptSearchContainer.classList.remove("hidden")
   }
 
+  document.getElementById("products-grid").innerHTML = ""
   renderProducts()
 }
 
@@ -576,19 +582,54 @@ function renderProducts() {
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  grid.innerHTML = ""
+  if (displayedProductsCount === 0) {
+    grid.innerHTML = ""
+  }
 
   if (filteredProducts.length === 0) {
     noProducts.classList.remove("hidden")
+    grid.innerHTML = ""
     return
   }
 
   noProducts.classList.add("hidden")
 
-  filteredProducts.forEach((product) => {
-    const card = createProductCard(product)
+  const startIndex = displayedProductsCount
+  const endIndex = Math.min(startIndex + PRODUCTS_PER_BATCH, filteredProducts.length)
+
+  for (let i = startIndex; i < endIndex; i++) {
+    const card = createProductCard(filteredProducts[i])
     grid.appendChild(card)
-  })
+  }
+
+  displayedProductsCount = endIndex
+
+  if (displayedProductsCount < filteredProducts.length) {
+    setupInfiniteScroll()
+  }
+}
+
+function setupInfiniteScroll() {
+  const grid = document.getElementById("products-grid")
+  const lastCard = grid.lastElementChild
+
+  if (!lastCard) return
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting && displayedProductsCount < filteredProducts.length) {
+          observer.disconnect()
+          renderProducts()
+        }
+      })
+    },
+    {
+      rootMargin: "200px",
+    },
+  )
+
+  observer.observe(lastCard)
 }
 
 function createProductCard(product) {
@@ -621,6 +662,7 @@ function createProductCard(product) {
       <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
            class="product-image"
+           loading="lazy"
            onerror="this.src='/generic-product-display.png'">
     </div>
     <div class="p-5">
@@ -948,7 +990,6 @@ function sendWhatsAppOrder() {
     message += `Total: $${totalGMayor.toFixed(2)}\n\n`
   }
 
-  // Agregar nombre del usuario y mensaje de cierre
   message += `Mi nombre: ${currentUser.name}\n\n`
   message += `Por favor, contáctame para el pedido.`
 
@@ -976,6 +1017,8 @@ function handleGlobalSearch(e) {
 
   if (query === "") {
     filteredProducts = allProducts
+    displayedProductsCount = 0
+    document.getElementById("products-grid").innerHTML = ""
     renderProducts()
     return
   }
@@ -990,6 +1033,8 @@ function handleGlobalSearch(e) {
         (p.departamento && p.departamento.toLowerCase().includes(query)),
     )
 
+    displayedProductsCount = 0
+    document.getElementById("products-grid").innerHTML = ""
     renderProducts()
     document.getElementById("search-loading").classList.add("hidden")
   }, 300)
@@ -1009,6 +1054,8 @@ function handleDeptSearch(e) {
       (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
   )
 
+  displayedProductsCount = 0
+  document.getElementById("products-grid").innerHTML = ""
   renderProducts()
 }
 
