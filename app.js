@@ -8,8 +8,6 @@ let filteredProducts = []
 let cart = []
 let currentDepartment = "all"
 let selectedProductForQuantity = null
-let displayedProductsCount = 0
-const PRODUCTS_PER_BATCH = 50
 
 // ============================================
 // INICIALIZACIÓN
@@ -122,10 +120,10 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
       .eq("auth_id", data.user.id)
 
     if (updateError) {
-      console.error("[v0] Error actualizando usuario:", updateError)
+      console.error("Error actualizando usuario:", updateError)
     }
 
-    console.log("[v0] ✅ Registro exitoso")
+    console.log("✅ Registro exitoso")
     showAuthMessage("¡Cuenta creada exitosamente! Iniciando sesión...", "success")
 
     setTimeout(async () => {
@@ -133,7 +131,7 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
       showApp()
     }, 1500)
   } catch (error) {
-    console.error("[v0] ❌ Error en registro:", error)
+    console.error("❌ Error en registro:", error)
     showAuthMessage(
       error.message === "El nombre de usuario ya está en uso"
         ? error.message
@@ -213,25 +211,25 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
 
 // Cargar datos del usuario
 async function loadUserData(userId) {
-  console.log("[v0] Cargando datos del usuario:", userId)
+  console.log("Cargando datos del usuario:", userId)
 
   try {
     const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
 
     if (error) {
-      console.error("[v0] Error obteniendo datos:", error)
+      console.error("Error obteniendo datos:", error)
       throw error
     }
 
     if (!data) {
-      console.error("[v0] No se encontró el usuario")
+      console.error("No se encontró el usuario")
       throw new Error("Usuario no encontrado")
     }
 
     currentUser = data
     currentUserRole = data.role
 
-    console.log("[v0] ✅ Datos de usuario cargados:", {
+    console.log("✅ Datos de usuario cargados:", {
       username: data.username,
       name: data.name,
       role: data.role,
@@ -239,7 +237,7 @@ async function loadUserData(userId) {
 
     updateUIForRole()
   } catch (error) {
-    console.error("[v0] ❌ Error al cargar datos del usuario:", error)
+    console.error("❌ Error al cargar datos del usuario:", error)
     // Si hay error, cerrar sesión
     await window.supabaseClient.auth.signOut()
     showLogin()
@@ -247,6 +245,8 @@ async function loadUserData(userId) {
 }
 
 function updateUIForRole() {
+  console.log("[v0] Actualizando UI para rol:", currentUserRole)
+
   const roleBadge = document.getElementById("user-role-badge")
   const adminSection = document.getElementById("admin-section")
   const gestorSection = document.getElementById("gestor-section")
@@ -294,6 +294,7 @@ function showLogin() {
 }
 
 function showApp() {
+  console.log("[v0] Mostrando app...")
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
@@ -462,6 +463,8 @@ function closeSidebar() {
 // ============================================
 
 async function loadProducts() {
+  console.log("[v0] Iniciando carga de productos...")
+
   try {
     document.getElementById("products-loading").classList.remove("hidden")
     document.getElementById("products-grid").innerHTML = ""
@@ -498,10 +501,10 @@ async function loadProducts() {
 
     filteredProducts = allProducts
 
+    console.log("[v0] Renderizando departamentos...")
     renderDepartments()
-    // Inicializar el contador de productos mostrados y el grid
-    displayedProductsCount = 0
-    document.getElementById("products-grid").innerHTML = ""
+
+    console.log("[v0] Renderizando productos...")
     renderProducts()
 
     console.log(`✅ ${allProducts.length} productos cargados en total`)
@@ -558,8 +561,7 @@ function filterByDepartment(dept) {
     filteredProducts = allProducts.filter((p) => p.departamento === dept)
   }
 
-  displayedProductsCount = 0
-
+  // Actualizar botones activos
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
     if (btn.dataset.dept === dept) {
@@ -567,6 +569,7 @@ function filterByDepartment(dept) {
     }
   })
 
+  // Mostrar/ocultar búsqueda por departamento
   const deptSearchContainer = document.getElementById("dept-search-container")
   if (dept === "all") {
     deptSearchContainer.classList.add("hidden")
@@ -574,62 +577,34 @@ function filterByDepartment(dept) {
     deptSearchContainer.classList.remove("hidden")
   }
 
-  document.getElementById("products-grid").innerHTML = ""
   renderProducts()
 }
 
 function renderProducts() {
+  console.log("[v0] Renderizando", filteredProducts.length, "productos")
+
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  if (displayedProductsCount === 0) {
-    grid.innerHTML = ""
-  }
+  grid.innerHTML = ""
 
   if (filteredProducts.length === 0) {
     noProducts.classList.remove("hidden")
-    grid.innerHTML = ""
     return
   }
 
   noProducts.classList.add("hidden")
 
-  const startIndex = displayedProductsCount
-  const endIndex = Math.min(startIndex + PRODUCTS_PER_BATCH, filteredProducts.length)
+  filteredProducts.forEach((product) => {
+    try {
+      const card = createProductCard(product)
+      grid.appendChild(card)
+    } catch (error) {
+      console.error("[v0] Error creando tarjeta para producto:", product.nombre, error)
+    }
+  })
 
-  for (let i = startIndex; i < endIndex; i++) {
-    const card = createProductCard(filteredProducts[i])
-    grid.appendChild(card)
-  }
-
-  displayedProductsCount = endIndex
-
-  if (displayedProductsCount < filteredProducts.length) {
-    setupInfiniteScroll()
-  }
-}
-
-function setupInfiniteScroll() {
-  const grid = document.getElementById("products-grid")
-  const lastCard = grid.lastElementChild
-
-  if (!lastCard) return
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting && displayedProductsCount < filteredProducts.length) {
-          observer.disconnect()
-          renderProducts()
-        }
-      })
-    },
-    {
-      rootMargin: "200px",
-    },
-  )
-
-  observer.observe(lastCard)
+  console.log("[v0] Productos renderizados exitosamente")
 }
 
 function createProductCard(product) {
@@ -641,8 +616,7 @@ function createProductCard(product) {
   let priceHTML = ""
   if (priceInfo.display === "single") {
     priceHTML = `<span class="price-badge">$${priceInfo.price.toFixed(2)}</span>`
-  } else {
-    // Mostrar ambos precios para distribuidor y gestor
+  } else if (priceInfo.display === "dual") {
     priceHTML = `
       <div class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
@@ -655,6 +629,23 @@ function createProductCard(product) {
         </div>
       </div>
     `
+  } else if (priceInfo.display === "triple") {
+    priceHTML = `
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelCliente}:</span>
+          <span class="text-lg font-black text-red-600">$${priceInfo.priceCliente.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelMayor}:</span>
+          <span class="text-lg font-black text-green-600">$${priceInfo.priceMayor.toFixed(2)}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelGmayor}:</span>
+          <span class="text-lg font-black text-blue-600">$${priceInfo.priceGmayor.toFixed(2)}</span>
+        </div>
+      </div>
+    `
   }
 
   card.innerHTML = `
@@ -662,7 +653,6 @@ function createProductCard(product) {
       <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
            class="product-image"
-           loading="lazy"
            onerror="this.src='/generic-product-display.png'">
     </div>
     <div class="p-5">
@@ -694,6 +684,15 @@ function getPriceForRole(product) {
         label: "Gran Mayor",
       }
     case "gestor":
+      return {
+        display: "triple",
+        priceCliente: product.precio_cliente || 0,
+        priceMayor: product.precio_mayor || 0,
+        priceGmayor: product.precio_gmayor || 0,
+        labelCliente: "Detal",
+        labelMayor: "Mayor",
+        labelGmayor: "G.Mayor",
+      }
     case "distribuidor":
       return {
         display: "dual",
@@ -763,18 +762,50 @@ function openQuantityModal(product) {
 
   let priceHTML = ""
   if (priceInfo.display === "single") {
-    priceHTML = `<p class="text-red-600 font-black text-xl">${priceInfo.label}: $${priceInfo.price.toFixed(2)}</p>`
-  } else {
+    priceHTML = `<p class="text-red-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
+  } else if (priceInfo.display === "dual") {
     priceHTML = `
-      <div class="space-y-2">
-        <div class="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-          <span class="font-semibold text-gray-700">Precio Detal:</span>
-          <span class="text-red-600 font-black text-lg">$${priceInfo.priceCliente.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-          <span class="font-semibold text-gray-700">Precio Mayor:</span>
-          <span class="text-green-600 font-black text-lg">$${priceInfo.priceMayor.toFixed(2)}</span>
-        </div>
+      <div class="space-y-2 mb-4">
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Detal</span>
+            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
+        </label>
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Mayor</span>
+            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
+        </label>
+      </div>
+    `
+  } else if (priceInfo.display === "triple") {
+    priceHTML = `
+      <div class="space-y-2 mb-4">
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Detal</span>
+            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
+        </label>
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Mayor</span>
+            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
+        </label>
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio G.Mayor</span>
+            <span class="text-blue-600 font-black text-lg ml-3">$${priceInfo.priceGmayor.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="gmayor" class="w-5 h-5">
+        </label>
       </div>
     `
   }
@@ -798,26 +829,36 @@ function confirmQuantity() {
     return
   }
 
-  addToCart(selectedProductForQuantity, quantity)
+  const priceInfo = getPriceForRole(selectedProductForQuantity)
+  let selectedPrice
+
+  if (priceInfo.display === "dual" || priceInfo.display === "triple") {
+    const priceOption = document.querySelector('input[name="price-option"]:checked')?.value
+    if (priceOption === "mayor") {
+      selectedPrice = priceInfo.priceMayor
+    } else if (priceOption === "gmayor") {
+      selectedPrice = priceInfo.priceGmayor
+    } else {
+      selectedPrice = priceInfo.priceCliente
+    }
+  } else {
+    selectedPrice = priceInfo.price
+  }
+
+  addToCart(selectedProductForQuantity, quantity, selectedPrice)
   document.getElementById("quantity-modal").classList.add("hidden")
 }
 
-function addToCart(product, quantity) {
-  const existingItem = cart.find((item) => item.id === product.id)
+function addToCart(product, quantity, price) {
+  const existingItem = cart.find((item) => item.id === product.id && item.price === price)
 
   if (existingItem) {
     existingItem.quantity += quantity
   } else {
     cart.push({
-      id: product.id,
-      nombre: product.nombre,
-      descripcion: product.descripcion,
-      precio_cliente: product.precio_cliente,
-      precio_mayor: product.precio_mayor,
-      precio_gmayor: product.precio_gmayor,
-      departamento: product.departamento,
-      imagen_url: product.imagen_url,
+      ...product,
       quantity: quantity,
+      price: price,
     })
   }
 
@@ -825,7 +866,7 @@ function addToCart(product, quantity) {
   updateCartCount()
   animateCartButton()
 
-  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity}`)
+  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}`)
 }
 
 function updateCartCount() {
@@ -852,14 +893,14 @@ function renderCart() {
         <p class="text-gray-500 text-lg font-medium">Tu carrito está vacío</p>
       </div>
     `
-    cartTotal.innerHTML = ""
+    cartTotal.textContent = "$0.00"
     return
   }
 
   cartItems.innerHTML = cart
     .map(
-      (item) => `
-    <div class="cart-item">
+      (item, index) => `
+    <div class="cart-item" data-cart-index="${index}">
       <div class="flex items-center space-x-4">
         <img src="${item.imagen_url || "/generic-product-display.png"}" 
              alt="${item.nombre}" 
@@ -867,16 +908,16 @@ function renderCart() {
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
-          <p class="text-sm text-gray-600">${item.departamento || ""}</p>
+          <p class="text-red-600 font-bold text-lg">$${item.price.toFixed(2)}</p>
         </div>
       </div>
       <div class="flex items-center justify-between mt-4">
         <div class="flex items-center space-x-3">
-          <button class="quantity-button" onclick="updateCartItemQuantity(${item.id}, -1)">-</button>
+          <button class="quantity-button cart-decrease" data-cart-index="${index}">-</button>
           <span class="text-xl font-bold text-gray-800 min-w-[40px] text-center">${item.quantity}</span>
-          <button class="quantity-button" onclick="updateCartItemQuantity(${item.id}, 1)">+</button>
+          <button class="quantity-button cart-increase" data-cart-index="${index}">+</button>
         </div>
-        <button class="text-red-600 hover:text-red-700 font-semibold" onclick="removeFromCart(${item.id})">
+        <button class="text-red-600 hover:text-red-700 font-semibold cart-remove" data-cart-index="${index}">
           Eliminar
         </button>
       </div>
@@ -885,55 +926,38 @@ function renderCart() {
     )
     .join("")
 
-  let totalHTML = ""
+  document.querySelectorAll(".cart-decrease").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const index = Number.parseInt(e.target.dataset.cartIndex)
+      updateCartItemQuantityByIndex(index, -1)
+    })
+  })
 
-  if (currentUserRole === "cliente") {
-    // Cliente: solo total en detal
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    totalHTML = `
-      <div class="text-right">
-        <p class="text-sm text-gray-600 mb-1">Total Detal:</p>
-        <p class="text-3xl font-black text-red-600">$${totalDetal.toFixed(2)}</p>
-      </div>
-    `
-  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
-    // Distribuidor/Gestor: total en detal Y total en mayor
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
-    totalHTML = `
-      <div class="space-y-3">
-        <div class="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-          <span class="font-semibold text-gray-700">Total Detal:</span>
-          <span class="text-2xl font-black text-red-600">$${totalDetal.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-          <span class="font-semibold text-gray-700">Total Mayor:</span>
-          <span class="text-2xl font-black text-green-600">$${totalMayor.toFixed(2)}</span>
-        </div>
-      </div>
-    `
-  } else if (currentUserRole === "admin") {
-    // Admin: total en gran mayor
-    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
-    totalHTML = `
-      <div class="text-right">
-        <p class="text-sm text-gray-600 mb-1">Total Gran Mayor:</p>
-        <p class="text-3xl font-black text-blue-600">$${totalGMayor.toFixed(2)}</p>
-      </div>
-    `
-  }
+  document.querySelectorAll(".cart-increase").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const index = Number.parseInt(e.target.dataset.cartIndex)
+      updateCartItemQuantityByIndex(index, 1)
+    })
+  })
 
-  cartTotal.innerHTML = totalHTML
+  document.querySelectorAll(".cart-remove").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const index = Number.parseInt(e.target.dataset.cartIndex)
+      removeFromCartByIndex(index)
+    })
+  })
+
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  cartTotal.textContent = `$${total.toFixed(2)}`
 }
 
-function updateCartItemQuantity(productId, change) {
-  const item = cart.find((i) => i.id === productId)
-  if (!item) return
+function updateCartItemQuantityByIndex(index, change) {
+  if (index < 0 || index >= cart.length) return
 
-  item.quantity += change
+  cart[index].quantity += change
 
-  if (item.quantity <= 0) {
-    removeFromCart(productId)
+  if (cart[index].quantity <= 0) {
+    removeFromCartByIndex(index)
   } else {
     saveCartToStorage()
     updateCartCount()
@@ -941,8 +965,10 @@ function updateCartItemQuantity(productId, change) {
   }
 }
 
-function removeFromCart(productId) {
-  cart = cart.filter((item) => item.id !== productId)
+function removeFromCartByIndex(index) {
+  if (index < 0 || index >= cart.length) return
+
+  cart.splice(index, 1)
   saveCartToStorage()
   updateCartCount()
   renderCart()
@@ -958,50 +984,35 @@ function sendWhatsAppOrder() {
     return
   }
 
-  let message = `Hola, quiero comprar los siguientes productos:\n\n`
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-  // Agregar cada producto
-  cart.forEach((item) => {
-    const codigo = item.descripcion ? `${item.descripcion} ` : ""
-    message += `${item.quantity}x ${codigo}"${item.nombre}"\n`
+  let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
+  message += `*Cliente:* ${currentUser.name}\n`
+  message += `*Usuario:* ${currentUser.username}\n`
+  message += `*Rol:* ${currentUserRole}\n\n`
+  message += `*PRODUCTOS:*\n`
 
-    // Mostrar precio según el rol
-    if (currentUserRole === "cliente") {
-      message += `Precio: $${item.precio_cliente.toFixed(2)}\n\n`
-    } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
-      message += `Precio Detal: $${item.precio_cliente.toFixed(2)}\n`
-      message += `Precio Mayor: $${item.precio_mayor.toFixed(2)}\n\n`
-    } else if (currentUserRole === "admin") {
-      message += `Precio: $${item.precio_gmayor.toFixed(2)}\n\n`
-    }
+  cart.forEach((item, index) => {
+    message += `\n${index + 1}. *${item.nombre}*\n`
+    message += `   Cantidad: ${item.quantity}\n`
+    message += `   Precio: $${item.price.toFixed(2)}\n`
+    message += `   Subtotal: $${(item.price * item.quantity).toFixed(2)}\n`
   })
 
-  // Agregar totales según el rol
-  if (currentUserRole === "cliente") {
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    message += `Total: $${totalDetal.toFixed(2)}\n\n`
-  } else if (currentUserRole === "distribuidor" || currentUserRole === "gestor") {
-    const totalDetal = cart.reduce((sum, item) => sum + item.precio_cliente * item.quantity, 0)
-    const totalMayor = cart.reduce((sum, item) => sum + item.precio_mayor * item.quantity, 0)
-    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
-    message += `Total Mayor: $${totalMayor.toFixed(2)}\n\n`
-  } else if (currentUserRole === "admin") {
-    const totalGMayor = cart.reduce((sum, item) => sum + item.precio_gmayor * item.quantity, 0)
-    message += `Total: $${totalGMayor.toFixed(2)}\n\n`
-  }
+  message += `\n*TOTAL: $${total.toFixed(2)}*`
 
-  message += `Mi nombre: ${currentUser.name}\n\n`
-  message += `Por favor, contáctame para el pedido.`
-
-  const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`
+  const whatsappNumber = "1234567890" // Cambiar por el número real
+  const encodedMessage = encodeURIComponent(message)
+  const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
 
   clearCart()
 
+  // Cerrar modal del carrito
   document.getElementById("cart-modal").classList.add("hidden")
 
-  alert("Pedido preparado para WhatsApp. Selecciona el contacto al que deseas enviarlo.")
+  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
 
 // ============================================
@@ -1017,8 +1028,6 @@ function handleGlobalSearch(e) {
 
   if (query === "") {
     filteredProducts = allProducts
-    displayedProductsCount = 0
-    document.getElementById("products-grid").innerHTML = ""
     renderProducts()
     return
   }
@@ -1033,8 +1042,6 @@ function handleGlobalSearch(e) {
         (p.departamento && p.departamento.toLowerCase().includes(query)),
     )
 
-    displayedProductsCount = 0
-    document.getElementById("products-grid").innerHTML = ""
     renderProducts()
     document.getElementById("search-loading").classList.add("hidden")
   }, 300)
@@ -1054,8 +1061,6 @@ function handleDeptSearch(e) {
       (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
   )
 
-  displayedProductsCount = 0
-  document.getElementById("products-grid").innerHTML = ""
   renderProducts()
 }
 
