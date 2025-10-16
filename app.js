@@ -881,6 +881,8 @@ function animateCartButton() {
 }
 
 function renderCart() {
+  console.log("[v0] Renderizando carrito con", cart.length, "items")
+
   const cartItems = document.getElementById("cart-items")
   const cartTotal = document.getElementById("cart-total")
 
@@ -897,10 +899,13 @@ function renderCart() {
     return
   }
 
-  cartItems.innerHTML = cart
-    .map(
-      (item, index) => `
-    <div class="cart-item" data-cart-index="${index}">
+  cartItems.innerHTML = ""
+
+  cart.forEach((item, index) => {
+    const cartItemDiv = document.createElement("div")
+    cartItemDiv.className = "cart-item"
+
+    cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
         <img src="${item.imagen_url || "/generic-product-display.png"}" 
              alt="${item.nombre}" 
@@ -913,42 +918,43 @@ function renderCart() {
       </div>
       <div class="flex items-center justify-between mt-4">
         <div class="flex items-center space-x-3">
-          <button class="quantity-button cart-decrease" data-cart-index="${index}">-</button>
+          <button class="quantity-button cart-decrease-btn">-</button>
           <span class="text-xl font-bold text-gray-800 min-w-[40px] text-center">${item.quantity}</span>
-          <button class="quantity-button cart-increase" data-cart-index="${index}">+</button>
+          <button class="quantity-button cart-increase-btn">+</button>
         </div>
-        <button class="text-red-600 hover:text-red-700 font-semibold cart-remove" data-cart-index="${index}">
+        <button class="text-red-600 hover:text-red-700 font-semibold cart-remove-btn">
           Eliminar
         </button>
       </div>
-    </div>
-  `,
-    )
-    .join("")
+    `
 
-  document.querySelectorAll(".cart-decrease").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const index = Number.parseInt(e.target.dataset.cartIndex)
+    // Agregar event listeners directamente a los botones
+    const decreaseBtn = cartItemDiv.querySelector(".cart-decrease-btn")
+    const increaseBtn = cartItemDiv.querySelector(".cart-increase-btn")
+    const removeBtn = cartItemDiv.querySelector(".cart-remove-btn")
+
+    decreaseBtn.addEventListener("click", () => {
+      console.log("[v0] Disminuyendo cantidad del item", index)
       updateCartItemQuantityByIndex(index, -1)
     })
-  })
 
-  document.querySelectorAll(".cart-increase").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const index = Number.parseInt(e.target.dataset.cartIndex)
+    increaseBtn.addEventListener("click", () => {
+      console.log("[v0] Aumentando cantidad del item", index)
       updateCartItemQuantityByIndex(index, 1)
     })
-  })
 
-  document.querySelectorAll(".cart-remove").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const index = Number.parseInt(e.target.dataset.cartIndex)
+    removeBtn.addEventListener("click", () => {
+      console.log("[v0] Eliminando item", index)
       removeFromCartByIndex(index)
     })
+
+    cartItems.appendChild(cartItemDiv)
   })
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
   cartTotal.textContent = `$${total.toFixed(2)}`
+
+  console.log("[v0] Carrito renderizado exitosamente")
 }
 
 function updateCartItemQuantityByIndex(index, change) {
