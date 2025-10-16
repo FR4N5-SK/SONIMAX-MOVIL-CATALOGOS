@@ -1,705 +1,820 @@
-// SONIMAX MÓVIL - Aplicación Optimizada
+// SONIMAX MÓVIL - Aplicación Principal
+// Sistema actualizado con USUARIO en lugar de EMAIL
 
-const state = {
-  user: null,
-  userRole: null,
-  userName: null,
-  products: [],
-  departments: [],
-  currentDepartment: "all",
-  cart: [],
-  searchQuery: "",
-  deptSearchQuery: "",
-  pendingProduct: null,
-  isLoading: false,
-}
+let currentUser = null
+let currentUserRole = null
+let allProducts = []
+let filteredProducts = []
+let cart = []
+let currentDepartment = "all"
+let selectedProductForQuantity = null
 
-// Función de debounce mejorada
-function debounce(func, wait) {
-  let timeout
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout)
-      func(...args)
-    }
-    clearTimeout(timeout)
-    timeout = setTimeout(later, wait)
-  }
-}
-
-// Normalización de texto mejorada para búsqueda
-function normalizeText(text) {
-  if (!text) return ""
-  return text
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-// Parser CSV mejorado que maneja comillas y comas dentro de campos
-function parseCSVLine(line) {
-  const result = []
-  let current = ""
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    const nextChar = line[i + 1]
-
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim())
-      current = ""
-    } else {
-      current += char
-    }
-  }
-
-  result.push(current.trim())
-  return result
-}
-
-// Gestión del carrito en localStorage
-function saveCartToLocalStorage() {
-  try {
-    localStorage.setItem("sonimax_cart", JSON.stringify(state.cart))
-  } catch (error) {
-    console.error("[v0] Error guardando carrito:", error)
-  }
-}
-
-function loadCartFromLocalStorage() {
-  try {
-    const savedCart = localStorage.getItem("sonimax_cart")
-    if (savedCart) {
-      state.cart = JSON.parse(savedCart)
-      updateCartUI()
-    }
-  } catch (error) {
-    console.error("[v0] Error cargando carrito:", error)
-    state.cart = []
-  }
-}
-
-function clearCartFromLocalStorage() {
-  try {
-    localStorage.removeItem("sonimax_cart")
-  } catch (error) {
-    console.error("[v0] Error eliminando carrito:", error)
-  }
-}
-
-const supabaseClient = window.supabaseClient
-
-async function handleLogout() {
-  const { error } = await supabaseClient.auth.signOut()
-  if (error) {
-    console.error("[v0] Error cerrando sesión:", error)
-  } else {
-    state.user = null
-    state.userRole = null
-    state.userName = null
-    showLoginScreen()
-  }
-}
+// ============================================
+// INICIALIZACIÓN
+// ============================================
 
 document.addEventListener("DOMContentLoaded", async () => {
-  loadCartFromLocalStorage()
-  await initApp()
-})
+  console.log("🚀 Iniciando SONIMAX MÓVIL...")
 
-async function initApp() {
+  // Verificar sesión existente
   const {
     data: { session },
-  } = await supabaseClient.auth.getSession()
+  } = await window.supabaseClient.auth.getSession()
 
   if (session) {
-    await handleUserSession(session.user)
+    console.log("✅ Sesión activa encontrada")
+    await loadUserData(session.user.id)
+    loadCartFromStorage()
+    showApp()
   } else {
-    showLoginScreen()
+    console.log("ℹ️ No hay sesión activa")
+    showLogin()
   }
 
   setupEventListeners()
-}
+})
 
-// Búsquedas con debounce
-const debouncedGlobalSearch = debounce((value) => {
-  state.searchQuery = normalizeText(value)
-  renderProducts()
-}, 300)
+// ============================================
+// AUTENTICACIÓN - ACTUALIZADA CON USUARIOS
+// ============================================
 
-const debouncedDeptSearch = debounce((value) => {
-  state.deptSearchQuery = normalizeText(value)
-  renderProducts()
-}, 300)
-
-function setupEventListeners() {
-  document.getElementById("show-login-btn").addEventListener("click", showLoginForm)
-  document.getElementById("show-register-btn").addEventListener("click", showRegisterForm)
-  document.getElementById("login-form").addEventListener("submit", handleLogin)
-  document.getElementById("register-form").addEventListener("submit", handleRegister)
-  document.getElementById("logout-button").addEventListener("click", handleLogout)
-
-  document.getElementById("global-search").addEventListener("input", (e) => {
-    debouncedGlobalSearch(e.target.value)
-  })
-
-  document.getElementById("dept-search").addEventListener("input", (e) => {
-    debouncedDeptSearch(e.target.value)
-  })
-
-  document.getElementById("cart-button").addEventListener("click", openCart)
-  document.getElementById("close-cart").addEventListener("click", closeCart)
-  document.getElementById("send-whatsapp").addEventListener("click", sendWhatsAppOrder)
-
-  document.getElementById("upload-csv-button")?.addEventListener("click", openCSVModal)
-  document.getElementById("close-csv-modal")?.addEventListener("click", closeCSVModal)
-  document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
-  document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
-
-  document.getElementById("export-pdf-button")?.addEventListener("click", openPDFModal)
-  document.getElementById("close-pdf-modal")?.addEventListener("click", closePDFModal)
-  document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
-
-  document.getElementById("open-sidebar").addEventListener("click", openSidebar)
-  document.getElementById("close-sidebar").addEventListener("click", closeSidebar)
-  document.getElementById("sidebar-overlay").addEventListener("click", closeSidebar)
-
-  document.getElementById("close-quantity-modal").addEventListener("click", closeQuantityModal)
-  document.getElementById("cancel-quantity").addEventListener("click", closeQuantityModal)
-  document.getElementById("confirm-quantity").addEventListener("click", confirmQuantity)
-
-  document.getElementById("quantity-input").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") confirmQuantity()
-  })
-}
-
-function showLoginForm() {
-  document.getElementById("login-form").classList.remove("hidden")
-  document.getElementById("register-form").classList.add("hidden")
-  document.getElementById("show-login-btn").classList.add("auth-tab-active")
-  document.getElementById("show-register-btn").classList.remove("auth-tab-active")
-  hideAuthMessages()
-}
-
-function showRegisterForm() {
-  document.getElementById("login-form").classList.add("hidden")
-  document.getElementById("register-form").classList.remove("hidden")
-  document.getElementById("show-register-btn").classList.add("auth-tab-active")
-  document.getElementById("show-login-btn").classList.remove("auth-tab-active")
-  hideAuthMessages()
-}
-
-function hideAuthMessages() {
-  document.getElementById("auth-error").classList.add("hidden")
-  document.getElementById("auth-success").classList.add("hidden")
-}
-
-async function handleLogin(e) {
+document.getElementById("login-form").addEventListener("submit", async (e) => {
   e.preventDefault()
-  const email = document.getElementById("login-email").value
+  const username = document.getElementById("login-username").value.trim().toLowerCase()
   const password = document.getElementById("login-password").value
-  const errorDiv = document.getElementById("auth-error")
+
+  showAuthMessage("Iniciando sesión...", "info")
 
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password })
-    if (error) throw error
-    await handleUserSession(data.user)
+    const internalEmail = `${username}@sonimax.internal`
+
+    // Usar el email generado para autenticar
+    const { data, error } = await window.supabaseClient.auth.signInWithPassword({
+      email: internalEmail,
+      password: password,
+    })
+
+    if (error) {
+      // Si el error es de credenciales inválidas, mostrar mensaje genérico
+      if (error.message.includes("Invalid login credentials")) {
+        throw new Error("Usuario o contraseña incorrectos")
+      }
+      throw error
+    }
+
+    console.log("✅ Login exitoso")
+    await loadUserData(data.user.id)
+    loadCartFromStorage()
+    showApp()
   } catch (error) {
-    console.error("[v0] Error en login:", error)
-    errorDiv.textContent = "Error: " + error.message
-    errorDiv.classList.remove("hidden")
+    console.error("❌ Error en login:", error)
+    showAuthMessage(
+      error.message === "Usuario o contraseña incorrectos"
+        ? error.message
+        : "Error al iniciar sesión. Verifica tus credenciales.",
+      "error",
+    )
   }
-}
+})
 
-async function handleRegister(e) {
+document.getElementById("register-form").addEventListener("submit", async (e) => {
   e.preventDefault()
-  const name = document.getElementById("register-name").value
-  const email = document.getElementById("register-email").value
+  const name = document.getElementById("register-name").value.trim()
+  const username = document.getElementById("register-username").value.trim().toLowerCase()
   const password = document.getElementById("register-password").value
-  const errorDiv = document.getElementById("auth-error")
-  const successDiv = document.getElementById("auth-success")
+
+  showAuthMessage("Creando cuenta...", "info")
 
   try {
-    const { data: authData, error: authError } = await supabaseClient.auth.signUp({
-      email,
-      password,
+    // Verificar si el username ya existe
+    const { data: existingUser } = await window.supabaseClient
+      .from("users")
+      .select("username")
+      .eq("username", username)
+      .single()
+
+    if (existingUser) {
+      throw new Error("El nombre de usuario ya está en uso")
+    }
+
+    // Generar email interno basado en username
+    const internalEmail = `${username}@sonimax.internal`
+
+    // Crear usuario en Supabase Auth
+    const { data, error } = await window.supabaseClient.auth.signUp({
+      email: internalEmail,
+      password: password,
       options: {
-        data: { name, role: "cliente" },
-        emailRedirectTo: window.location.origin,
+        data: {
+          name: name,
+          username: username,
+        },
       },
     })
 
-    if (authError) throw authError
+    if (error) throw error
 
-    const { error: dbError } = await supabaseClient.from("users").insert([
-      {
-        id: authData.user.id,
-        email,
-        name,
-        role: "cliente",
-      },
-    ])
+    const { error: updateError } = await window.supabaseClient
+      .from("users")
+      .update({ username: username, name: name })
+      .eq("auth_id", data.user.id)
 
-    if (dbError) console.error("[v0] Error insertando en users:", dbError)
+    if (updateError) {
+      console.error("[v0] Error actualizando usuario:", updateError)
+    }
 
-    successDiv.textContent = "¡Cuenta creada exitosamente! Iniciando sesión..."
-    successDiv.classList.remove("hidden")
-    errorDiv.classList.add("hidden")
+    console.log("[v0] ✅ Registro exitoso")
+    showAuthMessage("¡Cuenta creada exitosamente! Iniciando sesión...", "success")
 
     setTimeout(async () => {
-      await handleUserSession(authData.user)
+      await loadUserData(data.user.id)
+      showApp()
     }, 1500)
   } catch (error) {
-    console.error("[v0] Error en registro:", error)
-    errorDiv.textContent = "Error al crear cuenta: " + error.message
-    errorDiv.classList.remove("hidden")
-    successDiv.classList.add("hidden")
+    console.error("[v0] ❌ Error en registro:", error)
+    showAuthMessage(
+      error.message === "El nombre de usuario ya está en uso"
+        ? error.message
+        : "Error al crear la cuenta. Intenta con otro nombre de usuario.",
+      "error",
+    )
+  }
+})
+
+document.getElementById("create-user-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const name = document.getElementById("new-user-name").value.trim()
+  const username = document.getElementById("new-user-username").value.trim().toLowerCase()
+  const password = document.getElementById("new-user-password").value
+  const role = document.getElementById("new-user-role").value
+
+  showCreateUserMessage("Creando usuario...", "info")
+
+  try {
+    // Verificar si el username ya existe
+    const { data: existingUser } = await window.supabaseClient
+      .from("users")
+      .select("username")
+      .eq("username", username)
+      .maybeSingle()
+
+    if (existingUser) {
+      throw new Error("El nombre de usuario ya está en uso")
+    }
+
+    // Generar email interno
+    const internalEmail = `${username}@sonimax.internal`
+
+    const { data, error } = await window.supabaseClient.auth.signUp({
+      email: internalEmail,
+      password: password,
+      options: {
+        data: {
+          name: name,
+          username: username,
+          role: role,
+        },
+      },
+    })
+
+    if (error) throw error
+
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const { error: updateError } = await window.supabaseClient
+      .from("users")
+      .update({
+        role: role,
+        created_by: currentUser.auth_id,
+      })
+      .eq("auth_id", data.user.id)
+
+    if (updateError) {
+      console.error("Error actualizando rol:", updateError)
+      throw new Error("Usuario creado pero no se pudo asignar el rol correctamente")
+    }
+
+    console.log("✅ Usuario creado exitosamente con rol:", role)
+    showCreateUserMessage(`Usuario "${username}" creado exitosamente con rol de ${role}`, "success")
+
+    // Limpiar formulario
+    document.getElementById("create-user-form").reset()
+
+    setTimeout(() => {
+      document.getElementById("create-user-modal").classList.add("hidden")
+    }, 2000)
+  } catch (error) {
+    console.error("❌ Error al crear usuario:", error)
+    showCreateUserMessage(error.message || "Error al crear el usuario. Intenta con otro nombre de usuario.", "error")
+  }
+})
+
+// Cargar datos del usuario
+async function loadUserData(userId) {
+  console.log("[v0] Cargando datos del usuario:", userId)
+
+  try {
+    const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
+
+    if (error) {
+      console.error("[v0] Error obteniendo datos:", error)
+      throw error
+    }
+
+    if (!data) {
+      console.error("[v0] No se encontró el usuario")
+      throw new Error("Usuario no encontrado")
+    }
+
+    currentUser = data
+    currentUserRole = data.role
+
+    console.log("[v0] ✅ Datos de usuario cargados:", {
+      username: data.username,
+      name: data.name,
+      role: data.role,
+    })
+
+    updateUIForRole()
+  } catch (error) {
+    console.error("[v0] ❌ Error al cargar datos del usuario:", error)
+    // Si hay error, cerrar sesión
+    await window.supabaseClient.auth.signOut()
+    showLogin()
   }
 }
 
-async function handleUserSession(user) {
-  state.user = user
+function updateUIForRole() {
+  const roleBadge = document.getElementById("user-role-badge")
+  const adminSection = document.getElementById("admin-section")
+  const gestorSection = document.getElementById("gestor-section")
 
-  const { data: userData, error } = await supabaseClient.from("users").select("role, name").eq("id", user.id).single()
+  if (roleBadge) {
+    roleBadge.textContent = `${currentUser.name} (${currentUserRole})`
+    roleBadge.className = `role-badge-${currentUserRole}`
+    roleBadge.classList.remove("hidden")
+  }
 
-  if (error) {
-    console.error("[v0] Error obteniendo datos:", error)
-    state.userRole = user.user_metadata?.role || "cliente"
-    state.userName = user.user_metadata?.name || "Usuario"
+  // Admin: puede subir CSV, exportar PDF y crear usuarios
+  // Gestor: solo puede crear usuarios
+  // Distribuidor: solo ve catálogo con precios detal y mayor (NO crea usuarios)
+  // Cliente: solo ve catálogo con precios de cliente
+  if (currentUserRole === "admin") {
+    adminSection?.classList.remove("hidden")
+    gestorSection?.classList.remove("hidden")
+  } else if (currentUserRole === "gestor") {
+    adminSection?.classList.add("hidden")
+    gestorSection?.classList.remove("hidden")
   } else {
-    state.userRole = userData.role
-    state.userName = userData.name || "Usuario"
+    // distribuidor y cliente no ven ninguna sección de administración
+    adminSection?.classList.add("hidden")
+    gestorSection?.classList.add("hidden")
   }
-
-  await loadDepartments()
-  await loadProducts()
-  showAppScreen()
 }
 
-function showLoginScreen() {
+// Logout
+document.getElementById("logout-button")?.addEventListener("click", async () => {
+  await window.supabaseClient.auth.signOut()
+  currentUser = null
+  currentUserRole = null
+  cart = []
+  showLogin()
+})
+
+// ============================================
+// FUNCIONES DE UI
+// ============================================
+
+function showLogin() {
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.remove("hidden")
   document.getElementById("app-screen").classList.add("hidden")
-  showLoginForm()
 }
 
-function showAppScreen() {
+function showApp() {
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
-  setupRoleBasedUI()
+  loadProducts()
 }
 
-function setupRoleBasedUI() {
-  const roleBadge = document.getElementById("user-role-badge")
-  const adminSection = document.getElementById("admin-section")
+function showAuthMessage(message, type) {
+  const errorDiv = document.getElementById("auth-error")
+  const successDiv = document.getElementById("auth-success")
 
-  roleBadge.classList.remove("hidden")
+  errorDiv.classList.add("hidden")
+  successDiv.classList.add("hidden")
 
-  const roleConfig = {
-    admin: { text: "👑 Admin", class: "role-badge-admin", showAdmin: true },
-    distribuidor: { text: "📦 Distribuidor", class: "role-badge-distribuidor", showAdmin: false },
-    cliente: { text: "🛒 Cliente", class: "role-badge-cliente", showAdmin: false },
-  }
-
-  const config = roleConfig[state.userRole] || roleConfig.cliente
-  roleBadge.textContent = config.text
-  roleBadge.className = config.class
-
-  if (adminSection) {
-    adminSection.classList.toggle("hidden", !config.showAdmin)
+  if (type === "error") {
+    errorDiv.textContent = message
+    errorDiv.classList.remove("hidden")
+  } else if (type === "success") {
+    successDiv.textContent = message
+    successDiv.classList.remove("hidden")
+  } else {
+    successDiv.textContent = message
+    successDiv.classList.remove("hidden")
   }
 }
 
-async function loadDepartments() {
-  const { data, error } = await supabaseClient.rpc("get_distinct_departments")
+function showCreateUserMessage(message, type) {
+  const errorDiv = document.getElementById("create-user-error")
+  const successDiv = document.getElementById("create-user-success")
 
-  if (error) {
-    console.error("[v0] Error cargando departamentos:", error)
-    return
+  errorDiv.classList.add("hidden")
+  successDiv.classList.add("hidden")
+
+  if (type === "error") {
+    errorDiv.textContent = message
+    errorDiv.classList.remove("hidden")
+  } else if (type === "success") {
+    successDiv.textContent = message
+    successDiv.classList.remove("hidden")
+  } else {
+    successDiv.textContent = message
+    successDiv.classList.remove("hidden")
   }
-
-  state.departments = data.map((row) => row.departamento).filter((d) => d && d.trim() !== "")
-
-  renderDepartments()
 }
+
+// ============================================
+// EVENT LISTENERS
+// ============================================
+
+function setupEventListeners() {
+  // Tabs de autenticación
+  document.getElementById("show-login-btn")?.addEventListener("click", () => {
+    document.getElementById("login-form").classList.remove("hidden")
+    document.getElementById("register-form").classList.add("hidden")
+    document.getElementById("show-login-btn").classList.add("auth-tab-active")
+    document.getElementById("show-register-btn").classList.remove("auth-tab-active")
+  })
+
+  document.getElementById("show-register-btn")?.addEventListener("click", () => {
+    document.getElementById("login-form").classList.add("hidden")
+    document.getElementById("register-form").classList.remove("hidden")
+    document.getElementById("show-register-btn").classList.add("auth-tab-active")
+    document.getElementById("show-login-btn").classList.remove("auth-tab-active")
+  })
+
+  document.getElementById("create-user-button")?.addEventListener("click", () => {
+    const roleSelect = document.getElementById("new-user-role")
+
+    // Limpiar opciones anteriores
+    roleSelect.innerHTML = ""
+
+    // Gestor puede crear: cliente, distribuidor, gestor
+    // Admin puede crear: cliente, distribuidor, gestor, admin
+    if (currentUserRole === "gestor") {
+      roleSelect.innerHTML = `
+        <option value="cliente">Cliente</option>
+        <option value="distribuidor">Distribuidor</option>
+        <option value="gestor">Gestor</option>
+      `
+    } else if (currentUserRole === "admin") {
+      roleSelect.innerHTML = `
+        <option value="cliente">Cliente</option>
+        <option value="distribuidor">Distribuidor</option>
+        <option value="gestor">Gestor</option>
+        <option value="admin">Administrador</option>
+      `
+    }
+
+    document.getElementById("create-user-modal").classList.remove("hidden")
+    document.getElementById("create-user-error").classList.add("hidden")
+    document.getElementById("create-user-success").classList.add("hidden")
+  })
+
+  document.getElementById("close-create-user-modal")?.addEventListener("click", () => {
+    document.getElementById("create-user-modal").classList.add("hidden")
+  })
+
+  // Sidebar
+  document.getElementById("open-sidebar")?.addEventListener("click", () => {
+    document.getElementById("sidebar-menu").classList.add("open")
+    document.getElementById("sidebar-overlay").classList.remove("hidden")
+  })
+
+  document.getElementById("close-sidebar")?.addEventListener("click", closeSidebar)
+  document.getElementById("sidebar-overlay")?.addEventListener("click", closeSidebar)
+
+  // Carrito
+  document.getElementById("cart-button")?.addEventListener("click", () => {
+    document.getElementById("cart-modal").classList.remove("hidden")
+    renderCart()
+  })
+
+  document.getElementById("close-cart")?.addEventListener("click", () => {
+    document.getElementById("cart-modal").classList.add("hidden")
+  })
+
+  // Búsqueda
+  document.getElementById("global-search")?.addEventListener("input", handleGlobalSearch)
+  document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
+
+  // WhatsApp
+  document.getElementById("send-whatsapp")?.addEventListener("click", sendWhatsAppOrder)
+
+  // CSV Upload
+  document.getElementById("upload-csv-button")?.addEventListener("click", () => {
+    document.getElementById("csv-modal").classList.remove("hidden")
+  })
+
+  document.getElementById("close-csv-modal")?.addEventListener("click", () => {
+    document.getElementById("csv-modal").classList.add("hidden")
+  })
+
+  document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
+  document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
+
+  // PDF Export
+  document.getElementById("export-pdf-button")?.addEventListener("click", () => {
+    document.getElementById("pdf-modal").classList.remove("hidden")
+    loadDepartmentsForPDF()
+  })
+
+  document.getElementById("close-pdf-modal")?.addEventListener("click", () => {
+    document.getElementById("pdf-modal").classList.add("hidden")
+  })
+
+  document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
+
+  // Modal de cantidad
+  document.getElementById("close-quantity-modal")?.addEventListener("click", () => {
+    document.getElementById("quantity-modal").classList.add("hidden")
+  })
+
+  document.getElementById("cancel-quantity")?.addEventListener("click", () => {
+    document.getElementById("quantity-modal").classList.add("hidden")
+  })
+
+  document.getElementById("confirm-quantity")?.addEventListener("click", confirmQuantity)
+}
+
+function closeSidebar() {
+  document.getElementById("sidebar-menu").classList.remove("open")
+  document.getElementById("sidebar-overlay").classList.add("hidden")
+}
+
+// ============================================
+// PRODUCTOS
+// ============================================
 
 async function loadProducts() {
   try {
-    state.isLoading = true
-    showProductsLoading()
+    document.getElementById("products-loading").classList.remove("hidden")
+    document.getElementById("products-grid").innerHTML = ""
 
-    console.log("[v0] 🔄 Iniciando carga de productos desde Supabase...")
-    const startTime = performance.now()
-
-    const { count, error: countError } = await supabaseClient
-      .from("products")
-      .select("*", { count: "exact", head: true })
-
-    if (countError) {
-      console.error("[v0] ❌ Error obteniendo conteo:", countError)
-      return
-    }
-
-    console.log(`[v0] 📊 Total de productos en base de datos: ${count}`)
-
+    allProducts = []
+    let start = 0
     const batchSize = 1000
-    const allProducts = []
-    let currentBatch = 0
+    let hasMore = true
 
-    while (allProducts.length < count) {
-      const start = currentBatch * batchSize
-      const end = start + batchSize - 1
+    // Cargar productos en lotes hasta obtener todos
+    while (hasMore) {
+      const { data, error } = await window.supabaseClient
+        .from("products")
+        .select("*")
+        .order("nombre", { ascending: true })
+        .range(start, start + batchSize - 1)
 
-      console.log(`[v0] 📦 Cargando lote ${currentBatch + 1}: productos ${start + 1} a ${Math.min(end + 1, count)}`)
+      if (error) throw error
 
-      const { data, error } = await supabaseClient.from("products").select("*").order("nombre").range(start, end)
+      if (data && data.length > 0) {
+        allProducts = [...allProducts, ...data]
+        console.log(`📦 Cargados ${allProducts.length} productos...`)
 
-      if (error) {
-        console.error(`[v0] ❌ Error cargando lote ${currentBatch + 1}:`, error)
-        break
+        // Si recibimos menos de 1000, ya no hay más productos
+        if (data.length < batchSize) {
+          hasMore = false
+        } else {
+          start += batchSize
+        }
+      } else {
+        hasMore = false
       }
-
-      allProducts.push(...data)
-      console.log(`[v0] ✅ Lote ${currentBatch + 1} cargado: ${data.length} productos`)
-      console.log(
-        `[v0] 📈 Progreso: ${allProducts.length}/${count} productos (${((allProducts.length / count) * 100).toFixed(1)}%)`,
-      )
-
-      currentBatch++
-
-      if (data.length < batchSize) break
     }
 
-    const fetchTime = performance.now() - startTime
-    console.log(`[v0] ✅ Productos obtenidos de Supabase: ${allProducts.length}`)
-    console.log(`[v0] ⏱️ Tiempo de carga total: ${fetchTime.toFixed(2)}ms`)
+    filteredProducts = allProducts
 
-    if (allProducts.length < count) {
-      console.warn(`[v0] ⚠️ ADVERTENCIA: Solo se cargaron ${allProducts.length} de ${count} productos`)
-    } else {
-      console.log(`[v0] 🎉 ¡Todos los productos cargados exitosamente!`)
-    }
-
-    console.log("[v0] 🔍 Pre-calculando textos de búsqueda...")
-    const processStart = performance.now()
-
-    state.products = allProducts.map((product) => ({
-      ...product,
-      _searchText: normalizeText(`${product.nombre} ${product.descripcion || ""} ${product.departamento || ""}`),
-    }))
-
-    const processTime = performance.now() - processStart
-    console.log(`[v0] ✅ Productos procesados: ${state.products.length}`)
-    console.log(`[v0] ⏱️ Tiempo de procesamiento: ${processTime.toFixed(2)}ms`)
-    console.log(`[v0] 🎉 Carga completa! Total de productos disponibles: ${state.products.length}`)
-
-    state.isLoading = false
+    renderDepartments()
     renderProducts()
+
+    console.log(`✅ ${allProducts.length} productos cargados en total`)
   } catch (error) {
-    console.error("[v0] ❌ Error crítico en loadProducts:", error)
-    state.isLoading = false
-    hideProductsLoading()
+    console.error("❌ Error al cargar productos:", error)
+  } finally {
+    document.getElementById("products-loading").classList.add("hidden")
   }
 }
 
-function showProductsLoading() {
-  document.getElementById("products-loading").classList.remove("hidden")
-  document.getElementById("products-grid").classList.add("hidden")
-  document.getElementById("no-products").classList.add("hidden")
-}
-
-function hideProductsLoading() {
-  document.getElementById("products-loading").classList.add("hidden")
-}
-
 function renderDepartments() {
-  const container = document.getElementById("departments-nav")
+  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
+
+  const navContainer = document.getElementById("departments-nav")
   const sidebarContainer = document.getElementById("sidebar-departments")
 
-  container.innerHTML = ""
+  navContainer.innerHTML = ""
   sidebarContainer.innerHTML = ""
 
-  state.departments.forEach((dept) => {
-    const button = document.createElement("button")
-    button.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
-    button.textContent = dept
-    button.dataset.dept = dept
-    button.addEventListener("click", () => selectDepartment(dept))
-    container.appendChild(button)
+  departments.forEach((dept) => {
+    // Botón en navbar
+    const navBtn = document.createElement("button")
+    navBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
+    navBtn.textContent = dept
+    navBtn.dataset.dept = dept
+    navBtn.addEventListener("click", () => filterByDepartment(dept))
+    navContainer.appendChild(navBtn)
 
+    // Botón en sidebar
     const sidebarBtn = document.createElement("button")
     sidebarBtn.className =
       "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
     sidebarBtn.textContent = `📁 ${dept}`
     sidebarBtn.dataset.dept = dept
     sidebarBtn.addEventListener("click", () => {
-      selectDepartment(dept)
+      filterByDepartment(dept)
       closeSidebar()
     })
     sidebarContainer.appendChild(sidebarBtn)
   })
 
-  updateDepartmentButtons()
+  // Botón "Todos" en navbar
+  document.querySelectorAll('[data-dept="all"]').forEach((btn) => {
+    btn.addEventListener("click", () => filterByDepartment("all"))
+  })
 }
 
-function selectDepartment(dept) {
-  state.currentDepartment = dept
-  state.deptSearchQuery = ""
-  document.getElementById("dept-search").value = ""
-  updateDepartmentButtons()
+function filterByDepartment(dept) {
+  currentDepartment = dept
+
+  if (dept === "all") {
+    filteredProducts = allProducts
+  } else {
+    filteredProducts = allProducts.filter((p) => p.departamento === dept)
+  }
+
+  // Actualizar botones activos
+  document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
+    btn.classList.remove("active")
+    if (btn.dataset.dept === dept) {
+      btn.classList.add("active")
+    }
+  })
+
+  // Mostrar/ocultar búsqueda por departamento
+  const deptSearchContainer = document.getElementById("dept-search-container")
+  if (dept === "all") {
+    deptSearchContainer.classList.add("hidden")
+  } else {
+    deptSearchContainer.classList.remove("hidden")
+  }
+
   renderProducts()
 }
 
-function updateDepartmentButtons() {
-  document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.dept === state.currentDepartment)
-  })
-
-  const deptSearchContainer = document.getElementById("dept-search-container")
-  deptSearchContainer.classList.toggle("hidden", state.currentDepartment === "all")
-}
-
 function renderProducts() {
-  const container = document.getElementById("products-grid")
+  const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  hideProductsLoading()
-
-  let filteredProducts = state.products
-
-  console.log(`[v0] 🔍 Iniciando filtrado de productos...`)
-  console.log(`[v0] 📦 Total de productos antes de filtrar: ${filteredProducts.length}`)
-
-  if (state.searchQuery) {
-    filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.searchQuery))
-    console.log(`[v0] 🔎 Búsqueda global: "${state.searchQuery}" - Resultados: ${filteredProducts.length}`)
-  } else {
-    if (state.currentDepartment !== "all") {
-      const beforeDeptFilter = filteredProducts.length
-      filteredProducts = filteredProducts.filter((p) => p.departamento === state.currentDepartment)
-      console.log(
-        `[v0] 📁 Filtro por departamento: "${state.currentDepartment}" - ${beforeDeptFilter} → ${filteredProducts.length}`,
-      )
-    }
-
-    if (state.deptSearchQuery && state.currentDepartment !== "all") {
-      const beforeDeptSearch = filteredProducts.length
-      filteredProducts = filteredProducts.filter((p) => p._searchText.includes(state.deptSearchQuery))
-      console.log(
-        `[v0] 🔎 Búsqueda en departamento: "${state.deptSearchQuery}" - ${beforeDeptSearch} → ${filteredProducts.length}`,
-      )
-    }
-  }
-
-  console.log(`[v0] ✅ Productos a mostrar: ${filteredProducts.length}`)
+  grid.innerHTML = ""
 
   if (filteredProducts.length === 0) {
-    container.innerHTML = ""
-    container.classList.add("hidden")
     noProducts.classList.remove("hidden")
-    console.log("[v0] ℹ️ No hay productos para mostrar")
     return
   }
 
   noProducts.classList.add("hidden")
-  container.classList.remove("hidden")
-  container.innerHTML = ""
-
-  const fragment = document.createDocumentFragment()
 
   filteredProducts.forEach((product) => {
     const card = createProductCard(product)
-    fragment.appendChild(card)
+    grid.appendChild(card)
   })
-
-  container.appendChild(fragment)
-  console.log(`[v0] 🎨 Renderizado completo: ${filteredProducts.length} productos mostrados`)
 }
 
 function createProductCard(product) {
   const card = document.createElement("div")
-  card.className = "product-card fade-in"
+  card.className = "product-card"
 
-  let pricesHTML = ""
-  let cartPrice = 0
+  const priceInfo = getPriceForRole(product)
 
-  if (state.userRole === "cliente") {
-    cartPrice = product.precio_cliente
-    pricesHTML = `
-      <div>
-        <span class="text-xs text-gray-500 font-medium">Precio Detal</span>
-        <div class="price-badge mt-1">$${product.precio_cliente.toFixed(2)}</div>
-      </div>
-    `
-  } else if (state.userRole === "distribuidor") {
-    cartPrice = product.precio_distribuidor || product.precio_cliente
-    pricesHTML = `
-      <div class="space-y-1">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-500">Detal:</span>
-          <span class="text-sm font-bold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-red-600 font-semibold">Mayor:</span>
-          <div class="price-badge text-sm">$${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}</div>
-        </div>
-      </div>
-    `
+  let priceHTML = ""
+  if (priceInfo.display === "single") {
+    priceHTML = `<span class="price-badge">$${priceInfo.price.toFixed(2)}</span>`
   } else {
-    cartPrice = product.precio_gmayor || product.precio_distribuidor || product.precio_cliente
-    pricesHTML = `
-      <div class="space-y-1 text-xs">
+    // Mostrar ambos precios para distribuidor y gestor
+    priceHTML = `
+      <div class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
-          <span class="text-gray-500">Detal:</span>
-          <span class="font-bold text-gray-700">$${product.precio_cliente.toFixed(2)}</span>
+          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelCliente}:</span>
+          <span class="text-lg font-black text-red-600">$${priceInfo.priceCliente.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-gray-500">Mayor:</span>
-          <span class="font-bold text-gray-700">$${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-red-600 font-semibold">GMayor:</span>
-          <div class="price-badge text-xs py-1 px-2">$${(product.precio_gmayor || product.precio_distribuidor || product.precio_cliente).toFixed(2)}</div>
+          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelMayor}:</span>
+          <span class="text-lg font-black text-green-600">$${priceInfo.priceMayor.toFixed(2)}</span>
         </div>
       </div>
     `
   }
 
-  const placeholderImage =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
-
   card.innerHTML = `
     <div class="product-image-container">
-      <img src="${product.imagen_url || placeholderImage}" 
+      <img src="${product.imagen_url || "/generic-product-display.png"}" 
            alt="${product.nombre}" 
            class="product-image"
-           loading="lazy"
-           onerror="this.src='${placeholderImage}'">
+           onerror="this.src='/generic-product-display.png'">
     </div>
-    <div class="p-4">
-      <div class="mb-2">
-        <span class="text-xs font-bold text-red-600 bg-red-50 px-3 py-1 rounded-full">
-          ${product.departamento || "General"}
-        </span>
+    <div class="p-5">
+      <h3 class="font-bold text-lg text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
+      ${product.descripcion ? `<p class="text-gray-600 text-sm mb-3 line-clamp-2">${product.descripcion}</p>` : ""}
+      <div class="mb-4">
+        ${priceHTML}
       </div>
-      <h3 class="text-base font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3rem]">${product.nombre}</h3>
-      <p class="text-sm text-gray-600 mb-4 line-clamp-2 min-h-[2.5rem]">${product.descripcion || "Sin descripción disponible"}</p>
-      <div class="flex items-end justify-between gap-3">
-        ${pricesHTML}
-        <button class="add-to-cart-btn bg-gradient-to-r from-red-600 to-red-700 text-white px-4 py-2.5 rounded-xl hover:from-red-700 hover:to-red-800 transition-all font-semibold shadow-lg transform hover:scale-105 text-sm whitespace-nowrap"
-                data-product-id="${product.id}"
-                data-price="${cartPrice}">
-          Agregar
-        </button>
-      </div>
+      ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
+      <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
+        Agregar al Carrito
+      </button>
     </div>
   `
 
-  card.querySelector(".add-to-cart-btn").addEventListener("click", (e) => {
-    const price = Number.parseFloat(e.currentTarget.dataset.price)
-    openQuantityModal({ ...product, cartPrice: price })
+  card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
+    openQuantityModal(product)
   })
 
   return card
 }
 
-function openQuantityModal(product) {
-  state.pendingProduct = product
+function getPriceForRole(product) {
+  switch (currentUserRole) {
+    case "admin":
+      return {
+        display: "single",
+        price: product.precio_gmayor || 0,
+        label: "Gran Mayor",
+      }
+    case "gestor":
+    case "distribuidor":
+      return {
+        display: "dual",
+        priceCliente: product.precio_cliente || 0,
+        priceMayor: product.precio_mayor || 0,
+        labelCliente: "Detal",
+        labelMayor: "Mayor",
+      }
+    case "cliente":
+    default:
+      return {
+        display: "single",
+        price: product.precio_cliente || 0,
+        label: "Detal",
+      }
+  }
+}
 
+// ============================================
+// CARRITO - ACTUALIZADO CON PERSISTENCIA
+// ============================================
+
+function saveCartToStorage() {
+  if (!currentUser) return
+
+  const cartKey = `sonimax_cart_${currentUser.auth_id}`
+  localStorage.setItem(cartKey, JSON.stringify(cart))
+  console.log(`💾 Carrito guardado para usuario ${currentUser.username}`)
+}
+
+function loadCartFromStorage() {
+  if (!currentUser) return
+
+  const cartKey = `sonimax_cart_${currentUser.auth_id}`
+  const savedCart = localStorage.getItem(cartKey)
+
+  if (savedCart) {
+    try {
+      cart = JSON.parse(savedCart)
+      updateCartCount()
+      console.log(`📦 Carrito cargado: ${cart.length} items`)
+    } catch (error) {
+      console.error("Error al cargar carrito:", error)
+      cart = []
+    }
+  }
+}
+
+function clearCart() {
+  cart = []
+  if (currentUser) {
+    const cartKey = `sonimax_cart_${currentUser.auth_id}`
+    localStorage.removeItem(cartKey)
+  }
+  updateCartCount()
+  renderCart()
+  console.log("🗑️ Carrito limpiado")
+}
+
+function openQuantityModal(product) {
+  selectedProductForQuantity = product
   const modal = document.getElementById("quantity-modal")
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
 
-  const placeholderImage =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
+  const priceInfo = getPriceForRole(product)
+
+  let priceHTML = ""
+  if (priceInfo.display === "single") {
+    priceHTML = `<p class="text-red-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
+  } else {
+    // Distribuidor/Gestor: mostrar ambos precios y permitir elegir
+    priceHTML = `
+      <div class="space-y-2 mb-4">
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Detal</span>
+            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
+        </label>
+        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
+          <div>
+            <span class="font-semibold text-gray-700">Precio Mayor</span>
+            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
+          </div>
+          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
+        </label>
+      </div>
+    `
+  }
 
   productInfo.innerHTML = `
-    <div class="flex items-center space-x-4">
-      <img src="${product.imagen_url || placeholderImage}" 
-           alt="${product.nombre}" 
-           class="w-20 h-20 object-cover rounded-xl shadow-md"
-           loading="lazy"
-           onerror="this.src='${placeholderImage}'">
-      <div class="flex-1">
-        <h3 class="font-bold text-gray-900 mb-1 text-sm">${product.nombre}</h3>
-        <p class="text-red-600 font-black text-xl">$${product.cartPrice.toFixed(2)}</p>
-      </div>
-    </div>
+    <h3 class="font-bold text-lg text-gray-800 mb-2">${product.nombre}</h3>
+    <p class="text-gray-600 text-sm mb-3">${product.descripcion || ""}</p>
+    ${priceHTML}
   `
 
   quantityInput.value = 1
-  quantityInput.focus()
-  quantityInput.select()
-
   modal.classList.remove("hidden")
-}
-
-function closeQuantityModal() {
-  document.getElementById("quantity-modal").classList.add("hidden")
-  state.pendingProduct = null
+  quantityInput.focus()
 }
 
 function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
 
-  if (!state.pendingProduct || quantity < 1) return
+  if (quantity < 1) {
+    alert("La cantidad debe ser al menos 1")
+    return
+  }
 
-  addToCart(state.pendingProduct, quantity)
-  closeQuantityModal()
+  const priceInfo = getPriceForRole(selectedProductForQuantity)
+  let selectedPrice
+
+  if (priceInfo.display === "dual") {
+    // Distribuidor/Gestor: obtener el precio seleccionado
+    const priceOption = document.querySelector('input[name="price-option"]:checked')?.value
+    selectedPrice = priceOption === "mayor" ? priceInfo.priceMayor : priceInfo.priceCliente
+  } else {
+    selectedPrice = priceInfo.price
+  }
+
+  addToCart(selectedProductForQuantity, quantity, selectedPrice)
+  document.getElementById("quantity-modal").classList.add("hidden")
 }
 
-function addToCart(product, quantity = 1) {
-  const price = product.cartPrice || product.precio_cliente
-  const existingItem = state.cart.find((item) => item.id === product.id)
+function addToCart(product, quantity, price) {
+  const existingItem = cart.find((item) => item.id === product.id && item.price === price)
 
   if (existingItem) {
     existingItem.quantity += quantity
   } else {
-    state.cart.push({
-      id: product.id,
-      nombre: product.nombre,
-      descripcion: product.descripcion || "",
-      price,
-      quantity,
-      imagen_url: product.imagen_url,
+    cart.push({
+      ...product,
+      quantity: quantity,
+      price: price,
     })
   }
 
-  saveCartToLocalStorage()
-  updateCartUI()
+  saveCartToStorage()
+  updateCartCount()
+  animateCartButton()
 
-  const cartButton = document.getElementById("cart-button")
-  cartButton.classList.add("cart-pulse")
-  setTimeout(() => cartButton.classList.remove("cart-pulse"), 300)
+  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}`)
 }
 
-function openCart() {
-  renderCart()
-  document.getElementById("cart-modal").classList.remove("hidden")
+function updateCartCount() {
+  const count = cart.reduce((sum, item) => sum + item.quantity, 0)
+  document.getElementById("cart-count").textContent = count
 }
 
-function closeCart() {
-  document.getElementById("cart-modal").classList.add("hidden")
+function animateCartButton() {
+  const cartBtn = document.getElementById("cart-button")
+  cartBtn.classList.add("cart-pulse")
+  setTimeout(() => cartBtn.classList.remove("cart-pulse"), 300)
 }
 
 function renderCart() {
-  const container = document.getElementById("cart-items")
-  const totalElement = document.getElementById("cart-total")
+  const cartItems = document.getElementById("cart-items")
+  const cartTotal = document.getElementById("cart-total")
 
-  if (state.cart.length === 0) {
-    container.innerHTML = `
+  if (cart.length === 0) {
+    cartItems.innerHTML = `
       <div class="text-center py-12">
         <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
@@ -707,500 +822,408 @@ function renderCart() {
         <p class="text-gray-500 text-lg font-medium">Tu carrito está vacío</p>
       </div>
     `
-    totalElement.textContent = "$0.00"
+    cartTotal.textContent = "$0.00"
     return
   }
 
-  container.innerHTML = ""
-  let total = 0
-
-  const placeholderImage =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect fill='%23f3f4f6' width='400' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='18' fill='%239ca3af'%3EProducto%3C/text%3E%3C/svg%3E"
-
-  state.cart.forEach((item) => {
-    const itemTotal = item.price * item.quantity
-    total += itemTotal
-
-    const cartItem = document.createElement("div")
-    cartItem.className = "cart-item"
-    cartItem.innerHTML = `
+  cartItems.innerHTML = cart
+    .map(
+      (item) => `
+    <div class="cart-item">
       <div class="flex items-center space-x-4">
-        <img src="${item.imagen_url || placeholderImage}" 
+        <img src="${item.imagen_url || "/generic-product-display.png"}" 
              alt="${item.nombre}" 
-             class="w-20 h-20 object-cover rounded-xl shadow-sm"
-             loading="lazy"
-             onerror="this.src='${placeholderImage}'">
-        <div class="flex-1 min-w-0">
-          <h4 class="font-bold text-gray-900 mb-1 truncate">${item.nombre}</h4>
-          <p class="text-red-600 font-black text-lg">$${item.price.toFixed(2)}</p>
-        </div>
-        <div class="flex items-center space-x-2">
-          <button class="quantity-button decrease-btn" data-product-id="${item.id}">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
-            </svg>
-          </button>
-          <span class="font-black text-gray-900 w-10 text-center text-lg">${item.quantity}</span>
-          <button class="quantity-button increase-btn" data-product-id="${item.id}">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-            </svg>
-          </button>
-          <button class="ml-2 p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all remove-btn" data-product-id="${item.id}">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-            </svg>
-          </button>
+             class="w-20 h-20 object-cover rounded-lg"
+             onerror="this.src='/generic-product-display.png'">
+        <div class="flex-1">
+          <h4 class="font-bold text-gray-800">${item.nombre}</h4>
+          <p class="text-red-600 font-bold text-lg">$${item.price.toFixed(2)}</p>
         </div>
       </div>
-      <div class="mt-3 text-right border-t border-gray-100 pt-2">
-        <span class="text-sm text-gray-600 font-medium">Subtotal: </span>
-        <span class="font-black text-gray-900 text-lg">$${itemTotal.toFixed(2)}</span>
+      <div class="flex items-center justify-between mt-4">
+        <div class="flex items-center space-x-3">
+          <button class="quantity-button" onclick="updateCartItemQuantity(${item.id}, -1)">-</button>
+          <span class="text-xl font-bold text-gray-800 min-w-[40px] text-center">${item.quantity}</span>
+          <button class="quantity-button" onclick="updateCartItemQuantity(${item.id}, 1)">+</button>
+        </div>
+        <button class="text-red-600 hover:text-red-700 font-semibold" onclick="removeFromCart(${item.id})">
+          Eliminar
+        </button>
       </div>
-    `
-    container.appendChild(cartItem)
-  })
+    </div>
+  `,
+    )
+    .join("")
 
-  container.querySelectorAll(".increase-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const productId = Number.parseInt(e.currentTarget.dataset.productId)
-      changeQuantity(productId, 1)
-    })
-  })
-
-  container.querySelectorAll(".decrease-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const productId = Number.parseInt(e.currentTarget.dataset.productId)
-      changeQuantity(productId, -1)
-    })
-  })
-
-  container.querySelectorAll(".remove-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const productId = Number.parseInt(e.currentTarget.dataset.productId)
-      removeFromCart(productId)
-    })
-  })
-
-  totalElement.textContent = `$${total.toFixed(2)}`
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  cartTotal.textContent = `$${total.toFixed(2)}`
 }
 
-function changeQuantity(productId, change) {
-  const item = state.cart.find((i) => i.id === productId)
-  if (item) {
-    item.quantity += change
-    if (item.quantity <= 0) {
-      removeFromCart(productId)
-    } else {
-      saveCartToLocalStorage()
-      updateCartUI()
-      renderCart()
-    }
+function updateCartItemQuantity(productId, change) {
+  const item = cart.find((i) => i.id === productId)
+  if (!item) return
+
+  item.quantity += change
+
+  if (item.quantity <= 0) {
+    removeFromCart(productId)
+  } else {
+    saveCartToStorage()
+    updateCartCount()
+    renderCart()
   }
 }
 
 function removeFromCart(productId) {
-  state.cart = state.cart.filter((item) => item.id !== productId)
-  saveCartToLocalStorage()
-  updateCartUI()
+  cart = cart.filter((item) => item.id !== productId)
+  saveCartToStorage()
+  updateCartCount()
   renderCart()
 }
 
+// ============================================
+// WHATSAPP
+// ============================================
+
 function sendWhatsAppOrder() {
-  if (state.cart.length === 0) {
+  if (cart.length === 0) {
     alert("El carrito está vacío")
     return
   }
 
-  let message = "Hola, quiero comprar los siguientes productos:\n\n"
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-  let total = 0
-  state.cart.forEach((item) => {
-    const itemTotal = item.price * item.quantity
-    total += itemTotal
-    message += `${item.quantity}x ${item.nombre}\n`
-    if (item.descripcion && item.descripcion.trim() !== "") {
-      message += `${item.descripcion}\n`
-    }
-    message += `Precio: $${itemTotal.toFixed(2)}\n\n`
+  let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
+  message += `*Cliente:* ${currentUser.name}\n`
+  message += `*Usuario:* ${currentUser.username}\n`
+  message += `*Rol:* ${currentUserRole}\n\n`
+  message += `*PRODUCTOS:*\n`
+
+  cart.forEach((item, index) => {
+    message += `\n${index + 1}. *${item.nombre}*\n`
+    message += `   Cantidad: ${item.quantity}\n`
+    message += `   Precio: $${item.price.toFixed(2)}\n`
+    message += `   Subtotal: $${(item.price * item.quantity).toFixed(2)}\n`
   })
 
-  message += `Total: $${total.toFixed(2)}\n\n`
-  message += `Mi nombre: ${state.userName}\n\n`
-  message += "Por favor, contáctame para el pedido."
+  message += `\n*TOTAL: $${total.toFixed(2)}*`
 
+  const whatsappNumber = "1234567890" // Cambiar por el número real
   const encodedMessage = encodeURIComponent(message)
-  const whatsappURL = `https://wa.me/?text=${encodedMessage}`
+  const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
 
-  state.cart = []
-  clearCartFromLocalStorage()
-  updateCartUI()
-  closeCart()
+  clearCart()
+
+  // Cerrar modal del carrito
+  document.getElementById("cart-modal").classList.add("hidden")
+
+  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
 
-function openCSVModal() {
-  document.getElementById("csv-modal").classList.remove("hidden")
+// ============================================
+// BÚSQUEDA
+// ============================================
+
+let searchTimeout = null
+
+function handleGlobalSearch(e) {
+  const query = e.target.value.toLowerCase().trim()
+
+  clearTimeout(searchTimeout)
+
+  if (query === "") {
+    filteredProducts = allProducts
+    renderProducts()
+    return
+  }
+
+  document.getElementById("search-loading").classList.remove("hidden")
+
+  searchTimeout = setTimeout(() => {
+    filteredProducts = allProducts.filter(
+      (p) =>
+        p.nombre.toLowerCase().includes(query) ||
+        (p.descripcion && p.descripcion.toLowerCase().includes(query)) ||
+        (p.departamento && p.departamento.toLowerCase().includes(query)),
+    )
+
+    renderProducts()
+    document.getElementById("search-loading").classList.add("hidden")
+  }, 300)
 }
 
-function closeCSVModal() {
-  document.getElementById("csv-modal").classList.add("hidden")
-  document.getElementById("csv-file-input").value = ""
-  document.getElementById("csv-file-name").classList.add("hidden")
-  document.getElementById("csv-status").classList.add("hidden")
+function handleDeptSearch(e) {
+  const query = e.target.value.toLowerCase().trim()
+
+  if (query === "") {
+    filterByDepartment(currentDepartment)
+    return
+  }
+
+  filteredProducts = allProducts.filter(
+    (p) =>
+      p.departamento === currentDepartment &&
+      (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
+  )
+
+  renderProducts()
 }
+
+// ============================================
+// CSV UPLOAD (Solo Admin)
+// ============================================
+
+let selectedCSVFile = null
 
 function handleCSVFileSelect(e) {
-  const file = e.target.files[0]
-  if (file) {
-    const fileNameDiv = document.getElementById("csv-file-name")
-    fileNameDiv.textContent = `📄 Archivo seleccionado: ${file.name}`
-    fileNameDiv.classList.remove("hidden")
+  selectedCSVFile = e.target.files[0]
+  if (selectedCSVFile) {
+    document.getElementById("csv-file-name").textContent = `Archivo seleccionado: ${selectedCSVFile.name}`
+    document.getElementById("csv-file-name").classList.remove("hidden")
   }
 }
 
 async function handleCSVUpload() {
-  if (state.userRole !== "admin") {
-    alert("Solo el administrador puede subir archivos CSV")
+  if (!selectedCSVFile) {
+    showCSVStatus("Por favor selecciona un archivo CSV", "error")
     return
   }
 
-  const fileInput = document.getElementById("csv-file-input")
-  const file = fileInput.files[0]
-  const statusDiv = document.getElementById("csv-status")
-  const submitBtn = document.getElementById("upload-csv-submit")
-
-  if (!file) {
-    alert("Por favor selecciona un archivo CSV")
+  if (currentUserRole !== "admin") {
+    showCSVStatus("Solo los administradores pueden subir productos", "error")
     return
   }
 
-  submitBtn.disabled = true
-  submitBtn.textContent = "Procesando..."
+  const reader = new FileReader()
 
-  try {
-    console.log("[v0] 📤 Iniciando carga de CSV...")
-    console.log(`[v0] 📄 Archivo: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`)
+  reader.onload = async (e) => {
+    try {
+      const text = e.target.result
+      const lines = text.split("\n").filter((line) => line.trim())
 
-    const text = await file.text()
-    const lines = text.split("\n").filter((line) => line.trim())
-
-    console.log(`[v0] 📋 Total de líneas en CSV: ${lines.length}`)
-
-    if (lines.length < 2) {
-      throw new Error("El archivo CSV está vacío o no tiene datos")
-    }
-
-    const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase())
-    console.log(`[v0] 📊 Columnas detectadas: ${headers.join(", ")}`)
-
-    const codigoIdx = headers.indexOf("codigo")
-    const descripcionIdx = headers.indexOf("descripcion")
-    const detalIdx = headers.indexOf("detal")
-    const mayorIdx = headers.indexOf("mayor")
-    const gmayorIdx = headers.indexOf("gmayor")
-    const departamentoIdx = headers.indexOf("departamento")
-    const urlIdx = headers.indexOf("url")
-
-    if (codigoIdx === -1 || descripcionIdx === -1 || detalIdx === -1 || mayorIdx === -1) {
-      throw new Error("El CSV debe contener: codigo, descripcion, detal, mayor")
-    }
-
-    const products = []
-    let skippedLines = 0
-
-    console.log("[v0] 🔄 Procesando productos del CSV...")
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i])
-
-      if (values.length < 3) {
-        skippedLines++
-        continue
+      if (lines.length < 2) {
+        throw new Error("El archivo CSV está vacío o no tiene datos")
       }
 
-      const product = {
-        nombre: values[codigoIdx] || `Producto ${i}`,
-        descripcion: values[descripcionIdx] || "",
-        precio_cliente: Number.parseFloat(values[detalIdx]) || 0,
-        precio_distribuidor: Number.parseFloat(values[mayorIdx]) || 0,
-        precio_gmayor: gmayorIdx !== -1 ? Number.parseFloat(values[gmayorIdx]) || 0 : 0,
-        departamento: departamentoIdx !== -1 ? values[departamentoIdx] || "General" : "General",
-        imagen_url: urlIdx !== -1 ? values[urlIdx] || null : null,
+      // Parsear headers (primera línea)
+      const headers = lines[0].split(",").map((h) => h.trim().toUpperCase())
+
+      // Encontrar índices de las columnas que necesitamos
+      const colIndexes = {
+        descripcion: headers.indexOf("DESCRIPCION"),
+        codigo: headers.indexOf("CODIGO"),
+        detal: headers.indexOf("DETAL"),
+        mayor: headers.indexOf("MAYOR"),
+        gmayor: headers.indexOf("GMAYOR"),
+        url: headers.indexOf("URL"),
+        departamento: headers.indexOf("DEPARTAMENTO"),
       }
 
-      if (product.precio_cliente > 0) {
+      // Verificar que existan las columnas necesarias
+      if (
+        colIndexes.descripcion === -1 ||
+        colIndexes.detal === -1 ||
+        colIndexes.mayor === -1 ||
+        colIndexes.gmayor === -1
+      ) {
+        throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
+      }
+
+      const products = []
+
+      // Parsear cada línea de datos
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+
+        // Parsear valores respetando comillas
+        const values = parseCSVLine(line)
+
+        if (values.length < headers.length) continue
+
+        // Extraer valores de las columnas
+        const descripcion = values[colIndexes.descripcion]?.trim() || ""
+        const codigo = colIndexes.codigo !== -1 ? values[colIndexes.codigo]?.trim() || "" : ""
+        const detal = values[colIndexes.detal]?.trim() || "0"
+        const mayor = values[colIndexes.mayor]?.trim() || "0"
+        const gmayor = values[colIndexes.gmayor]?.trim() || "0"
+        const url = colIndexes.url !== -1 ? values[colIndexes.url]?.trim() || null : null
+        const departamento =
+          colIndexes.departamento !== -1 ? values[colIndexes.departamento]?.trim() || "Sin categoría" : "Sin categoría"
+
+        // Validar que tenga al menos descripción
+        if (!descripcion) continue
+
+        const product = {
+          nombre: descripcion,
+          descripcion: codigo || "",
+          precio_cliente: Number.parseFloat(detal) || 0,
+          precio_mayor: Number.parseFloat(mayor) || 0,
+          precio_gmayor: Number.parseFloat(gmayor) || 0,
+          departamento: departamento,
+          imagen_url: url,
+        }
+
         products.push(product)
-      } else {
-        skippedLines++
       }
-    }
 
-    console.log(`[v0] ✅ Productos válidos parseados: ${products.length}`)
-    console.log(`[v0] ⚠️ Líneas omitidas: ${skippedLines}`)
+      if (products.length === 0) {
+        throw new Error("No se encontraron productos válidos en el CSV")
+      }
 
-    if (products.length === 0) {
-      throw new Error("No se pudieron parsear productos válidos del CSV")
-    }
+      showCSVStatus(`Procesando ${products.length} productos...`, "info")
 
-    console.log("[v0] 🗑️ Eliminando productos existentes...")
-    const { error: deleteError } = await supabaseClient.from("products").delete().neq("id", 0)
+      // Eliminar productos existentes
+      const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
-    if (deleteError) {
-      throw new Error("Error al eliminar productos: " + deleteError.message)
-    }
+      if (deleteError) {
+        console.error("Error al eliminar productos existentes:", deleteError)
+        throw new Error("Error al limpiar productos existentes")
+      }
 
-    console.log("[v0] 💾 Insertando nuevos productos en lotes de 100...")
-    const batchSize = 100
-    let insertedCount = 0
+      // Insertar nuevos productos
+      const { error } = await window.supabaseClient.from("products").insert(products)
 
-    for (let i = 0; i < products.length; i += batchSize) {
-      const batch = products.slice(i, i + batchSize)
-      const { error } = await supabaseClient.from("products").insert(batch)
       if (error) throw error
-      insertedCount += batch.length
-      console.log(
-        `[v0] 📦 Lote ${Math.floor(i / batchSize) + 1}: ${insertedCount}/${products.length} productos insertados`,
+
+      showCSVStatus(
+        `✅ ${products.length} productos subidos exitosamente (productos anteriores reemplazados)`,
+        "success",
       )
+
+      setTimeout(() => {
+        document.getElementById("csv-modal").classList.add("hidden")
+        loadProducts()
+      }, 2000)
+    } catch (error) {
+      console.error("❌ Error al procesar CSV:", error)
+      showCSVStatus(`Error: ${error.message}`, "error")
     }
-
-    console.log(`[v0] 🎉 ¡Carga completa! Total insertado: ${insertedCount} productos`)
-
-    statusDiv.textContent = `✅ ¡Éxito! ${products.length} productos cargados correctamente`
-    statusDiv.className = "mt-4 p-4 rounded-xl text-sm font-medium bg-green-50 text-green-700 border border-green-200"
-    statusDiv.classList.remove("hidden")
-
-    console.log("[v0] 🔄 Recargando departamentos y productos...")
-    await loadDepartments()
-    await loadProducts()
-
-    setTimeout(() => {
-      closeCSVModal()
-    }, 2000)
-  } catch (error) {
-    console.error("[v0] ❌ Error procesando CSV:", error)
-    statusDiv.textContent = `❌ Error: ${error.message}`
-    statusDiv.className = "mt-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
-    statusDiv.classList.remove("hidden")
-  } finally {
-    submitBtn.disabled = false
-    submitBtn.textContent = "Subir y Procesar CSV"
   }
+
+  reader.readAsText(selectedCSVFile)
 }
 
-function updateCartUI() {
-  const cartCount = document.getElementById("cart-count")
-  const totalItems = state.cart.reduce((sum, item) => sum + item.quantity, 0)
-  cartCount.textContent = totalItems
+function parseCSVLine(line) {
+  const values = []
+  let current = ""
+  let inQuotes = false
 
-  if (totalItems > 0) {
-    cartCount.classList.add("animate-pulse")
-  } else {
-    cartCount.classList.remove("animate-pulse")
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+
+    if (char === '"') {
+      inQuotes = !inQuotes
+    } else if (char === "," && !inQuotes) {
+      values.push(current)
+      current = ""
+    } else {
+      current += char
+    }
   }
+
+  values.push(current)
+  return values
 }
 
-function openSidebar() {
-  document.getElementById("sidebar-menu").classList.add("open")
-  document.getElementById("sidebar-overlay").classList.remove("hidden")
-  document.body.style.overflow = "hidden"
+function showCSVStatus(message, type) {
+  const statusDiv = document.getElementById("csv-status")
+  statusDiv.textContent = message
+  statusDiv.className = `mt-4 p-4 rounded-xl text-sm font-medium ${
+    type === "error"
+      ? "bg-red-100 border border-red-300 text-red-700"
+      : type === "success"
+        ? "bg-green-100 border border-green-300 text-green-700"
+        : "bg-blue-100 border border-blue-300 text-blue-700"
+  }`
+  statusDiv.classList.remove("hidden")
 }
 
-function closeSidebar() {
-  document.getElementById("sidebar-menu").classList.remove("open")
-  document.getElementById("sidebar-overlay").classList.add("hidden")
-  document.body.style.overflow = "auto"
-}
+// ============================================
+// PDF EXPORT (Solo Admin)
+// ============================================
 
-function openPDFModal() {
-  const modal = document.getElementById("pdf-modal")
+async function loadDepartmentsForPDF() {
   const select = document.getElementById("pdf-department-select")
+  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
 
   select.innerHTML = '<option value="">Selecciona un departamento...</option>'
-  state.departments.forEach((dept) => {
+
+  departments.forEach((dept) => {
     const option = document.createElement("option")
     option.value = dept
     option.textContent = dept
     select.appendChild(option)
   })
-
-  modal.classList.remove("hidden")
-}
-
-function closePDFModal() {
-  document.getElementById("pdf-modal").classList.add("hidden")
-  document.getElementById("pdf-status").classList.add("hidden")
 }
 
 async function generatePDF() {
-  const select = document.getElementById("pdf-department-select")
-  const selectedDept = select.value
-  const statusDiv = document.getElementById("pdf-status")
-  const generateBtn = document.getElementById("generate-pdf-button")
+  const department = document.getElementById("pdf-department-select").value
 
-  if (!selectedDept) {
-    statusDiv.textContent = "Por favor selecciona un departamento"
-    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
-    statusDiv.classList.remove("hidden")
+  if (!department) {
+    showPDFStatus("Por favor selecciona un departamento", "error")
     return
   }
 
-  generateBtn.disabled = true
-  generateBtn.innerHTML = `
-    <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-    <span>Generando PDF...</span>
-  `
+  if (currentUserRole !== "admin") {
+    showPDFStatus("Solo los administradores pueden exportar PDF", "error")
+    return
+  }
 
   try {
-    console.log(`[v0] 📄 Iniciando generación de PDF para departamento: ${selectedDept}`)
-
-    const deptProducts = state.products.filter((p) => p.departamento === selectedDept)
-    console.log(`[v0] 📦 Productos encontrados: ${deptProducts.length}`)
-
-    if (deptProducts.length === 0) {
-      throw new Error("No hay productos en este departamento")
-    }
-
-    statusDiv.textContent = `Procesando ${deptProducts.length} productos...`
-    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200"
-    statusDiv.classList.remove("hidden")
+    showPDFStatus("Generando PDF...", "info")
 
     const { jsPDF } = window.jspdf
     const doc = new jsPDF()
 
-    doc.setFontSize(20)
-    doc.setFont(undefined, "bold")
-    doc.text("SONIMAX MÓVIL", 105, 15, { align: "center" })
+    const productsInDept = allProducts.filter((p) => p.departamento === department)
 
-    doc.setFontSize(14)
-    doc.text(`Catálogo - ${selectedDept}`, 105, 23, { align: "center" })
+    doc.setFontSize(18)
+    doc.text(`SONIMAX MÓVIL - ${department}`, 14, 20)
 
     doc.setFontSize(10)
-    doc.setFont(undefined, "normal")
-    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 105, 30, { align: "center" })
+    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28)
+    doc.text(`Total de productos: ${productsInDept.length}`, 14, 34)
 
-    let yPosition = 40
-    const pageHeight = doc.internal.pageSize.height
-    const margin = 15
-    const productHeight = 45
+    const tableData = productsInDept.map((p) => [
+      p.nombre,
+      `$${p.precio_cliente.toFixed(2)}`,
+      `$${p.precio_mayor.toFixed(2)}`,
+      `$${p.precio_gmayor.toFixed(2)}`,
+    ])
 
-    for (let i = 0; i < deptProducts.length; i++) {
-      const product = deptProducts[i]
+    doc.autoTable({
+      startY: 40,
+      head: [["Producto", "Detal", "Mayor", "G. Mayor"]],
+      body: tableData,
+      theme: "grid",
+      headStyles: { fillColor: [220, 38, 38] },
+    })
 
-      if (yPosition + productHeight > pageHeight - margin) {
-        doc.addPage()
-        yPosition = 20
-      }
+    doc.save(`SONIMAX_${department}_${new Date().toISOString().split("T")[0]}.pdf`)
 
-      doc.setDrawColor(200, 200, 200)
-      doc.rect(margin, yPosition, 180, productHeight - 5)
-
-      if (product.imagen_url) {
-        try {
-          const imgData = await loadImageAsBase64(product.imagen_url)
-          doc.addImage(imgData, "JPEG", margin + 5, yPosition + 5, 30, 30)
-        } catch (error) {
-          console.warn(`[v0] ⚠️ No se pudo cargar imagen para ${product.nombre}`)
-          doc.setFillColor(240, 240, 240)
-          doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
-          doc.setFontSize(8)
-          doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
-        }
-      } else {
-        doc.setFillColor(240, 240, 240)
-        doc.rect(margin + 5, yPosition + 5, 30, 30, "F")
-        doc.setFontSize(8)
-        doc.text("Sin imagen", margin + 20, yPosition + 22, { align: "center" })
-      }
-
-      const textX = margin + 40
-
-      doc.setFontSize(11)
-      doc.setFont(undefined, "bold")
-      const productName = product.nombre.length > 50 ? product.nombre.substring(0, 50) + "..." : product.nombre
-      doc.text(productName, textX, yPosition + 10)
-
-      doc.setFontSize(9)
-      doc.setFont(undefined, "normal")
-      const description = product.descripcion || "Sin descripción"
-      const shortDesc = description.length > 60 ? description.substring(0, 60) + "..." : description
-      doc.text(shortDesc, textX, yPosition + 17)
-
-      doc.setFontSize(10)
-      doc.setFont(undefined, "bold")
-      doc.text(`Detal: $${product.precio_cliente.toFixed(2)}`, textX, yPosition + 25)
-      doc.text(`Mayor: $${(product.precio_distribuidor || product.precio_cliente).toFixed(2)}`, textX, yPosition + 31)
-
-      if (product.precio_gmayor && product.precio_gmayor > 0) {
-        doc.setTextColor(220, 38, 38)
-        doc.text(`GMayor: $${product.precio_gmayor.toFixed(2)}`, textX + 60, yPosition + 31)
-        doc.setTextColor(0, 0, 0)
-      }
-
-      yPosition += productHeight
-
-      if (i % 5 === 0) {
-        statusDiv.textContent = `Procesando ${i + 1}/${deptProducts.length} productos...`
-      }
-    }
-
-    const fileName = `SONIMAX_${selectedDept.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`
-    doc.save(fileName)
-
-    console.log(`[v0] ✅ PDF generado exitosamente: ${fileName}`)
-
-    statusDiv.textContent = `¡PDF generado exitosamente! (${deptProducts.length} productos)`
-    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-green-50 text-green-700 border border-green-200"
+    showPDFStatus("✅ PDF generado exitosamente", "success")
 
     setTimeout(() => {
-      closePDFModal()
+      document.getElementById("pdf-modal").classList.add("hidden")
     }, 2000)
   } catch (error) {
-    console.error("[v0] ❌ Error generando PDF:", error)
-    statusDiv.textContent = `Error: ${error.message}`
-    statusDiv.className = "mb-4 p-4 rounded-xl text-sm font-medium bg-red-50 text-red-700 border border-red-200"
-    statusDiv.classList.remove("hidden")
-  } finally {
-    generateBtn.disabled = false
-    generateBtn.innerHTML = `
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-      </svg>
-      <span>Generar y Descargar PDF</span>
-    `
+    console.error("❌ Error al generar PDF:", error)
+    showPDFStatus(`Error: ${error.message}`, "error")
   }
 }
 
-function loadImageAsBase64(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = "Anonymous"
-
-    img.onload = () => {
-      const canvas = document.createElement("canvas")
-      canvas.width = img.width
-      canvas.height = img.height
-
-      const ctx = canvas.getContext("2d")
-      ctx.drawImage(img, 0, 0)
-
-      try {
-        const dataURL = canvas.toDataURL("image/jpeg", 0.8)
-        resolve(dataURL)
-      } catch (error) {
-        reject(error)
-      }
-    }
-
-    img.onerror = () => {
-      reject(new Error("No se pudo cargar la imagen"))
-    }
-
-    img.src = url
-
-    setTimeout(() => {
-      reject(new Error("Timeout cargando imagen"))
-    }, 5000)
-  })
+function showPDFStatus(message, type) {
+  const statusDiv = document.getElementById("pdf-status")
+  statusDiv.textContent = message
+  statusDiv.className = `mb-4 p-4 rounded-xl text-sm font-medium ${
+    type === "error"
+      ? "bg-red-100 border border-red-300 text-red-700"
+      : type === "success"
+        ? "bg-green-100 border border-green-300 text-green-700"
+        : "bg-blue-100 border border-blue-300 text-blue-700"
+  }`
+  statusDiv.classList.remove("hidden")
 }
