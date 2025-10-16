@@ -901,9 +901,20 @@ function renderCart() {
 
   cartItems.innerHTML = ""
 
+  let totalDetal = 0
+  let totalMayor = 0
+  let totalGmayor = 0
+
   cart.forEach((item, index) => {
     const cartItemDiv = document.createElement("div")
     cartItemDiv.className = "cart-item"
+
+    const product = allProducts.find((p) => p.id === item.id)
+    if (product) {
+      totalDetal += (product.precio_cliente || 0) * item.quantity
+      totalMayor += (product.precio_mayor || 0) * item.quantity
+      totalGmayor += (product.precio_gmayor || 0) * item.quantity
+    }
 
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
@@ -913,7 +924,7 @@ function renderCart() {
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
-          <p class="text-red-600 font-bold text-lg">$${item.price.toFixed(2)}</p>
+          <p class="text-gray-600 text-sm">Cantidad: ${item.quantity}</p>
         </div>
       </div>
       <div class="flex items-center justify-between mt-4">
@@ -951,8 +962,49 @@ function renderCart() {
     cartItems.appendChild(cartItemDiv)
   })
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  cartTotal.textContent = `$${total.toFixed(2)}`
+  let totalHTML = ""
+
+  if (currentUserRole === "gestor") {
+    // Gestor ve los 3 totales
+    totalHTML = `
+      <div class="space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-sm font-semibold text-gray-600">Total Detal:</span>
+          <span class="text-lg font-black text-red-600">$${totalDetal.toFixed(2)}</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-sm font-semibold text-gray-600">Total Mayor:</span>
+          <span class="text-lg font-black text-green-600">$${totalMayor.toFixed(2)}</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-sm font-semibold text-gray-600">Total G.Mayor:</span>
+          <span class="text-lg font-black text-blue-600">$${totalGmayor.toFixed(2)}</span>
+        </div>
+      </div>
+    `
+  } else if (currentUserRole === "distribuidor") {
+    // Distribuidor ve 2 totales
+    totalHTML = `
+      <div class="space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-sm font-semibold text-gray-600">Total Detal:</span>
+          <span class="text-lg font-black text-red-600">$${totalDetal.toFixed(2)}</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-sm font-semibold text-gray-600">Total Mayor:</span>
+          <span class="text-lg font-black text-green-600">$${totalMayor.toFixed(2)}</span>
+        </div>
+      </div>
+    `
+  } else if (currentUserRole === "admin") {
+    // Admin ve solo total gmayor
+    totalHTML = `$${totalGmayor.toFixed(2)}`
+  } else {
+    // Cliente ve solo total detal
+    totalHTML = `$${totalDetal.toFixed(2)}`
+  }
+
+  cartTotal.innerHTML = totalHTML
 
   console.log("[v0] Carrito renderizado exitosamente")
 }
