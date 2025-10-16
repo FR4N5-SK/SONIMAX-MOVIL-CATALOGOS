@@ -702,8 +702,8 @@ function createProductCard(product) {
 
   card.innerHTML = `
     <div class="product-image-container">
-      <img src="${product.imagen_url || "/generic-product-display.png"}" 
-           alt="${product.nombre}" 
+      <img src="${product.imagen_url || "/generic-product-display.png"}"
+           alt="${product.nombre}"
            class="product-image"
            loading="lazy"
            onerror="this.src='/generic-product-display.png'">
@@ -971,8 +971,8 @@ function renderCart() {
 
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
-        <img src="${item.imagen_url || "/generic-product-display.png"}" 
-             alt="${item.nombre}" 
+        <img src="${item.imagen_url || "/generic-product-display.png"}"
+             alt="${item.nombre}"
              class="w-20 h-20 object-cover rounded-lg"
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
@@ -1090,12 +1090,12 @@ function removeFromCartByIndex(index) {
 // ============================================
 
 function sendWhatsAppOrder() {
+  console.log("[v0] Enviando pedido por WhatsApp...")
+
   if (cart.length === 0) {
     alert("El carrito está vacío")
     return
   }
-
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
   let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
   message += `*Cliente:* ${currentUser.name}\n`
@@ -1103,18 +1103,47 @@ function sendWhatsAppOrder() {
   message += `*Rol:* ${currentUserRole}\n\n`
   message += `*PRODUCTOS:*\n`
 
+  let totalDetal = 0
+  let totalMayor = 0
+  let totalGmayor = 0
+
   cart.forEach((item, index) => {
     message += `\n${index + 1}. *${item.nombre}*\n`
     message += `   Cantidad: ${item.quantity}\n`
-    message += `   Precio: $${item.price.toFixed(2)}\n`
+    message += `   Precio unitario: $${item.price.toFixed(2)}\n`
     message += `   Subtotal: $${(item.price * item.quantity).toFixed(2)}\n`
+
+    // Calcular totales por tipo de precio
+    const product = allProducts.find((p) => p.id === item.id)
+    if (product) {
+      totalDetal += (product.precio_cliente || 0) * item.quantity
+      totalMayor += (product.precio_mayor || 0) * item.quantity
+      totalGmayor += (product.precio_gmayor || 0) * item.quantity
+    }
   })
 
-  message += `\n*TOTAL: $${total.toFixed(2)}*`
+  // Agregar totales según el rol
+  message += `\n*TOTALES:*\n`
+
+  if (currentUserRole === "gestor") {
+    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+    message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
+    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}\n`
+  } else if (currentUserRole === "distribuidor") {
+    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+    message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
+  } else if (currentUserRole === "admin") {
+    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}\n`
+  } else {
+    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+  }
+
+  console.log("[v0] Mensaje generado:", message)
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
+  console.log("[v0] Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
 
   clearCart()
@@ -1290,7 +1319,7 @@ async function handleCSVUpload() {
       const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
       if (deleteError) {
-        console.error("Error al eliminar productos existentes:", deleteError)
+        console.error("Error al<bos>limpiar productos existentes:", deleteError)
         throw new Error("Error al limpiar productos existentes")
       }
 
