@@ -6,7 +6,6 @@
     <title>SONIMAX MÓVIL - Catálogo de Productos</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- Agregando jsPDF para exportación de PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="styles.css">
@@ -40,12 +39,13 @@
                 </button>
             </div>
 
+            <!-- Formulario de login - solo usuario y contraseña -->
             <form id="login-form" class="space-y-5">
                 <div>
-                    <label class="block text-white text-sm font-semibold mb-2">Correo Electrónico</label>
-                    <input type="email" id="login-email" required
+                    <label class="block text-white text-sm font-semibold mb-2">Nombre de Usuario</label>
+                    <input type="text" id="login-username" required
                         class="w-full px-4 py-3 rounded-xl bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
-                        placeholder="tu@email.com">
+                        placeholder="tu_usuario">
                 </div>
                 
                 <div>
@@ -61,6 +61,7 @@
                 </button>
             </form>
 
+            <!-- Formulario de registro - solo nombre, usuario y contraseña -->
             <form id="register-form" class="hidden space-y-5">
                 <div>
                     <label class="block text-white text-sm font-semibold mb-2">Nombre Completo</label>
@@ -70,10 +71,10 @@
                 </div>
 
                 <div>
-                    <label class="block text-white text-sm font-semibold mb-2">Correo Electrónico</label>
-                    <input type="email" id="register-email" required
+                    <label class="block text-white text-sm font-semibold mb-2">Nombre de Usuario</label>
+                    <input type="text" id="register-username" required
                         class="w-full px-4 py-3 rounded-xl bg-white/20 border border-white/30 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
-                        placeholder="tu@email.com">
+                        placeholder="usuario_unico">
                 </div>
                 
                 <div>
@@ -202,7 +203,7 @@
             </div>
         </div>
 
-        <!-- Botones Admin -->
+        <!-- Sección de administración (solo admin) -->
         <div id="admin-section" class="hidden container mx-auto px-4 py-6">
             <div class="flex flex-wrap gap-3">
                 <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
@@ -212,12 +213,24 @@
                     <span>Subir CSV de Productos</span>
                 </button>
                 
-                <!-- Nuevo botón para exportar PDF -->
                 <button id="export-pdf-button" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                     </svg>
                     <span>Exportar PDF por Departamento</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sección para gestores - crear usuarios (gestor y admin) -->
+        <div id="gestor-section" class="hidden container mx-auto px-4 py-6">
+            <div class="bg-white rounded-2xl shadow-lg p-6">
+                <h2 class="text-2xl font-black text-gray-800 mb-4">Gestión de Usuarios</h2>
+                <button id="create-user-button" class="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-700 text-white rounded-xl hover:from-orange-700 hover:to-orange-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                    </svg>
+                    <span>Crear Nuevo Usuario</span>
                 </button>
             </div>
         </div>
@@ -312,7 +325,7 @@
             </div>
         </div>
 
-        <!-- Nuevo modal para exportar PDF -->
+        <!-- Modal para exportar PDF -->
         <div id="pdf-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
             <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
                 <div class="flex items-center justify-between mb-6">
@@ -339,6 +352,59 @@
                     </svg>
                     <span>Generar y Descargar PDF</span>
                 </button>
+            </div>
+        </div>
+
+        <!-- Modal para crear usuarios (usado por gestor y admin) -->
+        <div id="create-user-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-black text-gray-800">Crear Nuevo Usuario</h2>
+                    <button id="close-create-user-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <form id="create-user-form" class="space-y-5">
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">Nombre Completo</label>
+                        <input type="text" id="new-user-name" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-orange-500 transition-all"
+                            placeholder="Nombre del usuario">
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">Nombre de Usuario</label>
+                        <input type="text" id="new-user-username" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-orange-500 transition-all"
+                            placeholder="usuario_unico">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">Contraseña</label>
+                        <input type="password" id="new-user-password" required minlength="6"
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-orange-500 transition-all"
+                            placeholder="Mínimo 6 caracteres">
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">Rol</label>
+                        <select id="new-user-role" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-orange-500 transition-all font-medium">
+                            <!-- Las opciones se cargarán dinámicamente según el rol del usuario actual -->
+                        </select>
+                    </div>
+                    
+                    <button type="submit" 
+                        class="w-full bg-orange-600 text-white font-bold py-3 rounded-xl hover:bg-orange-700 transition-all shadow-lg">
+                        Crear Usuario
+                    </button>
+                </form>
+                
+                <div id="create-user-error" class="hidden mt-4 p-4 bg-red-100 border border-red-300 rounded-xl text-red-700 text-sm font-medium"></div>
+                <div id="create-user-success" class="hidden mt-4 p-4 bg-green-100 border border-green-300 rounded-xl text-green-700 text-sm font-medium"></div>
             </div>
         </div>
 
