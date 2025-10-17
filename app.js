@@ -1086,7 +1086,7 @@ function removeFromCartByIndex(index) {
 }
 
 // ============================================
-// WHATSAPP - MENSAJE CON TOTALES SEGÚN ROL
+// WHATSAPP - MENSAJE CON TOTALES SEGÚN ROL Y ESPACIOS ENTRE PRODUCTOS
 // ============================================
 
 function sendWhatsAppOrder() {
@@ -1106,12 +1106,17 @@ function sendWhatsAppOrder() {
   let totalMayor = 0
   let totalGmayor = 0
 
-  cart.forEach((item) => {
+  cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
     const codigo = product ? (product.descripcion || "S/C") : "S/C"
     const subtotal = item.price * item.quantity
 
     message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    
+    // Agregar línea en blanco entre productos (excepto después del último)
+    if (index < cart.length - 1) {
+      message += `\n`
+    }
 
     // Calcular totales por tipo de precio
     if (product) {
@@ -1122,7 +1127,7 @@ function sendWhatsAppOrder() {
   })
 
   // Agregar totales según el rol del usuario
-  message += `\n*TOTALES:*\n`
+  message += `\n\n*TOTALES:*\n`
 
   if (currentUserRole === "gestor") {
     // Gestor ve los 3 totales
