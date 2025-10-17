@@ -1086,7 +1086,7 @@ function removeFromCartByIndex(index) {
 }
 
 // ============================================
-// WHATSAPP
+// WHATSAPP - MENSAJE CON TOTALES SEGÚN ROL
 // ============================================
 
 function sendWhatsAppOrder() {
@@ -1098,23 +1098,22 @@ function sendWhatsAppOrder() {
   }
 
   let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
-  message += `*Cliente:* ${currentUser.name}\n`
-  message += `*Usuario:* ${currentUser.username}\n`
-  message += `*Rol:* ${currentUserRole}\n\n`
+  message += `*Cliente:* ${currentUser.name}\n\n`
   message += `*PRODUCTOS:*\n`
 
+  // Calcular totales según el rol
   let totalDetal = 0
   let totalMayor = 0
   let totalGmayor = 0
 
-  cart.forEach((item, index) => {
-    message += `\n${index + 1}. *${item.nombre}*\n`
-    message += `   Cantidad: ${item.quantity}\n`
-    message += `   Precio unitario: $${item.price.toFixed(2)}\n`
-    message += `   Subtotal: $${(item.price * item.quantity).toFixed(2)}\n`
+  cart.forEach((item) => {
+    const product = allProducts.find((p) => p.id === item.id)
+    const codigo = product ? (product.descripcion || "S/C") : "S/C"
+    const subtotal = item.price * item.quantity
+
+    message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
 
     // Calcular totales por tipo de precio
-    const product = allProducts.find((p) => p.id === item.id)
     if (product) {
       totalDetal += (product.precio_cliente || 0) * item.quantity
       totalMayor += (product.precio_mayor || 0) * item.quantity
@@ -1122,20 +1121,24 @@ function sendWhatsAppOrder() {
     }
   })
 
-  // Agregar totales según el rol
+  // Agregar totales según el rol del usuario
   message += `\n*TOTALES:*\n`
 
   if (currentUserRole === "gestor") {
+    // Gestor ve los 3 totales
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
-    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}\n`
+    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
   } else if (currentUserRole === "distribuidor") {
+    // Distribuidor ve 2 totales
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
-    message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
+    message += `Total Mayor: $${totalMayor.toFixed(2)}`
   } else if (currentUserRole === "admin") {
-    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}\n`
+    // Admin ve solo total gmayor
+    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
   } else {
-    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+    // Cliente ve solo total detal
+    message += `Total Detal: $${totalDetal.toFixed(2)}`
   }
 
   console.log("[v0] Mensaje generado:", message)
@@ -1319,7 +1322,7 @@ async function handleCSVUpload() {
       const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
       if (deleteError) {
-        console.error("Error al<bos>limpiar productos existentes:", deleteError)
+        console.error("Error al limpiar productos existentes:", deleteError)
         throw new Error("Error al limpiar productos existentes")
       }
 
