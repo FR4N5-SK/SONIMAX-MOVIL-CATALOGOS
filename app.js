@@ -287,6 +287,17 @@ document.getElementById("logout-button")?.addEventListener("click", async () => 
   showLogin()
 })
 
+// Logout desde sidebar
+function logoutFromSidebar() {
+  window.supabaseClient.auth.signOut().then(() => {
+    currentUser = null
+    currentUserRole = null
+    cart = []
+    closeSidebar()
+    showLogin()
+  })
+}
+
 // ============================================
 // FUNCIONES DE UI
 // ============================================
@@ -340,6 +351,61 @@ function showCreateUserMessage(message, type) {
   } else {
     successDiv.textContent = message
     successDiv.classList.remove("hidden")
+  }
+}
+
+// ============================================
+// MODAL DE IMAGEN EXPANDIDA
+// ============================================
+
+function showImageModal(imageSrc, productName) {
+  // Crear el modal si no existe
+  let imageModal = document.getElementById("image-modal")
+  if (!imageModal) {
+    imageModal = document.createElement("div")
+    imageModal.id = "image-modal"
+    imageModal.className = "fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden"
+    imageModal.innerHTML = `
+      <div class="relative max-w-4xl max-h-full p-4">
+        <button id="close-image-modal" class="absolute top-2 right-2 text-white bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold hover:bg-opacity-75 transition-all z-10">
+          ×
+        </button>
+        <img id="modal-image" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl" alt="">
+        <div id="modal-image-title" class="text-white text-center mt-4 text-lg font-semibold"></div>
+      </div>
+    `
+    document.body.appendChild(imageModal)
+
+    // Agregar event listeners
+    document.getElementById("close-image-modal").addEventListener("click", closeImageModal)
+    imageModal.addEventListener("click", (e) => {
+      if (e.target === imageModal) {
+        closeImageModal()
+      }
+    })
+
+    // Cerrar con tecla Escape
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
+        closeImageModal()
+      }
+    })
+  }
+
+  // Actualizar contenido del modal
+  document.getElementById("modal-image").src = imageSrc
+  document.getElementById("modal-image-title").textContent = productName
+  
+  // Mostrar modal
+  imageModal.classList.remove("hidden")
+  document.body.style.overflow = "hidden" // Prevenir scroll del body
+}
+
+function closeImageModal() {
+  const imageModal = document.getElementById("image-modal")
+  if (imageModal) {
+    imageModal.classList.add("hidden")
+    document.body.style.overflow = "auto" // Restaurar scroll del body
   }
 }
 
@@ -550,6 +616,14 @@ function renderDepartments() {
     sidebarContainer.appendChild(sidebarBtn)
   })
 
+  // Agregar botón de cerrar sesión al final del sidebar
+  const logoutBtn = document.createElement("button")
+  logoutBtn.className =
+    "w-full text-left px-4 py-3 rounded-xl hover:bg-red-600/20 transition-all font-semibold text-red-400 border-t border-white/10 mt-4"
+  logoutBtn.innerHTML = `🚪 Cerrar Sesión`
+  logoutBtn.addEventListener("click", logoutFromSidebar)
+  sidebarContainer.appendChild(logoutBtn)
+
   // Botón "Todos" en navbar
   document.querySelectorAll('[data-dept="all"]').forEach((btn) => {
     btn.addEventListener("click", () => filterByDepartment("all"))
@@ -700,11 +774,13 @@ function createProductCard(product) {
     `
   }
 
+  const imageUrl = product.imagen_url || "/generic-product-display.png"
+
   card.innerHTML = `
     <div class="product-image-container">
-      <img src="${product.imagen_url || "/generic-product-display.png"}"
+      <img src="${imageUrl}"
            alt="${product.nombre}"
-           class="product-image"
+           class="product-image cursor-pointer hover:opacity-90 transition-opacity"
            loading="lazy"
            onerror="this.src='/generic-product-display.png'">
     </div>
@@ -721,6 +797,14 @@ function createProductCard(product) {
     </div>
   `
 
+  // Event listener para expandir imagen
+  const productImage = card.querySelector(".product-image")
+  productImage.addEventListener("click", (e) => {
+    e.stopPropagation()
+    showImageModal(imageUrl, product.nombre)
+  })
+
+  // Event listener para agregar al carrito
   card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
     openQuantityModal(product)
   })
@@ -971,7 +1055,7 @@ function renderCart() {
       <div class="flex items-center space-x-4">
         <img src="${item.imagen_url || "/generic-product-display.png"}"
              alt="${item.nombre}"
-             class="w-20 h-20 object-cover rounded-lg"
+             class="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
@@ -989,6 +1073,13 @@ function renderCart() {
         </button>
       </div>
     `
+
+    // Event listener para expandir imagen en el carrito
+    const cartImage = cartItemDiv.querySelector("img")
+    cartImage.addEventListener("click", (e) => {
+      e.stopPropagation()
+      showImageModal(item.imagen_url || "/generic-product-display.png", item.nombre)
+    })
 
     // Agregar event listeners directamente a los botones
     const decreaseBtn = cartItemDiv.querySelector(".cart-decrease-btn")
