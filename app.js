@@ -748,11 +748,9 @@ function getPriceForRole(product) {
       }
     case "distribuidor":
       return {
-        display: "dual",
-        priceCliente: product.precio_cliente || 0,
-        priceMayor: product.precio_mayor || 0,
-        labelCliente: "Detal",
-        labelMayor: "Mayor",
+        display: "single",
+        price: product.precio_mayor || 0,
+        label: "Mayor",
       }
     case "cliente":
     default:
@@ -815,7 +813,7 @@ function openQuantityModal(product) {
 
   let priceHTML = ""
   if (priceInfo.display === "single") {
-    priceHTML = `<p class="text-red-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
+    priceHTML = `<p class="text-green-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
   } else if (priceInfo.display === "dual") {
     priceHTML = `
       <div class="space-y-2 mb-4">
@@ -1036,19 +1034,8 @@ function renderCart() {
       </div>
     `
   } else if (currentUserRole === "distribuidor") {
-    // Distribuidor ve 2 totales
-    totalHTML = `
-      <div class="space-y-2">
-        <div class="flex justify-between items-center">
-          <span class="text-sm font-semibold text-gray-600">Total Detal:</span>
-          <span class="text-lg font-black text-red-600">$${totalDetal.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center">
-          <span class="text-sm font-semibold text-gray-600">Total Mayor:</span>
-          <span class="text-lg font-black text-green-600">$${totalMayor.toFixed(2)}</span>
-        </div>
-      </div>
-    `
+    // Distribuidor ve solo total mayor
+    totalHTML = `$${totalMayor.toFixed(2)}`
   } else if (currentUserRole === "admin") {
     // Admin ve solo total gmayor
     totalHTML = `$${totalGmayor.toFixed(2)}`
@@ -1135,8 +1122,7 @@ function sendWhatsAppOrder() {
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
     message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
   } else if (currentUserRole === "distribuidor") {
-    // Distribuidor ve 2 totales
-    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
+    // Distribuidor ve solo total mayor
     message += `Total Mayor: $${totalMayor.toFixed(2)}`
   } else if (currentUserRole === "admin") {
     // Admin ve solo total gmayor
