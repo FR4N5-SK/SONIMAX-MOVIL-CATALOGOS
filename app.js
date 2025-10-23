@@ -484,8 +484,25 @@ function setupEventListeners() {
   document.getElementById("global-search")?.addEventListener("input", handleGlobalSearch)
   document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
 
-  // WhatsApp
-  document.getElementById("send-whatsapp")?.addEventListener("click", sendWhatsAppOrder)
+  // WhatsApp - ACTUALIZADO PARA ADMIN
+  document.getElementById("send-whatsapp")?.addEventListener("click", () => {
+    if (currentUserRole === "admin") {
+      showOrderDetailsModal()
+    } else {
+      sendWhatsAppOrder()
+    }
+  })
+
+  // Modal de detalles del pedido para admin
+  document.getElementById("close-order-details-modal")?.addEventListener("click", () => {
+    document.getElementById("order-details-modal").classList.add("hidden")
+  })
+
+  document.getElementById("cancel-order-details")?.addEventListener("click", () => {
+    document.getElementById("order-details-modal").classList.add("hidden")
+  })
+
+  document.getElementById("confirm-order-details")?.addEventListener("click", confirmOrderDetails)
 
   // CSV Upload
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
@@ -1164,7 +1181,268 @@ function removeFromCartByIndex(index) {
 }
 
 // ============================================
-// WHATSAPP - MENSAJE CON TOTALES SEGÚN ROL Y ESPACIOS ENTRE PRODUCTOS
+// MODAL DE DETALLES DEL PEDIDO PARA ADMIN
+// ============================================
+
+function showOrderDetailsModal() {
+  if (cart.length === 0) {
+    alert("El carrito está vacío")
+    return
+  }
+
+  // Crear el modal si no existe
+  let orderModal = document.getElementById("order-details-modal")
+  if (!orderModal) {
+    orderModal = document.createElement("div")
+    orderModal.id = "order-details-modal"
+    orderModal.className = "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden"
+    orderModal.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="p-6">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">Detalles del Pedido</h2>
+            <button id="close-order-details-modal" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">×</button>
+          </div>
+          
+          <div class="space-y-4">
+            <div>
+              <label for="order-responsables" class="block text-sm font-semibold text-gray-700 mb-2">Responsables:</label>
+              <input type="text" id="order-responsables" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Ingrese los responsables">
+            </div>
+            
+            <div>
+              <label for="order-sitio" class="block text-sm font-semibold text-gray-700 mb-2">Sitio:</label>
+              <input type="text" id="order-sitio" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Ingrese el sitio" required>
+            </div>
+          </div>
+          
+          <div id="order-details-error" class="hidden mt-4 p-4 bg-red-100 border border-red-300 text-red-700 rounded-xl text-sm font-medium"></div>
+          
+          <div class="flex space-x-3 mt-6">
+            <button id="cancel-order-details" class="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition-all">
+              Cancelar
+            </button>
+            <button id="confirm-order-details" class="flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all">
+              Enviar Pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+    document.body.appendChild(orderModal)
+
+    // Agregar event listeners
+    document.getElementById("close-order-details-modal").addEventListener("click", () => {
+      orderModal.classList.add("hidden")
+    })
+
+    document.getElementById("cancel-order-details").addEventListener("click", () => {
+      orderModal.classList.add("hidden")
+    })
+
+    document.getElementById("confirm-order-details").addEventListener("click", confirmOrderDetails)
+
+    // Cerrar modal al hacer clic fuera
+    orderModal.addEventListener("click", (e) => {
+      if (e.target === orderModal) {
+        orderModal.classList.add("hidden")
+      }
+    })
+  }
+
+  // Limpiar campos y mostrar modal
+  document.getElementById("order-responsables").value = ""
+  document.getElementById("order-sitio").value = ""
+  document.getElementById("order-details-error").classList.add("hidden")
+  orderModal.classList.remove("hidden")
+  document.getElementById("order-responsables").focus()
+}
+
+function confirmOrderDetails() {
+  const responsables = document.getElementById("order-responsables").value.trim()
+  const sitio = document.getElementById("order-sitio").value.trim()
+  const errorDiv = document.getElementById("order-details-error")
+
+  if (!sitio) {
+    errorDiv.textContent = "El campo 'Sitio' es obligatorio"
+    errorDiv.classList.remove("hidden")
+    return
+  }
+
+  errorDiv.classList.add("hidden")
+
+  // Generar Excel y enviar WhatsApp
+  generateExcelAndSendOrder(responsables, sitio)
+
+  // Cerrar modal
+  document.getElementById("order-details-modal").classList.add("hidden")
+}
+
+// ============================================
+// WHATSAPP CON EXCEL PARA ADMIN
+// ============================================
+
+function generateExcelAndSendOrder(responsables, sitio) {
+  console.log("[v0] Generando Excel y enviando pedido para admin...")
+
+  try {
+    // Crear workbook y worksheet
+    const wb = XLSX.utils.book_new()
+    
+    // Preparar datos para Excel
+    const excelData = []
+    
+    // Encabezado
+    excelData.push(['PEDIDO SONIMAX MÓVIL'])
+    excelData.push([]) // Línea vacía
+    excelData.push(['Cliente:', currentUser.name])
+    if (responsables) {
+      excelData.push(['Responsables:', responsables])
+    }
+    excelData.push(['Sitio:', sitio])
+    excelData.push(['Fecha:', new Date().toLocaleDateString()])
+    excelData.push([]) // Línea vacía
+    
+    // Encabezados de tabla
+    excelData.push(['CANTIDAD', 'CÓDIGO', 'DESCRIPCIÓN', 'PRECIO UNITARIO', 'SUBTOTAL'])
+    
+    let totalGmayor = 0
+    
+    // Datos de productos
+    cart.forEach((item) => {
+      const product = allProducts.find((p) => p.id === item.id)
+      const codigo = product ? (product.descripcion || "S/C") : "S/C"
+      const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+      const subtotal = precioUnitario * item.quantity
+      
+      totalGmayor += subtotal
+      
+      excelData.push([
+        item.quantity,
+        codigo,
+        item.nombre,
+        `$${precioUnitario.toFixed(2)}`,
+        `$${subtotal.toFixed(2)}`
+      ])
+    })
+    
+    // Total
+    excelData.push([]) // Línea vacía
+    excelData.push(['', '', '', 'TOTAL:', `$${totalGmayor.toFixed(2)}`])
+    
+    // Crear worksheet
+    const ws = XLSX.utils.aoa_to_sheet(excelData)
+    
+    // Ajustar ancho de columnas
+    const colWidths = [
+      { wch: 10 }, // CANTIDAD
+      { wch: 15 }, // CÓDIGO
+      { wch: 40 }, // DESCRIPCIÓN
+      { wch: 15 }, // PRECIO UNITARIO
+      { wch: 15 }  // SUBTOTAL
+    ]
+    ws['!cols'] = colWidths
+    
+    // Agregar worksheet al workbook
+    XLSX.utils.book_append_sheet(wb, ws, "Pedido")
+    
+    // Generar nombre del archivo con el sitio
+    const fileName = `${sitio.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
+    
+    // Descargar Excel
+    XLSX.writeFile(wb, fileName)
+    
+    console.log(`✅ Excel generado: ${fileName}`)
+    
+    // Generar mensaje de WhatsApp
+    let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
+    message += `*Cliente:* ${currentUser.name}\n`
+    if (responsables) {
+      message += `*Responsables:* ${responsables}\n`
+    }
+    message += `*Sitio:* ${sitio}\n\n`
+    message += `*PRODUCTOS:*\n`
+
+    cart.forEach((item, index) => {
+      const product = allProducts.find((p) => p.id === item.id)
+      const codigo = product ? (product.descripcion || "S/C") : "S/C"
+      const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+      const subtotal = precioUnitario * item.quantity
+
+      message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+      
+      // Agregar línea en blanco entre productos (excepto después del último)
+      if (index < cart.length - 1) {
+        message += `\n`
+      }
+    })
+
+    message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
+    message += `\n\n📊 *Archivo Excel adjunto con detalles completos*`
+
+    console.log("[v0] Mensaje generado:", message)
+
+    const encodedMessage = encodeURIComponent(message)
+    const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
+
+    console.log("[v0] Abriendo WhatsApp...")
+    window.open(whatsappURL, "_blank")
+
+    clearCart()
+
+    // Cerrar modal del carrito
+    document.getElementById("cart-modal").classList.add("hidden")
+
+    alert(`Pedido enviado por WhatsApp y Excel descargado como: ${fileName}\nEl carrito ha sido limpiado.`)
+
+  } catch (error) {
+    console.error("❌ Error al generar Excel:", error)
+    alert("Error al generar el archivo Excel. Se enviará solo el mensaje de WhatsApp.")
+    
+    // Fallback: enviar solo WhatsApp sin Excel
+    sendWhatsAppOrderFallback(responsables, sitio)
+  }
+}
+
+function sendWhatsAppOrderFallback(responsables, sitio) {
+  let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
+  message += `*Cliente:* ${currentUser.name}\n`
+  if (responsables) {
+    message += `*Responsables:* ${responsables}\n`
+  }
+  message += `*Sitio:* ${sitio}\n\n`
+  message += `*PRODUCTOS:*\n`
+
+  let totalGmayor = 0
+
+  cart.forEach((item, index) => {
+    const product = allProducts.find((p) => p.id === item.id)
+    const codigo = product ? (product.descripcion || "S/C") : "S/C"
+    const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+    const subtotal = precioUnitario * item.quantity
+
+    totalGmayor += subtotal
+
+    message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    
+    if (index < cart.length - 1) {
+      message += `\n`
+    }
+  })
+
+  message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
+
+  const encodedMessage = encodeURIComponent(message)
+  const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
+
+  window.open(whatsappURL, "_blank")
+  clearCart()
+  document.getElementById("cart-modal").classList.add("hidden")
+  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
+}
+
+// ============================================
+// WHATSAPP - MENSAJE PARA OTROS ROLES (SIN CAMBIOS)
 // ============================================
 
 function sendWhatsAppOrder() {
@@ -1215,9 +1493,6 @@ function sendWhatsAppOrder() {
   } else if (currentUserRole === "distribuidor") {
     // Distribuidor ve solo total mayor
     message += `Total Mayor: $${totalMayor.toFixed(2)}`
-  } else if (currentUserRole === "admin") {
-    // Admin ve solo total gmayor
-    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
   } else {
     // Cliente ve solo total detal
     message += `Total Detal: $${totalDetal.toFixed(2)}`
@@ -1240,14 +1515,70 @@ function sendWhatsAppOrder() {
 }
 
 // ============================================
-// BÚSQUEDA
+// BÚSQUEDA MEJORADA - EXHAUSTIVA Y MULTI-PALABRA
 // ============================================
 
 let searchTimeout = null
 let deptSearchTimeout = null
 
+// Función para normalizar texto (quitar acentos y convertir a minúsculas)
+function normalizeText(text) {
+  if (!text) return ""
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Quitar acentos
+    .trim()
+}
+
+// Función para dividir query en palabras y limpiarlas
+function getSearchWords(query) {
+  return query
+    .split(/\s+/) // Dividir por espacios
+    .map(word => normalizeText(word))
+    .filter(word => word.length > 0) // Filtrar palabras vacías
+}
+
+// Función de búsqueda exhaustiva
+function searchProducts(products, query) {
+  if (!query || query.trim() === "") {
+    return products
+  }
+
+  const searchWords = getSearchWords(query)
+  if (searchWords.length === 0) {
+    return products
+  }
+
+  console.log("[SEARCH] Buscando palabras:", searchWords)
+
+  return products.filter(product => {
+    // Normalizar campos del producto
+    const normalizedName = normalizeText(product.nombre)
+    const normalizedDescription = normalizeText(product.descripcion)
+    const normalizedDepartment = normalizeText(product.departamento)
+    
+    // Crear texto combinado para búsqueda
+    const combinedText = `${normalizedName} ${normalizedDescription} ${normalizedDepartment}`
+    
+    // Verificar que TODAS las palabras estén presentes
+    const allWordsFound = searchWords.every(word => {
+      return normalizedName.includes(word) || 
+             normalizedDescription.includes(word) || 
+             normalizedDepartment.includes(word) ||
+             combinedText.includes(word)
+    })
+    
+    if (allWordsFound) {
+      console.log(`[SEARCH] ✅ Encontrado: ${product.nombre}`)
+    }
+    
+    return allWordsFound
+  })
+}
+
 function handleGlobalSearch(e) {
-  const query = e.target.value.toLowerCase().trim()
+  const query = e.target.value.trim()
 
   clearTimeout(searchTimeout)
 
@@ -1261,12 +1592,11 @@ function handleGlobalSearch(e) {
   document.getElementById("search-loading").classList.remove("hidden")
 
   searchTimeout = setTimeout(() => {
-    filteredProducts = allProducts.filter(
-      (p) =>
-        p.nombre.toLowerCase().includes(query) ||
-        (p.descripcion && p.descripcion.toLowerCase().includes(query)) ||
-        (p.departamento && p.departamento.toLowerCase().includes(query)),
-    )
+    console.log("[SEARCH] Búsqueda global:", query)
+    
+    filteredProducts = searchProducts(allProducts, query)
+    
+    console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     currentPage = 1
     renderProducts()
@@ -1275,7 +1605,7 @@ function handleGlobalSearch(e) {
 }
 
 function handleDeptSearch(e) {
-  const query = e.target.value.toLowerCase().trim()
+  const query = e.target.value.trim()
 
   clearTimeout(deptSearchTimeout)
 
@@ -1285,11 +1615,17 @@ function handleDeptSearch(e) {
   }
 
   deptSearchTimeout = setTimeout(() => {
-    filteredProducts = allProducts.filter(
-      (p) =>
-        p.departamento === currentDepartment &&
-        (p.nombre.toLowerCase().includes(query) || (p.descripcion && p.descripcion.toLowerCase().includes(query))),
-    )
+    console.log("[SEARCH] Búsqueda en departamento:", currentDepartment, "Query:", query)
+    
+    // Primero filtrar por departamento
+    const productsInDept = currentDepartment === "all" 
+      ? allProducts 
+      : allProducts.filter(p => p.departamento === currentDepartment)
+    
+    // Luego aplicar búsqueda de texto
+    filteredProducts = searchProducts(productsInDept, query)
+    
+    console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
 
     currentPage = 1
     renderProducts()
