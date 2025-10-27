@@ -1,6 +1,14 @@
 // SONIMAX MÓVIL - Aplicación Principal
 // Sistema actualizado con USUARIO en lugar de EMAIL
 
+/* global XLSX */
+/* eslint-disable no-undef */
+
+/**
+ * @typedef {Object} XLSX
+ * @global
+ */
+
 let currentUser = null
 let currentUserRole = null
 let allProducts = []
@@ -13,12 +21,165 @@ let currentPage = 1
 const PRODUCTS_PER_PAGE = 50
 let isLoadingMore = false
 
+let imageObserver = null
+let serviceWorkerRegistration = null
+const preloadedImagesCount = 0
+let totalImagesToPreload = 0
+
+// ============================================
+// SERVICE WORKER Y CACHÉ DE IMÁGENES
+// ============================================
+
+async function registerServiceWorker() {
+  if ("serviceWorker" in navigator) {
+    try {
+      serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js")
+      console.log("✅ Service Worker registrado para caché de imágenes")
+
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        if (event.data && event.data.type === "PRELOAD_PROGRESS") {
+          console.log(
+            `📥 Imágenes cargadas: ${event.data.loaded}/${event.data.total} (Lote ${event.data.batch}/${event.data.totalBatches})`,
+          )
+        }
+
+        if (event.data && event.data.type === "PRELOAD_COMPLETE") {
+          console.log(`✅ Precarga completada: ${event.data.count}/${event.data.total} imágenes en caché`)
+          showPreloadNotification(`${event.data.count} imágenes cargadas y guardadas`)
+        }
+      })
+    } catch (error) {
+      console.error("❌ Error registrando Service Worker:", error)
+    }
+  }
+}
+
+function showPreloadNotification(message) {
+  const notification = document.createElement("div")
+  notification.className =
+    "fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-xl shadow-lg z-50 animate-fade-in"
+  notification.innerHTML = `
+    <div class="flex items-center space-x-2">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+      </svg>
+      <span class="font-semibold">${message}</span>
+    </div>
+  `
+  document.body.appendChild(notification)
+
+  setTimeout(() => {
+    notification.style.opacity = "0"
+    notification.style.transition = "opacity 0.3s"
+    setTimeout(() => notification.remove(), 300)
+  }, 3000)
+}
+
+async function preloadAllImages() {
+  if (!serviceWorkerRegistration || !serviceWorkerRegistration.active) {
+    console.log("⏳ Esperando Service Worker...")
+    return
+  }
+
+  // Obtener todas las URLs de imágenes optimizadas
+  const imageUrls = allProducts
+    .map((p) => p.imagen_url)
+    .filter((url) => url && url !== "/generic-product-display.png")
+    .map((url) => optimizeImageUrl(url))
+
+  if (imageUrls.length === 0) return
+
+  totalImagesToPreload = imageUrls.length
+  console.log(`🚀 Iniciando precarga de ${totalImagesToPreload} imágenes en segundo plano...`)
+
+  // Enviar mensaje al Service Worker para precargar
+  serviceWorkerRegistration.active.postMessage({
+    type: "PRELOAD_IMAGES",
+    urls: imageUrls,
+  })
+}
+
+// ============================================
+// OPTIMIZACIÓN DE IMÁGENES
+// ============================================
+
+function optimizeImageUrl(url) {
+  if (!url || url === "/generic-product-display.png") {
+    return url
+  }
+
+  // Si es una URL de imgbb (ibb.co o i.ibb.co)
+  if (url.includes("ibb.co")) {
+    // Agregar parámetros de compresión y tamaño reducido
+    // Imgbb soporta parámetros de tamaño en la URL
+    // Convertir a thumbnail de 400px de ancho para carga rápida
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=400&quality=70`
+  }
+
+  return url
+}
+
+function createImagePlaceholder(url) {
+  if (!url || url === "/generic-product-display.png") {
+    return url
+  }
+
+  if (url.includes("ibb.co")) {
+    // Crear versión ultra pequeña (50px) para placeholder
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=50&quality=30`
+  }
+
+  return url
+}
+
+function initImageObserver() {
+  if ("IntersectionObserver" in window) {
+    imageObserver = new IntersectionObserver(
+      (entries, observer) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const img = entry.target
+            const fullSrc = img.dataset.src
+
+            if (fullSrc) {
+              // Crear nueva imagen para precargar
+              const tempImg = new Image()
+              tempImg.onload = () => {
+                img.src = fullSrc
+                img.classList.remove("image-loading")
+                img.classList.add("image-loaded")
+              }
+              tempImg.onerror = () => {
+                img.src = "/generic-product-display.png"
+                img.classList.remove("image-loading")
+              }
+              tempImg.src = fullSrc
+
+              observer.unobserve(img)
+            }
+          }
+        })
+      },
+      {
+        rootMargin: "100px", // Cargar imágenes 50px antes de que sean visibles
+        threshold: 0.01,
+      },
+    )
+  }
+}
+
 // ============================================
 // INICIALIZACIÓN
 // ============================================
 
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("🚀 Iniciando SONIMAX MÓVIL...")
+
+  await registerServiceWorker()
+
+  initImageObserver()
 
   // Verificar sesión existente
   const {
@@ -38,10 +199,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupEventListeners()
 })
 
-// ============================================
-// AUTENTICACIÓN - ACTUALIZADA CON USUARIOS
-// ============================================
-
 document.getElementById("login-form").addEventListener("submit", async (e) => {
   e.preventDefault()
   const username = document.getElementById("login-username").value.trim().toLowerCase()
@@ -52,14 +209,12 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   try {
     const internalEmail = `${username}@sonimax.internal`
 
-    // Usar el email generado para autenticar
     const { data, error } = await window.supabaseClient.auth.signInWithPassword({
       email: internalEmail,
       password: password,
     })
 
     if (error) {
-      // Si el error es de credenciales inválidas, mostrar mensaje genérico
       if (error.message.includes("Invalid login credentials")) {
         throw new Error("Usuario o contraseña incorrectos")
       }
@@ -90,7 +245,6 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
   showAuthMessage("Creando cuenta...", "info")
 
   try {
-    // Verificar si el username ya existe
     const { data: existingUser } = await window.supabaseClient
       .from("users")
       .select("username")
@@ -101,10 +255,8 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
       throw new Error("El nombre de usuario ya está en uso")
     }
 
-    // Generar email interno basado en username
     const internalEmail = `${username}@sonimax.internal`
 
-    // Crear usuario en Supabase Auth
     const { data, error } = await window.supabaseClient.auth.signUp({
       email: internalEmail,
       password: password,
@@ -155,7 +307,6 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
   showCreateUserMessage("Creando usuario...", "info")
 
   try {
-    // Verificar si el username ya existe
     const { data: existingUser } = await window.supabaseClient
       .from("users")
       .select("username")
@@ -166,7 +317,6 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
       throw new Error("El nombre de usuario ya está en uso")
     }
 
-    // Generar email interno
     const internalEmail = `${username}@sonimax.internal`
 
     const { data, error } = await window.supabaseClient.auth.signUp({
@@ -201,7 +351,6 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
     console.log("✅ Usuario creado exitosamente con rol:", role)
     showCreateUserMessage(`Usuario "${username}" creado exitosamente con rol de ${role}`, "success")
 
-    // Limpiar formulario
     document.getElementById("create-user-form").reset()
 
     setTimeout(() => {
@@ -213,7 +362,6 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
   }
 })
 
-// Cargar datos del usuario
 async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
@@ -242,7 +390,6 @@ async function loadUserData(userId) {
     updateUIForRole()
   } catch (error) {
     console.error("❌ Error al cargar datos del usuario:", error)
-    // Si hay error, cerrar sesión
     await window.supabaseClient.auth.signOut()
     showLogin()
   }
@@ -261,10 +408,6 @@ function updateUIForRole() {
     roleBadge.classList.remove("hidden")
   }
 
-  // Admin: puede subir CSV, exportar PDF y crear usuarios
-  // Gestor: solo puede crear usuarios
-  // Distribuidor: solo ve catálogo con precios detal y mayor (NO crea usuarios)
-  // Cliente: solo ve catálogo con precios de cliente
   if (currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     gestorSection?.classList.remove("hidden")
@@ -272,13 +415,11 @@ function updateUIForRole() {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.remove("hidden")
   } else {
-    // distribuidor y cliente no ven ninguna sección de administración
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
   }
 }
 
-// Logout
 document.getElementById("logout-button")?.addEventListener("click", async () => {
   await window.supabaseClient.auth.signOut()
   currentUser = null
@@ -287,7 +428,6 @@ document.getElementById("logout-button")?.addEventListener("click", async () => 
   showLogin()
 })
 
-// Logout desde sidebar
 function logoutFromSidebar() {
   window.supabaseClient.auth.signOut().then(() => {
     currentUser = null
@@ -297,10 +437,6 @@ function logoutFromSidebar() {
     showLogin()
   })
 }
-
-// ============================================
-// FUNCIONES DE UI
-// ============================================
 
 function showLogin() {
   document.getElementById("loading-screen").classList.add("hidden")
@@ -354,12 +490,7 @@ function showCreateUserMessage(message, type) {
   }
 }
 
-// ============================================
-// MODAL DE IMAGEN EXPANDIDA
-// ============================================
-
 function showImageModal(imageSrc, productName) {
-  // Crear el modal si no existe
   let imageModal = document.getElementById("image-modal")
   if (!imageModal) {
     imageModal = document.createElement("div")
@@ -376,7 +507,6 @@ function showImageModal(imageSrc, productName) {
     `
     document.body.appendChild(imageModal)
 
-    // Agregar event listeners
     document.getElementById("close-image-modal").addEventListener("click", closeImageModal)
     imageModal.addEventListener("click", (e) => {
       if (e.target === imageModal) {
@@ -384,7 +514,6 @@ function showImageModal(imageSrc, productName) {
       }
     })
 
-    // Cerrar con tecla Escape
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
         closeImageModal()
@@ -392,29 +521,22 @@ function showImageModal(imageSrc, productName) {
     })
   }
 
-  // Actualizar contenido del modal
-  document.getElementById("modal-image").src = imageSrc
+  document.getElementById("modal-image").src = optimizeImageUrl(imageSrc)
   document.getElementById("modal-image-title").textContent = productName
-  
-  // Mostrar modal
+
   imageModal.classList.remove("hidden")
-  document.body.style.overflow = "hidden" // Prevenir scroll del body
+  document.body.style.overflow = "hidden"
 }
 
 function closeImageModal() {
   const imageModal = document.getElementById("image-modal")
   if (imageModal) {
     imageModal.classList.add("hidden")
-    document.body.style.overflow = "auto" // Restaurar scroll del body
+    document.body.style.overflow = "auto"
   }
 }
 
-// ============================================
-// EVENT LISTENERS
-// ============================================
-
 function setupEventListeners() {
-  // Tabs de autenticación
   document.getElementById("show-login-btn")?.addEventListener("click", () => {
     document.getElementById("login-form").classList.remove("hidden")
     document.getElementById("register-form").classList.add("hidden")
@@ -432,11 +554,8 @@ function setupEventListeners() {
   document.getElementById("create-user-button")?.addEventListener("click", () => {
     const roleSelect = document.getElementById("new-user-role")
 
-    // Limpiar opciones anteriores
     roleSelect.innerHTML = ""
 
-    // Gestor puede crear: cliente, distribuidor, gestor
-    // Admin puede crear: cliente, distribuidor, gestor, admin
     if (currentUserRole === "gestor") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
@@ -461,7 +580,6 @@ function setupEventListeners() {
     document.getElementById("create-user-modal").classList.add("hidden")
   })
 
-  // Sidebar
   document.getElementById("open-sidebar")?.addEventListener("click", () => {
     document.getElementById("sidebar-menu").classList.add("open")
     document.getElementById("sidebar-overlay").classList.remove("hidden")
@@ -470,7 +588,6 @@ function setupEventListeners() {
   document.getElementById("close-sidebar")?.addEventListener("click", closeSidebar)
   document.getElementById("sidebar-overlay")?.addEventListener("click", closeSidebar)
 
-  // Carrito
   document.getElementById("cart-button")?.addEventListener("click", () => {
     document.getElementById("cart-modal").classList.remove("hidden")
     renderCart()
@@ -480,11 +597,9 @@ function setupEventListeners() {
     document.getElementById("cart-modal").classList.add("hidden")
   })
 
-  // Búsqueda
   document.getElementById("global-search")?.addEventListener("input", handleGlobalSearch)
   document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
 
-  // WhatsApp - ACTUALIZADO PARA ADMIN
   document.getElementById("send-whatsapp")?.addEventListener("click", () => {
     if (currentUserRole === "admin") {
       showOrderDetailsModal()
@@ -493,7 +608,6 @@ function setupEventListeners() {
     }
   })
 
-  // Modal de detalles del pedido para admin
   document.getElementById("close-order-details-modal")?.addEventListener("click", () => {
     document.getElementById("order-details-modal").classList.add("hidden")
   })
@@ -504,7 +618,6 @@ function setupEventListeners() {
 
   document.getElementById("confirm-order-details")?.addEventListener("click", confirmOrderDetails)
 
-  // CSV Upload
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
     document.getElementById("csv-modal").classList.remove("hidden")
   })
@@ -516,7 +629,6 @@ function setupEventListeners() {
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
 
-  // PDF Export
   document.getElementById("export-pdf-button")?.addEventListener("click", () => {
     document.getElementById("pdf-modal").classList.remove("hidden")
     loadDepartmentsForPDF()
@@ -528,7 +640,6 @@ function setupEventListeners() {
 
   document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
 
-  // Modal de cantidad
   document.getElementById("close-quantity-modal")?.addEventListener("click", () => {
     document.getElementById("quantity-modal").classList.add("hidden")
   })
@@ -545,10 +656,6 @@ function closeSidebar() {
   document.getElementById("sidebar-overlay").classList.add("hidden")
 }
 
-// ============================================
-// PRODUCTOS
-// ============================================
-
 async function loadProducts() {
   console.log("[v0] Iniciando carga de productos...")
 
@@ -558,10 +665,9 @@ async function loadProducts() {
 
     allProducts = []
     let start = 0
-    const batchSize = 1000
+    const batchSize = 500
     let hasMore = true
 
-    // Cargar productos en lotes hasta obtener todos
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
@@ -595,6 +701,10 @@ async function loadProducts() {
     renderProducts()
 
     console.log(`✅ ${allProducts.length} productos cargados en total`)
+
+    setTimeout(() => {
+      preloadAllImages()
+    }, 2000)
   } catch (error) {
     console.error("❌ Error al cargar productos:", error)
   } finally {
@@ -612,7 +722,6 @@ function renderDepartments() {
   sidebarContainer.innerHTML = ""
 
   departments.forEach((dept) => {
-    // Botón en navbar
     const navBtn = document.createElement("button")
     navBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
     navBtn.textContent = dept
@@ -620,7 +729,6 @@ function renderDepartments() {
     navBtn.addEventListener("click", () => filterByDepartment(dept))
     navContainer.appendChild(navBtn)
 
-    // Botón en sidebar
     const sidebarBtn = document.createElement("button")
     sidebarBtn.className =
       "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
@@ -633,7 +741,6 @@ function renderDepartments() {
     sidebarContainer.appendChild(sidebarBtn)
   })
 
-  // Agregar botón de cerrar sesión al final del sidebar
   const logoutBtn = document.createElement("button")
   logoutBtn.className =
     "w-full text-left px-4 py-3 rounded-xl hover:bg-red-600/20 transition-all font-semibold text-red-400 border-t border-white/10 mt-4"
@@ -641,7 +748,6 @@ function renderDepartments() {
   logoutBtn.addEventListener("click", logoutFromSidebar)
   sidebarContainer.appendChild(logoutBtn)
 
-  // Botón "Todos" en navbar
   document.querySelectorAll('[data-dept="all"]').forEach((btn) => {
     btn.addEventListener("click", () => filterByDepartment("all"))
   })
@@ -658,7 +764,6 @@ function filterByDepartment(dept) {
 
   currentPage = 1
 
-  // Actualizar botones activos
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
     if (btn.dataset.dept === dept) {
@@ -666,7 +771,6 @@ function filterByDepartment(dept) {
     }
   })
 
-  // Mostrar/ocultar búsqueda por departamento
   const deptSearchContainer = document.getElementById("dept-search-container")
   if (dept === "all") {
     deptSearchContainer.classList.add("hidden")
@@ -683,7 +787,6 @@ function renderProducts() {
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
 
-  // Solo limpiar el grid si es la primera página
   if (currentPage === 1) {
     grid.innerHTML = ""
   }
@@ -792,12 +895,15 @@ function createProductCard(product) {
   }
 
   const imageUrl = product.imagen_url || "/generic-product-display.png"
+  const optimizedUrl = optimizeImageUrl(imageUrl)
+  const placeholderUrl = createImagePlaceholder(imageUrl)
 
   card.innerHTML = `
     <div class="product-image-container">
-      <img src="${imageUrl}"
+      <img src="${placeholderUrl}"
+           data-src="${optimizedUrl}"
            alt="${product.nombre}"
-           class="product-image cursor-pointer hover:opacity-90 transition-opacity"
+           class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
            loading="lazy"
            onerror="this.src='/generic-product-display.png'">
     </div>
@@ -814,14 +920,16 @@ function createProductCard(product) {
     </div>
   `
 
-  // Event listener para expandir imagen
   const productImage = card.querySelector(".product-image")
+  if (imageObserver && productImage) {
+    imageObserver.observe(productImage)
+  }
+
   productImage.addEventListener("click", (e) => {
     e.stopPropagation()
     showImageModal(imageUrl, product.nombre)
   })
 
-  // Event listener para agregar al carrito
   card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
     openQuantityModal(product)
   })
@@ -862,10 +970,6 @@ function getPriceForRole(product) {
       }
   }
 }
-
-// ============================================
-// CARRITO - ACTUALIZADO CON PERSISTENCIA
-// ============================================
 
 function saveCartToStorage() {
   if (!currentUser) return
@@ -1038,6 +1142,11 @@ function renderCart() {
   const cartItems = document.getElementById("cart-items")
   const cartTotal = document.getElementById("cart-total")
 
+  if (!cartItems || !cartTotal) {
+    console.error("[v0] Error: elementos del carrito no encontrados")
+    return
+  }
+
   if (cart.length === 0) {
     cartItems.innerHTML = `
       <div class="text-center py-12">
@@ -1068,11 +1177,14 @@ function renderCart() {
       totalGmayor += (product.precio_gmayor || 0) * item.quantity
     }
 
+    const optimizedCartImage = optimizeImageUrl(item.imagen_url || "/generic-product-display.png")
+
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
-        <img src="${item.imagen_url || "/generic-product-display.png"}"
+        <img src="${optimizedCartImage}"
              alt="${item.nombre}"
              class="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+             loading="lazy"
              onerror="this.src='/generic-product-display.png'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
@@ -1091,14 +1203,12 @@ function renderCart() {
       </div>
     `
 
-    // Event listener para expandir imagen en el carrito
     const cartImage = cartItemDiv.querySelector("img")
     cartImage.addEventListener("click", (e) => {
       e.stopPropagation()
       showImageModal(item.imagen_url || "/generic-product-display.png", item.nombre)
     })
 
-    // Agregar event listeners directamente a los botones
     const decreaseBtn = cartItemDiv.querySelector(".cart-decrease-btn")
     const increaseBtn = cartItemDiv.querySelector(".cart-increase-btn")
     const removeBtn = cartItemDiv.querySelector(".cart-remove-btn")
@@ -1124,7 +1234,6 @@ function renderCart() {
   let totalHTML = ""
 
   if (currentUserRole === "gestor") {
-    // Gestor ve los 3 totales
     totalHTML = `
       <div class="space-y-2">
         <div class="flex justify-between items-center">
@@ -1142,13 +1251,10 @@ function renderCart() {
       </div>
     `
   } else if (currentUserRole === "distribuidor") {
-    // Distribuidor ve solo total mayor
     totalHTML = `$${totalMayor.toFixed(2)}`
   } else if (currentUserRole === "admin") {
-    // Admin ve solo total gmayor
     totalHTML = `$${totalGmayor.toFixed(2)}`
   } else {
-    // Cliente ve solo total detal
     totalHTML = `$${totalDetal.toFixed(2)}`
   }
 
@@ -1180,17 +1286,12 @@ function removeFromCartByIndex(index) {
   renderCart()
 }
 
-// ============================================
-// MODAL DE DETALLES DEL PEDIDO PARA ADMIN
-// ============================================
-
 function showOrderDetailsModal() {
   if (cart.length === 0) {
     alert("El carrito está vacío")
     return
   }
 
-  // Crear el modal si no existe
   let orderModal = document.getElementById("order-details-modal")
   if (!orderModal) {
     orderModal = document.createElement("div")
@@ -1231,7 +1332,6 @@ function showOrderDetailsModal() {
     `
     document.body.appendChild(orderModal)
 
-    // Agregar event listeners
     document.getElementById("close-order-details-modal").addEventListener("click", () => {
       orderModal.classList.add("hidden")
     })
@@ -1242,7 +1342,6 @@ function showOrderDetailsModal() {
 
     document.getElementById("confirm-order-details").addEventListener("click", confirmOrderDetails)
 
-    // Cerrar modal al hacer clic fuera
     orderModal.addEventListener("click", (e) => {
       if (e.target === orderModal) {
         orderModal.classList.add("hidden")
@@ -1250,7 +1349,6 @@ function showOrderDetailsModal() {
     })
   }
 
-  // Limpiar campos y mostrar modal
   document.getElementById("order-responsables").value = ""
   document.getElementById("order-sitio").value = ""
   document.getElementById("order-details-error").classList.add("hidden")
@@ -1271,90 +1369,60 @@ function confirmOrderDetails() {
 
   errorDiv.classList.add("hidden")
 
-  // Generar Excel y enviar WhatsApp
   generateExcelAndSendOrder(responsables, sitio)
 
-  // Cerrar modal
   document.getElementById("order-details-modal").classList.add("hidden")
 }
-
-// ============================================
-// WHATSAPP CON EXCEL PARA ADMIN
-// ============================================
 
 function generateExcelAndSendOrder(responsables, sitio) {
   console.log("[v0] Generando Excel y enviando pedido para admin...")
 
   try {
-    // Crear workbook y worksheet
     const wb = XLSX.utils.book_new()
-    
-    // Preparar datos para Excel
+
     const excelData = []
-    
-    // Encabezado
-    excelData.push(['PEDIDO SONIMAX MÓVIL'])
-    excelData.push([]) // Línea vacía
-    excelData.push(['Cliente:', currentUser.name])
+
+    excelData.push(["PEDIDO SONIMAX MÓVIL"])
+    excelData.push([])
+    excelData.push(["Cliente:", currentUser.name])
     if (responsables) {
-      excelData.push(['Responsables:', responsables])
+      excelData.push(["Responsables:", responsables])
     }
-    excelData.push(['Sitio:', sitio])
-    excelData.push(['Fecha:', new Date().toLocaleDateString()])
-    excelData.push([]) // Línea vacía
-    
-    // Encabezados de tabla
-    excelData.push(['CANTIDAD', 'CÓDIGO', 'DESCRIPCIÓN', 'PRECIO UNITARIO', 'SUBTOTAL'])
-    
+    excelData.push(["Sitio:", sitio])
+    excelData.push(["Fecha:", new Date().toLocaleDateString()])
+    excelData.push([])
+
+    excelData.push(["CANTIDAD", "CÓDIGO", "DESCRIPCIÓN", "PRECIO UNITARIO", "SUBTOTAL"])
+
     let totalGmayor = 0
-    
-    // Datos de productos
+
     cart.forEach((item) => {
       const product = allProducts.find((p) => p.id === item.id)
-      const codigo = product ? (product.descripcion || "S/C") : "S/C"
-      const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+      const codigo = product ? product.descripcion || "S/C" : "S/C"
+      const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
-      
+
       totalGmayor += subtotal
-      
-      excelData.push([
-        item.quantity,
-        codigo,
-        item.nombre,
-        `$${precioUnitario.toFixed(2)}`,
-        `$${subtotal.toFixed(2)}`
-      ])
+
+      excelData.push([item.quantity, codigo, item.nombre, `$${precioUnitario.toFixed(2)}`, `$${subtotal.toFixed(2)}`])
     })
-    
-    // Total
-    excelData.push([]) // Línea vacía
-    excelData.push(['', '', '', 'TOTAL:', `$${totalGmayor.toFixed(2)}`])
-    
-    // Crear worksheet
+
+    excelData.push([])
+    excelData.push(["", "", "", "TOTAL:", `$${totalGmayor.toFixed(2)}`])
+
     const ws = XLSX.utils.aoa_to_sheet(excelData)
-    
-    // Ajustar ancho de columnas
-    const colWidths = [
-      { wch: 10 }, // CANTIDAD
-      { wch: 15 }, // CÓDIGO
-      { wch: 40 }, // DESCRIPCIÓN
-      { wch: 15 }, // PRECIO UNITARIO
-      { wch: 15 }  // SUBTOTAL
-    ]
-    ws['!cols'] = colWidths
-    
-    // Agregar worksheet al workbook
+
+    const colWidths = [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }]
+    ws["!cols"] = colWidths
+
     XLSX.utils.book_append_sheet(wb, ws, "Pedido")
-    
-    // Generar nombre del archivo con el sitio
-    const fileName = `${sitio.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
-    
-    // Descargar Excel
+
+    const fileName = `${sitio.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx`
+
     XLSX.writeFile(wb, fileName)
-    
+
     console.log(`✅ Excel generado: ${fileName}`)
-    
-    // Generar mensaje de WhatsApp
+
     let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
     message += `*Cliente:* ${currentUser.name}\n`
     if (responsables) {
@@ -1365,13 +1433,12 @@ function generateExcelAndSendOrder(responsables, sitio) {
 
     cart.forEach((item, index) => {
       const product = allProducts.find((p) => p.id === item.id)
-      const codigo = product ? (product.descripcion || "S/C") : "S/C"
-      const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+      const codigo = product ? product.descripcion || "S/C" : "S/C"
+      const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
 
       message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
-      
-      // Agregar línea en blanco entre productos (excepto después del último)
+
       if (index < cart.length - 1) {
         message += `\n`
       }
@@ -1390,16 +1457,13 @@ function generateExcelAndSendOrder(responsables, sitio) {
 
     clearCart()
 
-    // Cerrar modal del carrito
     document.getElementById("cart-modal").classList.add("hidden")
 
     alert(`Pedido enviado por WhatsApp y Excel descargado como: ${fileName}\nEl carrito ha sido limpiado.`)
-
   } catch (error) {
     console.error("❌ Error al generar Excel:", error)
     alert("Error al generar el archivo Excel. Se enviará solo el mensaje de WhatsApp.")
-    
-    // Fallback: enviar solo WhatsApp sin Excel
+
     sendWhatsAppOrderFallback(responsables, sitio)
   }
 }
@@ -1417,14 +1481,14 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
-    const codigo = product ? (product.descripcion || "S/C") : "S/C"
-    const precioUnitario = product ? (product.precio_gmayor || 0) : 0
+    const codigo = product ? product.descripcion || "S/C" : "S/C"
+    const precioUnitario = product ? product.precio_gmayor || 0 : 0
     const subtotal = precioUnitario * item.quantity
 
     totalGmayor += subtotal
 
     message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
-    
+
     if (index < cart.length - 1) {
       message += `\n`
     }
@@ -1441,10 +1505,6 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
   alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
 
-// ============================================
-// WHATSAPP - MENSAJE PARA OTROS ROLES (SIN CAMBIOS)
-// ============================================
-
 function sendWhatsAppOrder() {
   console.log("[v0] Enviando pedido por WhatsApp...")
 
@@ -1457,24 +1517,21 @@ function sendWhatsAppOrder() {
   message += `*Cliente:* ${currentUser.name}\n\n`
   message += `*PRODUCTOS:*\n`
 
-  // Calcular totales según el rol
   let totalDetal = 0
   let totalMayor = 0
   let totalGmayor = 0
 
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
-    const codigo = product ? (product.descripcion || "S/C") : "S/C"
+    const codigo = product ? product.descripcion || "S/C" : "S/C"
     const subtotal = item.price * item.quantity
 
     message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
-    
-    // Agregar línea en blanco entre productos (excepto después del último)
+
     if (index < cart.length - 1) {
       message += `\n`
     }
 
-    // Calcular totales por tipo de precio
     if (product) {
       totalDetal += (product.precio_cliente || 0) * item.quantity
       totalMayor += (product.precio_mayor || 0) * item.quantity
@@ -1482,19 +1539,15 @@ function sendWhatsAppOrder() {
     }
   })
 
-  // Agregar totales según el rol del usuario
   message += `\n\n*TOTALES:*\n`
 
   if (currentUserRole === "gestor") {
-    // Gestor ve los 3 totales
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
     message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
   } else if (currentUserRole === "distribuidor") {
-    // Distribuidor ve solo total mayor
     message += `Total Mayor: $${totalMayor.toFixed(2)}`
   } else {
-    // Cliente ve solo total detal
     message += `Total Detal: $${totalDetal.toFixed(2)}`
   }
 
@@ -1508,38 +1561,30 @@ function sendWhatsAppOrder() {
 
   clearCart()
 
-  // Cerrar modal del carrito
   document.getElementById("cart-modal").classList.add("hidden")
 
   alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
 
-// ============================================
-// BÚSQUEDA MEJORADA - EXHAUSTIVA Y MULTI-PALABRA
-// ============================================
-
 let searchTimeout = null
 let deptSearchTimeout = null
 
-// Función para normalizar texto (quitar acentos y convertir a minúsculas)
 function normalizeText(text) {
   if (!text) return ""
   return text
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Quitar acentos
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
 }
 
-// Función para dividir query en palabras y limpiarlas
 function getSearchWords(query) {
   return query
-    .split(/\s+/) // Dividir por espacios
-    .map(word => normalizeText(word))
-    .filter(word => word.length > 0) // Filtrar palabras vacías
+    .split(/\s+/)
+    .map((word) => normalizeText(word))
+    .filter((word) => word.length > 0)
 }
 
-// Función de búsqueda exhaustiva
 function searchProducts(products, query) {
   if (!query || query.trim() === "") {
     return products
@@ -1552,27 +1597,26 @@ function searchProducts(products, query) {
 
   console.log("[SEARCH] Buscando palabras:", searchWords)
 
-  return products.filter(product => {
-    // Normalizar campos del producto
+  return products.filter((product) => {
     const normalizedName = normalizeText(product.nombre)
     const normalizedDescription = normalizeText(product.descripcion)
     const normalizedDepartment = normalizeText(product.departamento)
-    
-    // Crear texto combinado para búsqueda
+
     const combinedText = `${normalizedName} ${normalizedDescription} ${normalizedDepartment}`
-    
-    // Verificar que TODAS las palabras estén presentes
-    const allWordsFound = searchWords.every(word => {
-      return normalizedName.includes(word) || 
-             normalizedDescription.includes(word) || 
-             normalizedDepartment.includes(word) ||
-             combinedText.includes(word)
+
+    const allWordsFound = searchWords.every((word) => {
+      return (
+        normalizedName.includes(word) ||
+        normalizedDescription.includes(word) ||
+        normalizedDepartment.includes(word) ||
+        combinedText.includes(word)
+      )
     })
-    
+
     if (allWordsFound) {
       console.log(`[SEARCH] ✅ Encontrado: ${product.nombre}`)
     }
-    
+
     return allWordsFound
   })
 }
@@ -1582,25 +1626,28 @@ function handleGlobalSearch(e) {
 
   clearTimeout(searchTimeout)
 
+  const searchLoading = document.getElementById("search-loading")
+
   if (query === "") {
     filteredProducts = allProducts
     currentPage = 1
     renderProducts()
+    if (searchLoading) searchLoading.classList.add("hidden")
     return
   }
 
-  document.getElementById("search-loading").classList.remove("hidden")
+  if (searchLoading) searchLoading.classList.remove("hidden")
 
   searchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda global:", query)
-    
+
     filteredProducts = searchProducts(allProducts, query)
-    
+
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     currentPage = 1
     renderProducts()
-    document.getElementById("search-loading").classList.add("hidden")
+    if (searchLoading) searchLoading.classList.add("hidden")
   }, 300)
 }
 
@@ -1616,25 +1663,18 @@ function handleDeptSearch(e) {
 
   deptSearchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda en departamento:", currentDepartment, "Query:", query)
-    
-    // Primero filtrar por departamento
-    const productsInDept = currentDepartment === "all" 
-      ? allProducts 
-      : allProducts.filter(p => p.departamento === currentDepartment)
-    
-    // Luego aplicar búsqueda de texto
+
+    const productsInDept =
+      currentDepartment === "all" ? allProducts : allProducts.filter((p) => p.departamento === currentDepartment)
+
     filteredProducts = searchProducts(productsInDept, query)
-    
+
     console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
 
     currentPage = 1
     renderProducts()
   }, 300)
 }
-
-// ============================================
-// CSV UPLOAD (Solo Admin)
-// ============================================
 
 let selectedCSVFile = null
 
@@ -1668,10 +1708,8 @@ async function handleCSVUpload() {
         throw new Error("El archivo CSV está vacío o no tiene datos")
       }
 
-      // Parsear headers (primera línea)
       const headers = lines[0].split(",").map((h) => h.trim().toUpperCase())
 
-      // Encontrar índices de las columnas que necesitamos
       const colIndexes = {
         descripcion: headers.indexOf("DESCRIPCION"),
         codigo: headers.indexOf("CODIGO"),
@@ -1682,7 +1720,6 @@ async function handleCSVUpload() {
         departamento: headers.indexOf("DEPARTAMENTO"),
       }
 
-      // Verificar que existan las columnas necesarias
       if (
         colIndexes.descripcion === -1 ||
         colIndexes.detal === -1 ||
@@ -1694,17 +1731,14 @@ async function handleCSVUpload() {
 
       const products = []
 
-      // Parsear cada línea de datos
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim()
         if (!line) continue
 
-        // Parsear valores respetando comillas
         const values = parseCSVLine(line)
 
         if (values.length < headers.length) continue
 
-        // Extraer valores de las columnas
         const descripcion = values[colIndexes.descripcion]?.trim() || ""
         const codigo = colIndexes.codigo !== -1 ? values[colIndexes.codigo]?.trim() || "" : ""
         const detal = values[colIndexes.detal]?.trim() || "0"
@@ -1714,7 +1748,6 @@ async function handleCSVUpload() {
         const departamento =
           colIndexes.departamento !== -1 ? values[colIndexes.departamento]?.trim() || "Sin categoría" : "Sin categoría"
 
-        // Validar que tenga al menos descripción
         if (!descripcion) continue
 
         const product = {
@@ -1736,7 +1769,6 @@ async function handleCSVUpload() {
 
       showCSVStatus(`Procesando ${products.length} productos...`, "info")
 
-      // Eliminar productos existentes
       const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
       if (deleteError) {
@@ -1744,7 +1776,6 @@ async function handleCSVUpload() {
         throw new Error("Error al limpiar productos existentes")
       }
 
-      // Insertar nuevos productos
       const { error } = await window.supabaseClient.from("products").insert(products)
 
       if (error) throw error
@@ -1801,10 +1832,6 @@ function showCSVStatus(message, type) {
   }`
   statusDiv.classList.remove("hidden")
 }
-
-// ============================================
-// PDF EXPORT (Solo Admin)
-// ============================================
 
 async function loadDepartmentsForPDF() {
   const select = document.getElementById("pdf-department-select")
