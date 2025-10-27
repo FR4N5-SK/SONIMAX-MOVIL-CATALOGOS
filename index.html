@@ -4,10 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SONIMAX MÓVIL - Catálogo de Productos</title>
+    
+    <!-- Preconnect a imgbb para carga más rápida de imágenes -->
+    <link rel="preconnect" href="https://i.ibb.co">
+    <link rel="preconnect" href="https://ibb.co">
+    <link rel="dns-prefetch" href="https://i.ibb.co">
+    <link rel="dns-prefetch" href="https://ibb.co">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <!-- Agregar librería para Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-gradient-to-br from-gray-50 to-gray-100">
@@ -39,7 +48,6 @@
                 </button>
             </div>
 
-            <!-- Formulario de login - solo usuario y contraseña -->
             <form id="login-form" class="space-y-5">
                 <div>
                     <label class="block text-white text-sm font-semibold mb-2">Nombre de Usuario</label>
@@ -61,7 +69,6 @@
                 </button>
             </form>
 
-            <!-- Formulario de registro - solo nombre, usuario y contraseña -->
             <form id="register-form" class="hidden space-y-5">
                 <div>
                     <label class="block text-white text-sm font-semibold mb-2">Nombre Completo</label>
@@ -169,8 +176,12 @@
                         <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                         </svg>
+                        <!-- Agregando indicador de carga para búsqueda -->
                         <div id="search-loading" class="hidden absolute right-4 top-3.5">
-                            <div class="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                            <svg class="animate-spin h-5 w-5 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
                         </div>
                     </div>
                 </div>
@@ -444,4 +455,3 @@
     <script src="app.js"></script>
 </body>
 </html>
-
