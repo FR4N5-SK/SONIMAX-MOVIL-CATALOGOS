@@ -23,8 +23,94 @@ let isLoadingMore = false
 
 let imageObserver = null
 let serviceWorkerRegistration = null
-const preloadedImagesCount = 0
-let totalImagesToPreload = 0
+
+const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
+const PRODUCTS_HASH_KEY = "sonimax_products_hash"
+const MAX_RETRY_ATTEMPTS = 5
+const RETRY_DELAY = 3000 // 3 segundos entre reintentos
+
+const imageLoadState = {
+  loadedImages: new Set(),
+  failedImages: new Map(), // url -> attemptCount
+  inProgress: false,
+  lastUpdate: null,
+}
+
+// ============================================
+// GESTIÓN DE ESTADO DE CARGA DE IMÁGENES
+// ============================================
+
+function loadImageLoadState() {
+  try {
+    const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
+      imageLoadState.failedImages = new Map(parsed.failedImages || [])
+      imageLoadState.lastUpdate = parsed.lastUpdate
+      console.log(
+        `[IMG-STATE] Estado cargado: ${imageLoadState.loadedImages.size} imágenes exitosas, ${imageLoadState.failedImages.size} fallidas`,
+      )
+    }
+  } catch (error) {
+    console.error("[IMG-STATE] Error cargando estado:", error)
+  }
+}
+
+function saveImageLoadState() {
+  try {
+    const toSave = {
+      loadedImages: Array.from(imageLoadState.loadedImages),
+      failedImages: Array.from(imageLoadState.failedImages),
+      lastUpdate: Date.now(),
+    }
+    localStorage.setItem(IMAGE_LOAD_STATE_KEY, JSON.stringify(toSave))
+  } catch (error) {
+    console.error("[IMG-STATE] Error guardando estado:", error)
+  }
+}
+
+function getProductsHash(products) {
+  // Crear hash simple basado en URLs de imágenes
+  const urls = products
+    .map((p) => p.imagen_url)
+    .filter((url) => url && url !== "/generic-product-display.png")
+    .sort()
+    .join("|")
+
+  // Hash simple
+  let hash = 0
+  for (let i = 0; i < urls.length; i++) {
+    const char = urls.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash = hash & hash
+  }
+  return hash.toString()
+}
+
+function checkProductsChanged(products) {
+  const currentHash = getProductsHash(products)
+  const savedHash = localStorage.getItem(PRODUCTS_HASH_KEY)
+
+  if (savedHash !== currentHash) {
+    console.log("[IMG-STATE] Productos cambiaron, detectando nuevas imágenes...")
+    localStorage.setItem(PRODUCTS_HASH_KEY, currentHash)
+
+    // Obtener solo las URLs nuevas
+    const currentUrls = new Set(
+      products
+        .map((p) => optimizeImageUrl(p.imagen_url))
+        .filter((url) => url && url !== "/generic-product-display.png"),
+    )
+
+    const newUrls = Array.from(currentUrls).filter((url) => !imageLoadState.loadedImages.has(url))
+    console.log(`[IMG-STATE] ${newUrls.length} imágenes nuevas detectadas`)
+
+    return { changed: true, newUrls }
+  }
+
+  return { changed: false, newUrls: [] }
+}
 
 // ============================================
 // SERVICE WORKER Y CACHÉ DE IMÁGENES
@@ -39,13 +125,12 @@ async function registerServiceWorker() {
       navigator.serviceWorker.addEventListener("message", (event) => {
         if (event.data && event.data.type === "PRELOAD_PROGRESS") {
           console.log(
-            `📥 Imágenes cargadas: ${event.data.loaded}/${event.data.total} (Lote ${event.data.batch}/${event.data.totalBatches})`,
+            `[IMG-LOAD] Progreso: ${event.data.loaded}/${event.data.total} (Lote ${event.data.batch}/${event.data.totalBatches})`,
           )
         }
 
         if (event.data && event.data.type === "PRELOAD_COMPLETE") {
-          console.log(`✅ Precarga completada: ${event.data.count}/${event.data.total} imágenes en caché`)
-          showPreloadNotification(`${event.data.count} imágenes cargadas y guardadas`)
+          console.log(`[IMG-LOAD] ✅ Precarga completada: ${event.data.count}/${event.data.total} imágenes`)
         }
       })
     } catch (error) {
@@ -54,124 +139,278 @@ async function registerServiceWorker() {
   }
 }
 
-function showPreloadNotification(message) {
-  const notification = document.createElement("div")
-  notification.className =
-    "fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-xl shadow-lg z-50 animate-fade-in"
-  notification.innerHTML = `
-    <div class="flex items-center space-x-2">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-      </svg>
-      <span class="font-semibold">${message}</span>
-    </div>
-  `
-  document.body.appendChild(notification)
-
-  setTimeout(() => {
-    notification.style.opacity = "0"
-    notification.style.transition = "opacity 0.3s"
-    setTimeout(() => notification.remove(), 300)
-  }, 3000)
-}
-
 async function preloadAllImages() {
   if (!("caches" in window)) {
-    console.log("⚠️ Cache API no disponible")
+    console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
     return
   }
 
-  // Obtener todas las URLs de imágenes optimizadas
-  const imageUrls = allProducts
+  // Cargar estado previo
+  loadImageLoadState()
+
+  // Verificar si los productos cambiaron
+  const { changed, newUrls } = checkProductsChanged(allProducts)
+
+  // Obtener todas las URLs optimizadas
+  const allImageUrls = allProducts
     .map((p) => p.imagen_url)
     .filter((url) => url && url !== "/generic-product-display.png")
     .map((url) => optimizeImageUrl(url))
 
-  if (imageUrls.length === 0) return
+  // Determinar qué imágenes cargar
+  let urlsToLoad = []
 
-  totalImagesToPreload = imageUrls.length
-  console.log(`🚀 Iniciando precarga agresiva de ${totalImagesToPreload} imágenes en segundo plano...`)
+  if (changed && newUrls.length > 0) {
+    // Solo cargar las nuevas
+    urlsToLoad = newUrls
+    console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
+  } else {
+    // Cargar las que no están en el estado o fallaron
+    urlsToLoad = allImageUrls.filter(
+      (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
+    )
 
-  // Abrir el caché
+    if (urlsToLoad.length === 0) {
+      console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
+      return
+    }
+
+    console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
+  }
+
+  if (imageLoadState.inProgress) {
+    console.log("[IMG-LOAD] ⚠️ Carga ya en progreso, omitiendo...")
+    return
+  }
+
+  imageLoadState.inProgress = true
+
+  await loadImagesWithRetry(urlsToLoad)
+
+  imageLoadState.inProgress = false
+  saveImageLoadState()
+}
+
+async function loadImagesWithRetry(urls) {
   const cache = await caches.open("sonimax-images-store")
+  const BATCH_SIZE = 20
+  const CONCURRENT_BATCHES = 2
 
-  let loadedCount = 0
-  const BATCH_SIZE = 20 // Lotes más pequeños para evitar sobrecarga
-  const CONCURRENT_BATCHES = 5 // Procesar 5 lotes en paralelo
-  const DELAY_BETWEEN_GROUPS = 100 // 100ms entre grupos de lotes
+  console.log(`[IMG-LOAD] 🚀 Iniciando carga de ${urls.length} imágenes...`)
+  console.log(`[IMG-LOAD] 📊 Ya cargadas: ${imageLoadState.loadedImages.size}`)
+  console.log(`[IMG-LOAD] 📊 Con errores previos: ${imageLoadState.failedImages.size}`)
+  console.log(`[IMG-LOAD] 📊 Por cargar ahora: ${urls.length}`)
 
-  // Dividir URLs en lotes
+  // Dividir en lotes
   const batches = []
-  for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
-    batches.push(imageUrls.slice(i, i + BATCH_SIZE))
+  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+    batches.push(urls.slice(i, i + BATCH_SIZE))
   }
 
-  console.log(`📦 Dividido en ${batches.length} lotes de ${BATCH_SIZE} imágenes`)
+  let totalLoaded = 0
+  let totalFailed = 0
 
-  // Función para procesar un lote
-  const processBatch = async (batch, batchIndex) => {
-    const batchPromises = batch.map(async (url) => {
-      try {
-        // Verificar si ya está en caché
-        const cachedResponse = await cache.match(url)
-        if (cachedResponse) {
-          return true
-        }
-
-        // Descargar y cachear
-        const response = await fetch(url, {
-          mode: "no-cors",
-          cache: "force-cache",
-        })
-
-        if (response) {
-          await cache.put(url, response)
-          return true
-        }
-        return false
-      } catch (error) {
-        return false
-      }
-    })
-
-    const results = await Promise.allSettled(batchPromises)
-    const successCount = results.filter((r) => r.status === "fulfilled" && r.value).length
-
-    return { batchIndex, successCount }
-  }
-
-  // Procesar lotes en grupos concurrentes
+  // Procesar lotes
   for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
     const batchGroup = []
 
-    // Crear grupo de lotes concurrentes
     for (let j = 0; j < CONCURRENT_BATCHES && i + j < batches.length; j++) {
       const batchIndex = i + j
-      batchGroup.push(processBatch(batches[batchIndex], batchIndex))
+      batchGroup.push(processBatch(cache, batches[batchIndex], batchIndex + 1, batches.length))
     }
 
-    // Procesar grupo de lotes en paralelo
     const results = await Promise.allSettled(batchGroup)
 
-    // Contar imágenes cargadas
     results.forEach((result) => {
       if (result.status === "fulfilled") {
-        loadedCount += result.value.successCount
+        totalLoaded += result.value.loaded
+        totalFailed += result.value.failed
       }
     })
 
-    // Reportar progreso cada grupo de lotes
-    const currentBatch = Math.min(i + CONCURRENT_BATCHES, batches.length)
-    console.log(`📥 Imágenes cargadas: ${loadedCount}/${totalImagesToPreload} (Lote ${currentBatch}/${batches.length})`)
+    const remaining = urls.length - (totalLoaded + totalFailed)
+    console.log(
+      `[IMG-LOAD] 📊 Progreso: ${totalLoaded} exitosas, ${totalFailed} fallidas, ${remaining} restantes de ${urls.length} totales`,
+    )
 
-    // Pequeño delay entre grupos para no sobrecargar
-    if (i + CONCURRENT_BATCHES < batches.length) {
-      await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_GROUPS))
-    }
+    // Guardar estado periódicamente
+    saveImageLoadState()
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
-  console.log(`✅ Precarga completada: ${loadedCount}/${totalImagesToPreload} imágenes en caché`)
-  showPreloadNotification(`${loadedCount} imágenes cargadas y guardadas`)
+  console.log(`[IMG-LOAD] ✅ Carga inicial completada`)
+  console.log(`[IMG-LOAD] 📊 Resultado: ${totalLoaded} exitosas, ${totalFailed} fallidas de ${urls.length} totales`)
+  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas en total`)
+
+  // Reintentar las fallidas
+  if (totalFailed > 0) {
+    console.log(`[IMG-LOAD] 🔄 Iniciando proceso de reintentos para ${totalFailed} imágenes fallidas...`)
+    await retryFailedImages(cache)
+  }
+}
+
+async function processBatch(cache, batch, batchNum, totalBatches) {
+  let loaded = 0
+  let failed = 0
+
+  const promises = batch.map(async (url) => {
+    try {
+      // Verificar si ya está en caché
+      const cachedResponse = await cache.match(url)
+      if (cachedResponse) {
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-LOAD] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        return { success: true, cached: true }
+      }
+
+      // Descargar con timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      const response = await fetch(url, {
+        mode: "no-cors",
+        cache: "force-cache",
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(url, response)
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-LOAD] ✅ Descargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        return { success: true, cached: false }
+      }
+
+      console.log(`[IMG-LOAD] ❌ Sin respuesta: ${url.substring(url.lastIndexOf("/") + 1)}`)
+      return { success: false, error: "No response" }
+    } catch (error) {
+      const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+      imageLoadState.failedImages.set(url, attemptCount)
+      console.log(
+        `[IMG-LOAD] ❌ Error (intento ${attemptCount}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+      )
+      return { success: false, error: error.message }
+    }
+  })
+
+  const results = await Promise.allSettled(promises)
+
+  results.forEach((result) => {
+    if (result.status === "fulfilled" && result.value.success) {
+      loaded++
+    } else {
+      failed++
+    }
+  })
+
+  console.log(`[IMG-LOAD] Lote ${batchNum}/${totalBatches}: ${loaded} exitosas, ${failed} fallidas`)
+
+  return { loaded, failed }
+}
+
+async function retryFailedImages(cache) {
+  const failedUrls = Array.from(imageLoadState.failedImages.entries())
+    .filter(([url, attempts]) => attempts < MAX_RETRY_ATTEMPTS)
+    .map(([url]) => url)
+
+  if (failedUrls.length === 0) {
+    console.log("[IMG-LOAD] ✅ No hay imágenes para reintentar")
+    return
+  }
+
+  console.log(`[IMG-LOAD] 🔄 Reintentando ${failedUrls.length} imágenes fallidas...`)
+  console.log(`[IMG-LOAD] ⏳ Esperando ${RETRY_DELAY / 1000} segundos antes de reintentar...`)
+
+  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY))
+
+  let retrySuccess = 0
+  let retryFailed = 0
+
+  for (let i = 0; i < failedUrls.length; i++) {
+    const url = failedUrls[i]
+    const currentAttempt = imageLoadState.failedImages.get(url) || 0
+
+    console.log(
+      `[IMG-LOAD] 🔄 Reintentando (${i + 1}/${failedUrls.length}) intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(url.lastIndexOf("/") + 1)}`,
+    )
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      const response = await fetch(url, {
+        mode: "no-cors",
+        cache: "force-cache",
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(url, response)
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        retrySuccess++
+        console.log(
+          `[IMG-LOAD] ✅ Reintento exitoso (${retrySuccess}/${failedUrls.length}): ${url.substring(url.lastIndexOf("/") + 1)}`,
+        )
+      } else {
+        const attempts = imageLoadState.failedImages.get(url) + 1
+        imageLoadState.failedImages.set(url, attempts)
+        retryFailed++
+        console.log(
+          `[IMG-LOAD] ❌ Reintento fallido (${retryFailed}/${failedUrls.length}): ${url.substring(url.lastIndexOf("/") + 1)}`,
+        )
+      }
+    } catch (error) {
+      const attempts = imageLoadState.failedImages.get(url) + 1
+      imageLoadState.failedImages.set(url, attempts)
+      retryFailed++
+      console.log(
+        `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+      )
+    }
+
+    // Pequeña pausa entre reintentos
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+
+  console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidos`)
+  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas`)
+
+  saveImageLoadState()
+
+  // Si aún hay fallidas, reintentar recursivamente
+  const stillFailed = Array.from(imageLoadState.failedImages.entries()).filter(
+    ([url, attempts]) => attempts < MAX_RETRY_ATTEMPTS,
+  )
+
+  if (stillFailed.length > 0) {
+    console.log(`[IMG-LOAD] 🔄 Quedan ${stillFailed.length} imágenes por reintentar...`)
+    console.log(`[IMG-LOAD] ⏳ Esperando ${RETRY_DELAY / 1000} segundos antes del próximo ciclo...`)
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY))
+    await retryFailedImages(cache)
+  } else {
+    const permanentlyFailed = Array.from(imageLoadState.failedImages.entries()).filter(
+      ([url, attempts]) => attempts >= MAX_RETRY_ATTEMPTS,
+    )
+
+    if (permanentlyFailed.length > 0) {
+      console.log(
+        `[IMG-LOAD] ⚠️ ${permanentlyFailed.length} imágenes no pudieron cargarse después de ${MAX_RETRY_ATTEMPTS} intentos:`,
+      )
+      permanentlyFailed.forEach(([url, attempts]) => {
+        console.log(`[IMG-LOAD]    ❌ ${url.substring(url.lastIndexOf("/") + 1)} (${attempts} intentos)`)
+      })
+    } else {
+      console.log("[IMG-LOAD] ✅ ¡Todas las imágenes cargadas exitosamente!")
+      console.log(`[IMG-LOAD] 📊 Total final: ${imageLoadState.loadedImages.size} imágenes en caché`)
+    }
+  }
 }
 
 // ============================================
@@ -183,11 +422,7 @@ function optimizeImageUrl(url) {
     return url
   }
 
-  // Si es una URL de imgbb (ibb.co o i.ibb.co)
   if (url.includes("ibb.co")) {
-    // Agregar parámetros de compresión y tamaño reducido
-    // Imgbb soporta parámetros de tamaño en la URL
-    // Convertir a thumbnail de 400px de ancho para carga rápida
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=400&quality=70`
   }
@@ -201,7 +436,6 @@ function createImagePlaceholder(url) {
   }
 
   if (url.includes("ibb.co")) {
-    // Crear versión ultra pequeña (50px) para placeholder
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=50&quality=30`
   }
@@ -219,7 +453,6 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc) {
-              // Crear nueva imagen para precargar
               const tempImg = new Image()
               tempImg.onload = () => {
                 img.src = fullSrc
@@ -238,7 +471,7 @@ function initImageObserver() {
         })
       },
       {
-        rootMargin: "100px", // Cargar imágenes 50px antes de que sean visibles
+        rootMargin: "100px",
         threshold: 0.01,
       },
     )
@@ -256,7 +489,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initImageObserver()
 
-  // Verificar sesión existente
   const {
     data: { session },
   } = await window.supabaseClient.auth.getSession()
@@ -471,7 +703,7 @@ async function loadUserData(userId) {
 }
 
 function updateUIForRole() {
-  console.log("[v0] Actualizando UI para rol:", currentUserRole)
+  console.log("Actualizando UI para rol:", currentUserRole)
 
   const roleBadge = document.getElementById("user-role-badge")
   const adminSection = document.getElementById("admin-section")
@@ -520,7 +752,7 @@ function showLogin() {
 }
 
 function showApp() {
-  console.log("[v0] Mostrando app...")
+  console.log("Mostrando app...")
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
@@ -732,7 +964,7 @@ function closeSidebar() {
 }
 
 async function loadProducts() {
-  console.log("[v0] Iniciando carga de productos...")
+  console.log("Iniciando carga de productos...")
 
   try {
     document.getElementById("products-loading").classList.remove("hidden")
@@ -769,10 +1001,10 @@ async function loadProducts() {
     filteredProducts = allProducts
     currentPage = 1
 
-    console.log("[v0] Renderizando departamentos...")
+    console.log("Renderizando departamentos...")
     renderDepartments()
 
-    console.log("[v0] Renderizando productos...")
+    console.log("Renderizando productos...")
     renderProducts()
 
     console.log(`✅ ${allProducts.length} productos cargados en total`)
@@ -857,7 +1089,7 @@ function filterByDepartment(dept) {
 }
 
 function renderProducts() {
-  console.log("[v0] Renderizando productos, página:", currentPage)
+  console.log("Renderizando productos, página:", currentPage)
 
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
@@ -884,7 +1116,7 @@ function renderProducts() {
       const card = createProductCard(product)
       fragment.appendChild(card)
     } catch (error) {
-      console.error("[v0] Error creando tarjeta para producto:", product.nombre, error)
+      console.error("Error creando tarjeta para producto:", product.nombre, error)
     }
   })
 
@@ -892,7 +1124,7 @@ function renderProducts() {
 
   updateLoadMoreButton()
 
-  console.log("[v0] Productos renderizados:", productsToRender.length)
+  console.log("Productos renderizados:", productsToRender.length)
 }
 
 function updateLoadMoreButton() {
@@ -1212,13 +1444,13 @@ function animateCartButton() {
 }
 
 function renderCart() {
-  console.log("[v0] Renderizando carrito con", cart.length, "items")
+  console.log("Renderizando carrito con", cart.length, "items")
 
   const cartItems = document.getElementById("cart-items")
   const cartTotal = document.getElementById("cart-total")
 
   if (!cartItems || !cartTotal) {
-    console.error("[v0] Error: elementos del carrito no encontrados")
+    console.error("Error: elementos del carrito no encontrados")
     return
   }
 
@@ -1289,17 +1521,17 @@ function renderCart() {
     const removeBtn = cartItemDiv.querySelector(".cart-remove-btn")
 
     decreaseBtn.addEventListener("click", () => {
-      console.log("[v0] Disminuyendo cantidad del item", index)
+      console.log("Disminuyendo cantidad del item", index)
       updateCartItemQuantityByIndex(index, -1)
     })
 
     increaseBtn.addEventListener("click", () => {
-      console.log("[v0] Aumentando cantidad del item", index)
+      console.log("Aumentando cantidad del item", index)
       updateCartItemQuantityByIndex(index, 1)
     })
 
     removeBtn.addEventListener("click", () => {
-      console.log("[v0] Eliminando item", index)
+      console.log("Eliminando item", index)
       removeFromCartByIndex(index)
     })
 
@@ -1335,7 +1567,7 @@ function renderCart() {
 
   cartTotal.innerHTML = totalHTML
 
-  console.log("[v0] Carrito renderizado exitosamente")
+  console.log("Carrito renderizado exitosamente")
 }
 
 function updateCartItemQuantityByIndex(index, change) {
@@ -1432,6 +1664,11 @@ function showOrderDetailsModal() {
 }
 
 function confirmOrderDetails() {
+  const orderModal = document.getElementById("order-details-modal")
+  if (orderModal) {
+    orderModal.classList.add("hidden")
+  }
+
   const responsables = document.getElementById("order-responsables").value.trim()
   const sitio = document.getElementById("order-sitio").value.trim()
   const errorDiv = document.getElementById("order-details-error")
@@ -1445,15 +1682,13 @@ function confirmOrderDetails() {
   errorDiv.classList.add("hidden")
 
   generateExcelAndSendOrder(responsables, sitio)
-
-  document.getElementById("order-details-modal").classList.add("hidden")
 }
 
 function generateExcelAndSendOrder(responsables, sitio) {
-  console.log("[v0] Generando Excel y enviando pedido para admin...")
+  console.log("Generando Excel y enviando pedido para admin...")
 
   try {
-    const wb = XLSX.utils.book_new()
+    const wb = window.XLSX.utils.book_new()
 
     const excelData = []
 
@@ -1485,16 +1720,16 @@ function generateExcelAndSendOrder(responsables, sitio) {
     excelData.push([])
     excelData.push(["", "", "", "TOTAL:", `$${totalGmayor.toFixed(2)}`])
 
-    const ws = XLSX.utils.aoa_to_sheet(excelData)
+    const ws = window.XLSX.utils.aoa_to_sheet(excelData)
 
     const colWidths = [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }]
     ws["!cols"] = colWidths
 
-    XLSX.utils.book_append_sheet(wb, ws, "Pedido")
+    window.XLSX.utils.book_append_sheet(wb, ws, "Pedido")
 
     const fileName = `${sitio.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx`
 
-    XLSX.writeFile(wb, fileName)
+    window.XLSX.writeFile(wb, fileName)
 
     console.log(`✅ Excel generado: ${fileName}`)
 
@@ -1522,12 +1757,12 @@ function generateExcelAndSendOrder(responsables, sitio) {
     message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
     message += `\n\n📊 *Archivo Excel adjunto con detalles completos*`
 
-    console.log("[v0] Mensaje generado:", message)
+    console.log("Mensaje generado:", message)
 
     const encodedMessage = encodeURIComponent(message)
     const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
-    console.log("[v0] Abriendo WhatsApp...")
+    console.log("Abriendo WhatsApp...")
     window.open(whatsappURL, "_blank")
 
     clearCart()
@@ -1581,7 +1816,7 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 }
 
 function sendWhatsAppOrder() {
-  console.log("[v0] Enviando pedido por WhatsApp...")
+  console.log("Enviando pedido por WhatsApp...")
 
   if (cart.length === 0) {
     alert("El carrito está vacío")
@@ -1626,12 +1861,12 @@ function sendWhatsAppOrder() {
     message += `Total Detal: $${totalDetal.toFixed(2)}`
   }
 
-  console.log("[v0] Mensaje generado:", message)
+  console.log("Mensaje generado:", message)
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
-  console.log("[v0] Abriendo WhatsApp...")
+  console.log("Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
 
   clearCart()
@@ -1859,6 +2094,10 @@ async function handleCSVUpload() {
         `✅ ${products.length} productos subidos exitosamente (productos anteriores reemplazados)`,
         "success",
       )
+
+      localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
+      localStorage.removeItem(PRODUCTS_HASH_KEY)
+      console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
 
       setTimeout(() => {
         document.getElementById("csv-modal").classList.add("hidden")
