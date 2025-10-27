@@ -76,8 +76,8 @@ function showPreloadNotification(message) {
 }
 
 async function preloadAllImages() {
-  if (!serviceWorkerRegistration || !serviceWorkerRegistration.active) {
-    console.log("⏳ Esperando Service Worker...")
+  if (!("caches" in window)) {
+    console.log("⚠️ Cache API no disponible")
     return
   }
 
@@ -90,13 +90,88 @@ async function preloadAllImages() {
   if (imageUrls.length === 0) return
 
   totalImagesToPreload = imageUrls.length
-  console.log(`🚀 Iniciando precarga de ${totalImagesToPreload} imágenes en segundo plano...`)
+  console.log(`🚀 Iniciando precarga agresiva de ${totalImagesToPreload} imágenes en segundo plano...`)
 
-  // Enviar mensaje al Service Worker para precargar
-  serviceWorkerRegistration.active.postMessage({
-    type: "PRELOAD_IMAGES",
-    urls: imageUrls,
-  })
+  // Abrir el caché
+  const cache = await caches.open("sonimax-images-store")
+
+  let loadedCount = 0
+  const BATCH_SIZE = 20 // Lotes más pequeños para evitar sobrecarga
+  const CONCURRENT_BATCHES = 5 // Procesar 5 lotes en paralelo
+  const DELAY_BETWEEN_GROUPS = 100 // 100ms entre grupos de lotes
+
+  // Dividir URLs en lotes
+  const batches = []
+  for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
+    batches.push(imageUrls.slice(i, i + BATCH_SIZE))
+  }
+
+  console.log(`📦 Dividido en ${batches.length} lotes de ${BATCH_SIZE} imágenes`)
+
+  // Función para procesar un lote
+  const processBatch = async (batch, batchIndex) => {
+    const batchPromises = batch.map(async (url) => {
+      try {
+        // Verificar si ya está en caché
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) {
+          return true
+        }
+
+        // Descargar y cachear
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+        })
+
+        if (response) {
+          await cache.put(url, response)
+          return true
+        }
+        return false
+      } catch (error) {
+        return false
+      }
+    })
+
+    const results = await Promise.allSettled(batchPromises)
+    const successCount = results.filter((r) => r.status === "fulfilled" && r.value).length
+
+    return { batchIndex, successCount }
+  }
+
+  // Procesar lotes en grupos concurrentes
+  for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
+    const batchGroup = []
+
+    // Crear grupo de lotes concurrentes
+    for (let j = 0; j < CONCURRENT_BATCHES && i + j < batches.length; j++) {
+      const batchIndex = i + j
+      batchGroup.push(processBatch(batches[batchIndex], batchIndex))
+    }
+
+    // Procesar grupo de lotes en paralelo
+    const results = await Promise.allSettled(batchGroup)
+
+    // Contar imágenes cargadas
+    results.forEach((result) => {
+      if (result.status === "fulfilled") {
+        loadedCount += result.value.successCount
+      }
+    })
+
+    // Reportar progreso cada grupo de lotes
+    const currentBatch = Math.min(i + CONCURRENT_BATCHES, batches.length)
+    console.log(`📥 Imágenes cargadas: ${loadedCount}/${totalImagesToPreload} (Lote ${currentBatch}/${batches.length})`)
+
+    // Pequeño delay entre grupos para no sobrecargar
+    if (i + CONCURRENT_BATCHES < batches.length) {
+      await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_GROUPS))
+    }
+  }
+
+  console.log(`✅ Precarga completada: ${loadedCount}/${totalImagesToPreload} imágenes en caché`)
+  showPreloadNotification(`${loadedCount} imágenes cargadas y guardadas`)
 }
 
 // ============================================
