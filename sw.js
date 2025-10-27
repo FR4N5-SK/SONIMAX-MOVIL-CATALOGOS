@@ -36,7 +36,6 @@ self.addEventListener("fetch", (event) => {
       caches.open(IMAGE_CACHE_NAME).then((cache) => {
         return cache.match(event.request).then((cachedResponse) => {
           if (cachedResponse) {
-            console.log("[SW] Imagen desde caché:", url.pathname)
             return cachedResponse
           }
 
@@ -46,13 +45,11 @@ self.addEventListener("fetch", (event) => {
               // Solo cachear respuestas exitosas
               if (networkResponse && networkResponse.status === 200) {
                 cache.put(event.request, networkResponse.clone())
-                console.log("[SW] Imagen cacheada:", url.pathname)
               }
               return networkResponse
             })
             .catch((error) => {
               console.error("[SW] Error descargando imagen:", error)
-              // Retornar imagen placeholder en caso de error
               return new Response("", { status: 404 })
             })
         })
@@ -61,88 +58,101 @@ self.addEventListener("fetch", (event) => {
   }
 })
 
-// Mensaje para precarga de imágenes
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "PRELOAD_IMAGES") {
     const imageUrls = event.data.urls
-    console.log("[SW] Precargando", imageUrls.length, "imágenes en lotes")
+    console.log("[SW] Iniciando precarga agresiva de", imageUrls.length, "imágenes")
 
-    event.waitUntil(
-      caches.open(IMAGE_CACHE_NAME).then(async (cache) => {
-        let loadedCount = 0
-        const totalCount = imageUrls.length
-        const BATCH_SIZE = 50 // Cargar 50 imágenes por lote
-        const DELAY_BETWEEN_BATCHES = 1000 // 1 segundo entre lotes
-
-        // Dividir URLs en lotes
-        const batches = []
-        for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
-          batches.push(imageUrls.slice(i, i + BATCH_SIZE))
-        }
-
-        console.log(`[SW] Dividido en ${batches.length} lotes de ${BATCH_SIZE} imágenes`)
-
-        // Procesar cada lote
-        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-          const batch = batches[batchIndex]
-          console.log(`[SW] Procesando lote ${batchIndex + 1}/${batches.length}`)
-
-          // Cargar todas las imágenes del lote en paralelo
-          const batchPromises = batch.map(async (url) => {
-            try {
-              const response = await fetch(url, {
-                mode: "no-cors",
-                cache: "force-cache",
-              })
-              if (response) {
-                await cache.put(url, response)
-                return { success: true, url }
-              }
-            } catch (error) {
-              console.error("[SW] Error en imagen:", url.substring(0, 50), error.message)
-              return { success: false, url, error: error.message }
-            }
-          })
-
-          // Esperar a que termine el lote
-          const results = await Promise.allSettled(batchPromises)
-
-          // Contar exitosas
-          const successCount = results.filter((r) => r.status === "fulfilled" && r.value?.success).length
-          loadedCount += successCount
-
-          // Reportar progreso
-          self.clients.matchAll().then((clients) => {
-            clients.forEach((client) => {
-              client.postMessage({
-                type: "PRELOAD_PROGRESS",
-                loaded: loadedCount,
-                total: totalCount,
-                batch: batchIndex + 1,
-                totalBatches: batches.length,
-              })
-            })
-          })
-
-          // Delay entre lotes (excepto el último)
-          if (batchIndex < batches.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES))
-          }
-        }
-
-        console.log(`[SW] Precarga completada: ${loadedCount}/${totalCount} imágenes`)
-
-        // Notificar finalización
-        self.clients.matchAll().then((clients) => {
-          clients.forEach((client) => {
-            client.postMessage({
-              type: "PRELOAD_COMPLETE",
-              count: loadedCount,
-              total: totalCount,
-            })
-          })
-        })
-      }),
-    )
+    // No usar event.waitUntil para evitar timeouts - procesar en background
+    preloadImagesAggressive(imageUrls)
   }
 })
+
+async function preloadImagesAggressive(imageUrls) {
+  const cache = await caches.open(IMAGE_CACHE_NAME)
+  let loadedCount = 0
+  const totalCount = imageUrls.length
+  const BATCH_SIZE = 30 // Lotes más pequeños para evitar sobrecarga
+  const CONCURRENT_BATCHES = 3 // Procesar 3 lotes en paralelo
+
+  console.log(`[SW] Procesando ${totalCount} imágenes en lotes de ${BATCH_SIZE}`)
+
+  // Dividir URLs en lotes
+  const batches = []
+  for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
+    batches.push(imageUrls.slice(i, i + BATCH_SIZE))
+  }
+
+  // Función para procesar un lote
+  const processBatch = async (batch, batchIndex) => {
+    const batchPromises = batch.map(async (url) => {
+      try {
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+        })
+        if (response) {
+          await cache.put(url, response)
+          return true
+        }
+        return false
+      } catch (error) {
+        return false
+      }
+    })
+
+    const results = await Promise.allSettled(batchPromises)
+    const successCount = results.filter((r) => r.status === "fulfilled" && r.value).length
+
+    return { batchIndex, successCount }
+  }
+
+  // Procesar lotes en grupos concurrentes
+  for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
+    const batchGroup = []
+
+    // Crear grupo de lotes concurrentes
+    for (let j = 0; j < CONCURRENT_BATCHES && i + j < batches.length; j++) {
+      const batchIndex = i + j
+      batchGroup.push(processBatch(batches[batchIndex], batchIndex))
+    }
+
+    // Procesar grupo de lotes en paralelo
+    const results = await Promise.allSettled(batchGroup)
+
+    // Contar imágenes cargadas
+    results.forEach((result) => {
+      if (result.status === "fulfilled") {
+        loadedCount += result.value.successCount
+      }
+    })
+
+    // Reportar progreso cada grupo de lotes
+    const currentBatch = Math.min(i + CONCURRENT_BATCHES, batches.length)
+    console.log(`[SW] Progreso: ${loadedCount}/${totalCount} (Lote ${currentBatch}/${batches.length})`)
+
+    // Enviar progreso a todos los clientes
+    const clients = await self.clients.matchAll()
+    clients.forEach((client) => {
+      client.postMessage({
+        type: "PRELOAD_PROGRESS",
+        loaded: loadedCount,
+        total: totalCount,
+        batch: currentBatch,
+        totalBatches: batches.length,
+      })
+    })
+  }
+
+  console.log(`[SW] ✅ Precarga completada: ${loadedCount}/${totalCount} imágenes en caché`)
+
+  // Notificar finalización
+  const clients = await self.clients.matchAll()
+  clients.forEach((client) => {
+    client.postMessage({
+      type: "PRELOAD_COMPLETE",
+      count: loadedCount,
+      total: totalCount,
+    })
+  })
+}
