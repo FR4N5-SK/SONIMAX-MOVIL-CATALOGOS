@@ -416,6 +416,55 @@ img {
   image-rendering: crisp-edges;
 }
 
+/* Estilos para botón de retry de imágenes */
+.image-retry-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  background: rgba(220, 38, 38, 0.9);
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.image-retry-btn:hover {
+  background: rgba(220, 38, 38, 1);
+  transform: translate(-50%, -50%) scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.image-retry-btn:active {
+  transform: translate(-50%, -50%) scale(0.95);
+}
+
+.image-retry-btn svg {
+  width: 24px;
+  height: 24px;
+  color: white;
+}
+
+.image-retry-btn.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
 /* Mejora de Accesibilidad */
 button:focus-visible,
 input:focus-visible {
