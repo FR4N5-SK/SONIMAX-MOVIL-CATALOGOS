@@ -34,6 +34,11 @@ const imageLoadState = {
   failedImages: new Map(), // url -> attemptCount
   inProgress: false,
   lastUpdate: null,
+  // Nuevos campos para priorización
+  isPaused: false,
+  priorityQueue: [],
+  backgroundQueue: [],
+  currentAbortController: null,
 }
 
 // ============================================
@@ -44,7 +49,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.parse(saved)
+      const parsed = JSON.JSON.parse(saved)
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -139,6 +144,183 @@ async function registerServiceWorker() {
   }
 }
 
+function pauseBackgroundDownloads() {
+  if (imageLoadState.isPaused) {
+    console.log("[IMG-PRIORITY] ⏸️ Descargas ya pausadas")
+    return
+  }
+
+  console.log("[IMG-PRIORITY] ⏸️ PAUSANDO descargas en segundo plano")
+  imageLoadState.isPaused = true
+
+  // Cancelar descarga actual si existe
+  if (imageLoadState.currentAbortController) {
+    imageLoadState.currentAbortController.abort()
+    console.log("[IMG-PRIORITY] ❌ Descarga actual cancelada")
+  }
+}
+
+function resumeBackgroundDownloads() {
+  if (!imageLoadState.isPaused) {
+    console.log("[IMG-PRIORITY] ▶️ Descargas ya activas")
+    return
+  }
+
+  console.log("[IMG-PRIORITY] ▶️ REANUDANDO descargas en segundo plano")
+  imageLoadState.isPaused = false
+
+  // Reanudar proceso de carga si hay imágenes pendientes
+  if (imageLoadState.backgroundQueue.length > 0) {
+    console.log(`[IMG-PRIORITY] 📋 Continuando con ${imageLoadState.backgroundQueue.length} imágenes en cola`)
+    setTimeout(() => processBackgroundQueue(), 1000)
+  }
+}
+
+async function loadPriorityImages(urls) {
+  if (urls.length === 0) {
+    console.log("[IMG-PRIORITY] ⚠️ No hay imágenes prioritarias para cargar")
+    return
+  }
+
+  console.log(`[IMG-PRIORITY] 🚀 Cargando ${urls.length} imágenes PRIORITARIAS`)
+
+  // Pausar descargas en segundo plano
+  pauseBackgroundDownloads()
+
+  const cache = await caches.open("sonimax-images-store")
+
+  // Filtrar solo las que no están cargadas
+  const urlsToLoad = urls.filter((url) => !imageLoadState.loadedImages.has(url))
+
+  console.log(`[IMG-PRIORITY] 📊 ${urlsToLoad.length} imágenes prioritarias necesitan descarga`)
+
+  for (const url of urlsToLoad) {
+    try {
+      // Verificar si ya está en caché
+      const cachedResponse = await cache.match(url)
+      if (cachedResponse) {
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-PRIORITY] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        continue
+      }
+
+      // Descargar con alta prioridad
+      console.log(`[IMG-PRIORITY] ⬇️ Descargando PRIORITARIA: ${url.substring(url.lastIndexOf("/") + 1)}`)
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(url, {
+        mode: "no-cors",
+        cache: "force-cache",
+        signal: controller.signal,
+        priority: "high", // Alta prioridad
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(url, response)
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-PRIORITY] ✅ PRIORITARIA descargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+      }
+    } catch (error) {
+      console.log(
+        `[IMG-PRIORITY] ❌ Error en prioritaria: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+      )
+      const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+      imageLoadState.failedImages.set(url, attemptCount)
+    }
+  }
+
+  saveImageLoadState()
+
+  // Reanudar descargas en segundo plano después de un breve delay
+  setTimeout(() => {
+    console.log("[IMG-PRIORITY] ⏱️ Reanudando descargas en segundo plano en 2 segundos...")
+    resumeBackgroundDownloads()
+  }, 2000)
+}
+
+async function processBackgroundQueue() {
+  if (imageLoadState.isPaused) {
+    console.log("[IMG-PRIORITY] ⏸️ Proceso pausado, esperando...")
+    return
+  }
+
+  if (imageLoadState.backgroundQueue.length === 0) {
+    console.log("[IMG-PRIORITY] ✅ Cola de segundo plano vacía")
+    return
+  }
+
+  const cache = await caches.open("sonimax-images-store")
+  const BATCH_SIZE = 10
+
+  while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
+    const batch = imageLoadState.backgroundQueue.splice(0, BATCH_SIZE)
+
+    console.log(
+      `[IMG-PRIORITY] 📦 Procesando lote de ${batch.length} imágenes (${imageLoadState.backgroundQueue.length} restantes)`,
+    )
+
+    for (const url of batch) {
+      if (imageLoadState.isPaused) {
+        console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
+        // Devolver imágenes no procesadas a la cola
+        imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
+        return
+      }
+
+      try {
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) {
+          imageLoadState.loadedImages.add(url)
+          continue
+        }
+
+        const controller = new AbortController()
+        imageLoadState.currentAbortController = controller
+
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response) {
+          await cache.put(url, response)
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          console.log(`[IMG-PRIORITY] ✅ Segundo plano: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        }
+      } catch (error) {
+        if (error.name === "AbortError") {
+          console.log(`[IMG-PRIORITY] ⏸️ Descarga cancelada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          imageLoadState.backgroundQueue.unshift(url) // Devolver a la cola
+        } else {
+          console.log(`[IMG-PRIORITY] ❌ Error: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`)
+          const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+          imageLoadState.failedImages.set(url, attemptCount)
+        }
+      }
+
+      imageLoadState.currentAbortController = null
+    }
+
+    // Pequeña pausa entre lotes
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    saveImageLoadState()
+  }
+
+  console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
+}
+
 async function preloadAllImages() {
   if (!("caches" in window)) {
     console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
@@ -185,7 +367,10 @@ async function preloadAllImages() {
 
   imageLoadState.inProgress = true
 
-  await loadImagesWithRetry(urlsToLoad)
+  imageLoadState.backgroundQueue = [...urlsToLoad]
+  console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
+
+  await processBackgroundQueue()
 
   imageLoadState.inProgress = false
   saveImageLoadState()
@@ -453,15 +638,25 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc) {
+              console.log(
+                `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
+              )
+              loadPriorityImages([fullSrc])
+
               const tempImg = new Image()
               tempImg.onload = () => {
                 img.src = fullSrc
                 img.classList.remove("image-loading")
                 img.classList.add("image-loaded")
+                const retryBtn = img.parentElement.querySelector(".image-retry-btn")
+                if (retryBtn) {
+                  retryBtn.remove()
+                }
               }
               tempImg.onerror = () => {
                 img.src = "/generic-product-display.png"
                 img.classList.remove("image-loading")
+                addRetryButton(img, fullSrc)
               }
               tempImg.src = fullSrc
 
@@ -476,6 +671,55 @@ function initImageObserver() {
       },
     )
   }
+}
+
+function addRetryButton(imgElement, imageUrl) {
+  // Verificar si ya existe un botón de retry
+  const existingBtn = imgElement.parentElement.querySelector(".image-retry-btn")
+  if (existingBtn) return
+
+  console.log(`[IMG-RETRY] 🔄 Agregando botón de retry para: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
+
+  const retryBtn = document.createElement("button")
+  retryBtn.className = "image-retry-btn"
+  retryBtn.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  `
+  retryBtn.title = "Reintentar cargar imagen"
+
+  retryBtn.addEventListener("click", async (e) => {
+    e.stopPropagation()
+    console.log(`[IMG-RETRY] 🔄 Reintentando carga: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
+
+    retryBtn.classList.add("spinning")
+
+    try {
+      // Cargar con prioridad
+      await loadPriorityImages([imageUrl])
+
+      // Intentar cargar la imagen
+      const tempImg = new Image()
+      tempImg.onload = () => {
+        imgElement.src = imageUrl
+        imgElement.classList.remove("image-loading")
+        imgElement.classList.add("image-loaded")
+        retryBtn.remove()
+        console.log(`[IMG-RETRY] ✅ Imagen cargada exitosamente`)
+      }
+      tempImg.onerror = () => {
+        retryBtn.classList.remove("spinning")
+        console.log(`[IMG-RETRY] ❌ Error al cargar imagen después de retry`)
+      }
+      tempImg.src = imageUrl
+    } catch (error) {
+      retryBtn.classList.remove("spinning")
+      console.log(`[IMG-RETRY] ❌ Error en retry: ${error.message}`)
+    }
+  })
+
+  imgElement.parentElement.appendChild(retryBtn)
 }
 
 // ============================================
@@ -1943,6 +2187,7 @@ function handleGlobalSearch(e) {
     currentPage = 1
     renderProducts()
     if (searchLoading) searchLoading.classList.add("hidden")
+    resumeBackgroundDownloads()
     return
   }
 
@@ -1954,6 +2199,14 @@ function handleGlobalSearch(e) {
     filteredProducts = searchProducts(allProducts, query)
 
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
+
+    const searchResultUrls = filteredProducts
+      .slice(0, 20) // Primeros 20 resultados
+      .map((p) => optimizeImageUrl(p.imagen_url))
+      .filter((url) => url && url !== "/generic-product-display.png")
+
+    console.log(`[SEARCH] 🔍 Priorizando ${searchResultUrls.length} imágenes de búsqueda`)
+    loadPriorityImages(searchResultUrls)
 
     currentPage = 1
     renderProducts()
