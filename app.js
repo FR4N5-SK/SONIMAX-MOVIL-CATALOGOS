@@ -26,8 +26,8 @@ let serviceWorkerRegistration = null
 
 const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
-const MAX_RETRY_ATTEMPTS = 5
-const RETRY_DELAY = 3000 // 3 segundos entre reintentos
+const MAX_RETRY_ATTEMPTS = 3
+const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
 
 const imageLoadState = {
   loadedImages: new Set(),
@@ -49,7 +49,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.JSON.parse(saved)
+      const parsed = JSON.parse(saved)
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -194,7 +194,7 @@ async function loadPriorityImages(urls) {
 
   console.log(`[IMG-PRIORITY] 📊 ${urlsToLoad.length} imágenes prioritarias necesitan descarga`)
 
-  for (const url of urlsToLoad) {
+  const priorityPromises = urlsToLoad.map(async (url) => {
     try {
       // Verificar si ya está en caché
       const cachedResponse = await cache.match(url)
@@ -202,14 +202,14 @@ async function loadPriorityImages(urls) {
         imageLoadState.loadedImages.add(url)
         imageLoadState.failedImages.delete(url)
         console.log(`[IMG-PRIORITY] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
-        continue
+        return
       }
 
       // Descargar con alta prioridad
       console.log(`[IMG-PRIORITY] ⬇️ Descargando PRIORITARIA: ${url.substring(url.lastIndexOf("/") + 1)}`)
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
 
       const response = await fetch(url, {
         mode: "no-cors",
@@ -233,15 +233,16 @@ async function loadPriorityImages(urls) {
       const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
       imageLoadState.failedImages.set(url, attemptCount)
     }
-  }
+  })
+
+  await Promise.allSettled(priorityPromises)
 
   saveImageLoadState()
 
-  // Reanudar descargas en segundo plano después de un breve delay
   setTimeout(() => {
-    console.log("[IMG-PRIORITY] ⏱️ Reanudando descargas en segundo plano en 2 segundos...")
+    console.log("[IMG-PRIORITY] ⏱️ Reanudando descargas en segundo plano...")
     resumeBackgroundDownloads()
-  }, 2000)
+  }, 500)
 }
 
 async function processBackgroundQueue() {
@@ -283,7 +284,7 @@ async function processBackgroundQueue() {
         const controller = new AbortController()
         imageLoadState.currentAbortController = controller
 
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
         const response = await fetch(url, {
           mode: "no-cors",
@@ -313,8 +314,7 @@ async function processBackgroundQueue() {
       imageLoadState.currentAbortController = null
     }
 
-    // Pequeña pausa entre lotes
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await new Promise((resolve) => setTimeout(resolve, 50))
     saveImageLoadState()
   }
 
@@ -378,8 +378,8 @@ async function preloadAllImages() {
 
 async function loadImagesWithRetry(urls) {
   const cache = await caches.open("sonimax-images-store")
-  const BATCH_SIZE = 20
-  const CONCURRENT_BATCHES = 2
+  const BATCH_SIZE = 10
+  const CONCURRENT_BATCHES = 4
 
   console.log(`[IMG-LOAD] 🚀 Iniciando carga de ${urls.length} imágenes...`)
   console.log(`[IMG-LOAD] 📊 Ya cargadas: ${imageLoadState.loadedImages.size}`)
@@ -421,7 +421,7 @@ async function loadImagesWithRetry(urls) {
     // Guardar estado periódicamente
     saveImageLoadState()
 
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
 
   console.log(`[IMG-LOAD] ✅ Carga inicial completada`)
@@ -452,7 +452,7 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
 
       // Descargar con timeout
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
 
       const response = await fetch(url, {
         mode: "no-cors",
@@ -515,53 +515,58 @@ async function retryFailedImages(cache) {
   let retrySuccess = 0
   let retryFailed = 0
 
-  for (let i = 0; i < failedUrls.length; i++) {
-    const url = failedUrls[i]
-    const currentAttempt = imageLoadState.failedImages.get(url) || 0
+  const RETRY_CONCURRENT = 5
+  for (let i = 0; i < failedUrls.length; i += RETRY_CONCURRENT) {
+    const batch = failedUrls.slice(i, i + RETRY_CONCURRENT)
 
-    console.log(
-      `[IMG-LOAD] 🔄 Reintentando (${i + 1}/${failedUrls.length}) intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(url.lastIndexOf("/") + 1)}`,
-    )
+    const retryPromises = batch.map(async (url) => {
+      const currentAttempt = imageLoadState.failedImages.get(url) || 0
 
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
+      console.log(
+        `[IMG-LOAD] 🔄 Reintentando intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(url.lastIndexOf("/") + 1)}`,
+      )
 
-      const response = await fetch(url, {
-        mode: "no-cors",
-        cache: "force-cache",
-        signal: controller.signal,
-      })
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      clearTimeout(timeoutId)
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+          signal: controller.signal,
+        })
 
-      if (response) {
-        await cache.put(url, response)
-        imageLoadState.loadedImages.add(url)
-        imageLoadState.failedImages.delete(url)
-        retrySuccess++
-        console.log(
-          `[IMG-LOAD] ✅ Reintento exitoso (${retrySuccess}/${failedUrls.length}): ${url.substring(url.lastIndexOf("/") + 1)}`,
-        )
-      } else {
+        clearTimeout(timeoutId)
+
+        if (response) {
+          await cache.put(url, response)
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          retrySuccess++
+          console.log(`[IMG-LOAD] ✅ Reintento exitoso: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          return { success: true }
+        } else {
+          const attempts = imageLoadState.failedImages.get(url) + 1
+          imageLoadState.failedImages.set(url, attempts)
+          retryFailed++
+          console.log(`[IMG-LOAD] ❌ Reintento fallido: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          return { success: false }
+        }
+      } catch (error) {
         const attempts = imageLoadState.failedImages.get(url) + 1
         imageLoadState.failedImages.set(url, attempts)
         retryFailed++
         console.log(
-          `[IMG-LOAD] ❌ Reintento fallido (${retryFailed}/${failedUrls.length}): ${url.substring(url.lastIndexOf("/") + 1)}`,
+          `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
         )
+        return { success: false }
       }
-    } catch (error) {
-      const attempts = imageLoadState.failedImages.get(url) + 1
-      imageLoadState.failedImages.set(url, attempts)
-      retryFailed++
-      console.log(
-        `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
-      )
-    }
+    })
 
-    // Pequeña pausa entre reintentos
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await Promise.allSettled(retryPromises)
+
+    // Pequeña pausa entre lotes de reintentos
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
   console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidos`)
@@ -696,16 +701,41 @@ function addRetryButton(imgElement, imageUrl) {
     retryBtn.classList.add("spinning")
 
     try {
-      // Cargar con prioridad
-      await loadPriorityImages([imageUrl])
+      const cache = await caches.open("sonimax-images-store")
+      await cache.delete(imageUrl)
+      imageLoadState.loadedImages.delete(imageUrl)
+      imageLoadState.failedImages.delete(imageUrl)
 
-      // Intentar cargar la imagen
+      console.log(`[IMG-RETRY] 🗑️ Caché limpiada para: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
+
+      const cacheBustUrl = imageUrl.includes("?") ? `${imageUrl}&_t=${Date.now()}` : `${imageUrl}?_t=${Date.now()}`
+
+      // Intentar cargar la imagen con cache busting
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(cacheBustUrl, {
+        mode: "no-cors",
+        cache: "reload", // Forzar recarga desde servidor
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(imageUrl, response.clone())
+        imageLoadState.loadedImages.add(imageUrl)
+        console.log(`[IMG-RETRY] 💾 Imagen guardada en caché`)
+      }
+
+      // Cargar la imagen en el elemento
       const tempImg = new Image()
       tempImg.onload = () => {
         imgElement.src = imageUrl
         imgElement.classList.remove("image-loading")
         imgElement.classList.add("image-loaded")
         retryBtn.remove()
+        saveImageLoadState()
         console.log(`[IMG-RETRY] ✅ Imagen cargada exitosamente`)
       }
       tempImg.onerror = () => {
