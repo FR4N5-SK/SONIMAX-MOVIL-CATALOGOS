@@ -2021,7 +2021,7 @@ function generateExcelAndSendOrder(responsables, sitio) {
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
 
-      message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+      message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
 
       if (index < cart.length - 1) {
         message += `\n`
@@ -2071,7 +2071,7 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 
     totalGmayor += subtotal
 
-    message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
 
     if (index < cart.length - 1) {
       message += `\n`
@@ -2110,7 +2110,7 @@ function sendWhatsAppOrder() {
     const codigo = product ? product.descripcion || "S/C" : "S/C"
     const subtotal = item.price * item.quantity
 
-    message += `${item.quantity} - ${codigo} - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
 
     if (index < cart.length - 1) {
       message += `\n`
