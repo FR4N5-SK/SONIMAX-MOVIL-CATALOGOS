@@ -1594,6 +1594,7 @@ function openQuantityModal(product) {
   const modal = document.getElementById("quantity-modal")
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
+  const observationInput = document.getElementById("observation-input")
 
   const priceInfo = getPriceForRole(product)
 
@@ -1654,12 +1655,14 @@ function openQuantityModal(product) {
   `
 
   quantityInput.value = 1
+  observationInput.value = ""
   modal.classList.remove("hidden")
   quantityInput.focus()
 }
 
 function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
+  const observation = document.getElementById("observation-input").value.trim()
 
   if (quantity < 1) {
     alert("La cantidad debe ser al menos 1")
@@ -1682,20 +1685,25 @@ function confirmQuantity() {
     selectedPrice = priceInfo.price
   }
 
-  addToCart(selectedProductForQuantity, quantity, selectedPrice)
+  addToCart(selectedProductForQuantity, quantity, selectedPrice, observation)
   document.getElementById("quantity-modal").classList.add("hidden")
 }
 
-function addToCart(product, quantity, price) {
-  const existingItem = cart.find((item) => item.id === product.id && item.price === price)
+function addToCart(product, quantity, price, observation = "") {
+  const existingItemIndex = cart.findIndex((item) => 
+    item.id === product.id && 
+    item.price === price && 
+    item.observation === observation
+  )
 
-  if (existingItem) {
-    existingItem.quantity += quantity
+  if (existingItemIndex !== -1) {
+    cart[existingItemIndex].quantity += quantity
   } else {
     cart.push({
       ...product,
       quantity: quantity,
       price: price,
+      observation: observation,
     })
   }
 
@@ -1703,7 +1711,7 @@ function addToCart(product, quantity, price) {
   updateCartCount()
   animateCartButton()
 
-  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}`)
+  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}${observation ? ` (${observation})` : ''}`)
 }
 
 function updateCartCount() {
@@ -1770,6 +1778,7 @@ function renderCart() {
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
           <p class="text-gray-600 text-sm">Cantidad: ${item.quantity}</p>
+          ${item.observation ? `<p class="text-blue-600 text-sm font-medium mt-1">📝 ${item.observation}</p>` : ''}
         </div>
       </div>
       <div class="flex items-center justify-between mt-4">
@@ -1976,7 +1985,7 @@ function generateExcelAndSendOrder(responsables, sitio) {
     excelData.push(["Fecha:", new Date().toLocaleDateString()])
     excelData.push([])
 
-    excelData.push(["CANTIDAD", "CÓDIGO", "DESCRIPCIÓN", "PRECIO UNITARIO", "SUBTOTAL"])
+    excelData.push(["CANTIDAD", "CÓDIGO", "DESCRIPCIÓN", "PRECIO UNITARIO", "SUBTOTAL", "OBSERVACIÓN"])
 
     let totalGmayor = 0
 
@@ -1988,15 +1997,22 @@ function generateExcelAndSendOrder(responsables, sitio) {
 
       totalGmayor += subtotal
 
-      excelData.push([item.quantity, codigo, item.nombre, `$${precioUnitario.toFixed(2)}`, `$${subtotal.toFixed(2)}`])
+      excelData.push([
+        item.quantity, 
+        codigo, 
+        item.nombre, 
+        `$${precioUnitario.toFixed(2)}`, 
+        `$${subtotal.toFixed(2)}`,
+        item.observation || ""
+      ])
     })
 
     excelData.push([])
-    excelData.push(["", "", "", "TOTAL:", `$${totalGmayor.toFixed(2)}`])
+    excelData.push(["", "", "", "", "TOTAL:", `$${totalGmayor.toFixed(2)}`])
 
     const ws = window.XLSX.utils.aoa_to_sheet(excelData)
 
-    const colWidths = [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }]
+    const colWidths = [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }]
     ws["!cols"] = colWidths
 
     window.XLSX.utils.book_append_sheet(wb, ws, "Pedido")
@@ -2021,7 +2037,11 @@ function generateExcelAndSendOrder(responsables, sitio) {
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
 
-      message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+      message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
+      if (item.observation) {
+        message += `\n   📝 _${item.observation}_`
+      }
+      message += `\n`
 
       if (index < cart.length - 1) {
         message += `\n`
@@ -2071,7 +2091,11 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 
     totalGmayor += subtotal
 
-    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
+    if (item.observation) {
+      message += `\n   📝 _${item.observation}_`
+    }
+    message += `\n`
 
     if (index < cart.length - 1) {
       message += `\n`
@@ -2110,7 +2134,11 @@ function sendWhatsAppOrder() {
     const codigo = product ? product.descripcion || "S/C" : "S/C"
     const subtotal = item.price * item.quantity
 
-    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}\n`
+    message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
+    if (item.observation) {
+      message += `\n   📝 _${item.observation}_`
+    }
+    message += `\n`
 
     if (index < cart.length - 1) {
       message += `\n`
