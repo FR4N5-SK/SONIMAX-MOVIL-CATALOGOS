@@ -1,5 +1,5 @@
 // SONIMAX MÓVIL - Aplicación Principal
-// Sistema actualizado con USUARIO en lugar de EMAIL
+// Sistema actualizado con USUARIO en lugar de EMAIL con BANNERS integrados
 
 /* global XLSX */
 /* eslint-disable no-undef */
@@ -28,6 +28,10 @@ const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
+
+let banners = []
+let currentBannerIndex = 0
+let bannerAutoPlayInterval = null
 
 const imageLoadState = {
   loadedImages: new Set(),
@@ -269,7 +273,6 @@ async function processBackgroundQueue() {
     for (const url of batch) {
       if (imageLoadState.isPaused) {
         console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
-        // Devolver imágenes no procesadas a la cola
         imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
         return
       }
@@ -327,27 +330,21 @@ async function preloadAllImages() {
     return
   }
 
-  // Cargar estado previo
   loadImageLoadState()
 
-  // Verificar si los productos cambiaron
   const { changed, newUrls } = checkProductsChanged(allProducts)
 
-  // Obtener todas las URLs optimizadas
   const allImageUrls = allProducts
     .map((p) => p.imagen_url)
     .filter((url) => url && url !== "/generic-product-display.png")
     .map((url) => optimizeImageUrl(url))
 
-  // Determinar qué imágenes cargar
   let urlsToLoad = []
 
   if (changed && newUrls.length > 0) {
-    // Solo cargar las nuevas
     urlsToLoad = newUrls
     console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
   } else {
-    // Cargar las que no están en el estado o fallaron
     urlsToLoad = allImageUrls.filter(
       (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
     )
@@ -386,7 +383,6 @@ async function loadImagesWithRetry(urls) {
   console.log(`[IMG-LOAD] 📊 Con errores previos: ${imageLoadState.failedImages.size}`)
   console.log(`[IMG-LOAD] 📊 Por cargar ahora: ${urls.length}`)
 
-  // Dividir en lotes
   const batches = []
   for (let i = 0; i < urls.length; i += BATCH_SIZE) {
     batches.push(urls.slice(i, i + BATCH_SIZE))
@@ -395,7 +391,6 @@ async function loadImagesWithRetry(urls) {
   let totalLoaded = 0
   let totalFailed = 0
 
-  // Procesar lotes
   for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
     const batchGroup = []
 
@@ -418,7 +413,6 @@ async function loadImagesWithRetry(urls) {
       `[IMG-LOAD] 📊 Progreso: ${totalLoaded} exitosas, ${totalFailed} fallidas, ${remaining} restantes de ${urls.length} totales`,
     )
 
-    // Guardar estado periódicamente
     saveImageLoadState()
 
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -428,7 +422,6 @@ async function loadImagesWithRetry(urls) {
   console.log(`[IMG-LOAD] 📊 Resultado: ${totalLoaded} exitosas, ${totalFailed} fallidas de ${urls.length} totales`)
   console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas en total`)
 
-  // Reintentar las fallidas
   if (totalFailed > 0) {
     console.log(`[IMG-LOAD] 🔄 Iniciando proceso de reintentos para ${totalFailed} imágenes fallidas...`)
     await retryFailedImages(cache)
@@ -441,7 +434,6 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
 
   const promises = batch.map(async (url) => {
     try {
-      // Verificar si ya está en caché
       const cachedResponse = await cache.match(url)
       if (cachedResponse) {
         imageLoadState.loadedImages.add(url)
@@ -450,7 +442,6 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
         return { success: true, cached: true }
       }
 
-      // Descargar con timeout
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
 
@@ -565,7 +556,6 @@ async function retryFailedImages(cache) {
 
     await Promise.allSettled(retryPromises)
 
-    // Pequeña pausa entre lotes de reintentos
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
@@ -574,7 +564,6 @@ async function retryFailedImages(cache) {
 
   saveImageLoadState()
 
-  // Si aún hay fallidas, reintentar recursivamente
   const stillFailed = Array.from(imageLoadState.failedImages.entries()).filter(
     ([url, attempts]) => attempts < MAX_RETRY_ATTEMPTS,
   )
@@ -753,6 +742,242 @@ function addRetryButton(imgElement, imageUrl) {
 }
 
 // ============================================
+// SISTEMA DE BANNERS (ROJO Y NEGRO)
+// ============================================
+
+async function loadBanners() {
+  try {
+    const { data, error } = await window.supabaseClient
+      .from("banners")
+      .select("*")
+      .eq("activo", true)
+      .order("posicion", { ascending: true })
+
+    if (error) throw error
+
+    banners = data || []
+
+    if (banners.length > 0) {
+      displayBanner(0)
+      startBannerAutoPlay()
+      renderBannerIndicators()
+    }
+
+    console.log(`✅ ${banners.length} banners cargados`)
+  } catch (error) {
+    console.error("❌ Error cargando banners:", error)
+    banners = []
+  }
+}
+
+function displayBanner(index) {
+  if (banners.length === 0) return
+
+  currentBannerIndex = index % banners.length
+  const banner = banners[currentBannerIndex]
+
+  const bannerImage = document.getElementById("banner-image")
+  if (bannerImage) {
+    bannerImage.src = banner.imagen_url
+    bannerImage.alt = banner.titulo
+  }
+
+  updateBannerIndicators()
+}
+
+function startBannerAutoPlay() {
+  if (bannerAutoPlayInterval) {
+    clearInterval(bannerAutoPlayInterval)
+  }
+
+  bannerAutoPlayInterval = setInterval(() => {
+    nextBanner()
+  }, 5000) // Cambia cada 5 segundos
+}
+
+function nextBanner() {
+  if (banners.length === 0) return
+  displayBanner(currentBannerIndex + 1)
+  restartBannerAutoPlay()
+}
+
+function previousBanner() {
+  if (banners.length === 0) return
+  displayBanner(currentBannerIndex - 1)
+  restartBannerAutoPlay()
+}
+
+function restartBannerAutoPlay() {
+  startBannerAutoPlay()
+}
+
+function renderBannerIndicators() {
+  const container = document.getElementById("banner-indicators")
+  if (!container) return
+
+  container.innerHTML = ""
+
+  banners.forEach((_, index) => {
+    const dot = document.createElement("button")
+    dot.className = `banner-indicator w-3 h-3 rounded-full transition-all ${
+      index === currentBannerIndex ? "bg-red-600 w-8" : "bg-white/50 hover:bg-white/75"
+    }`
+    dot.addEventListener("click", () => {
+      displayBanner(index)
+      restartBannerAutoPlay()
+    })
+    container.appendChild(dot)
+  })
+}
+
+function updateBannerIndicators() {
+  const indicators = document.querySelectorAll(".banner-indicator")
+  indicators.forEach((indicator, index) => {
+    if (index === currentBannerIndex) {
+      indicator.classList.add("bg-red-600", "w-8")
+      indicator.classList.remove("bg-white/50")
+    } else {
+      indicator.classList.remove("bg-red-600", "w-8")
+      indicator.classList.add("bg-white/50")
+    }
+  })
+}
+
+async function loadBannersForModal() {
+  try {
+    const { data, error } = await window.supabaseClient
+      .from("banners")
+      .select("*")
+      .order("posicion", { ascending: true })
+
+    if (error) throw error
+
+    const list = document.getElementById("banners-list")
+    const noMsg = document.getElementById("no-banners-msg")
+
+    if (!data || data.length === 0) {
+      list.innerHTML = ""
+      noMsg.classList.remove("hidden")
+      return
+    }
+
+    noMsg.classList.add("hidden")
+    list.innerHTML = ""
+
+    data.forEach((banner) => {
+      const item = document.createElement("div")
+      item.className = "p-4 border-2 border-gray-200 rounded-xl hover:border-red-400 transition-all"
+      item.innerHTML = `
+        <div class="flex items-start gap-4">
+          <img src="${banner.imagen_url}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
+          <div class="flex-1">
+            <h4 class="font-bold text-gray-800">${banner.titulo}</h4>
+            <p class="text-sm text-gray-600 mt-1 truncate">${banner.imagen_url}</p>
+            <div class="flex gap-2 mt-3">
+              <button class="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-all toggle-banner-btn" data-id="${banner.id}" data-active="${banner.activo}">
+                ${banner.activo ? "✓ Activo" : "○ Inactivo"}
+              </button>
+              <button class="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 transition-all delete-banner-btn" data-id="${banner.id}">
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      `
+
+      const toggleBtn = item.querySelector(".toggle-banner-btn")
+      const deleteBtn = item.querySelector(".delete-banner-btn")
+
+      toggleBtn.addEventListener("click", async () => {
+        await toggleBannerActive(banner.id, !banner.activo)
+      })
+
+      deleteBtn.addEventListener("click", async () => {
+        if (confirm(`¿Eliminar banner "${banner.titulo}"?`)) {
+          await deleteBanner(banner.id)
+        }
+      })
+
+      list.appendChild(item)
+    })
+  } catch (error) {
+    console.error("❌ Error cargando banners para modal:", error)
+  }
+}
+
+async function addBanner() {
+  const title = document.getElementById("banner-title-input").value.trim()
+  const url = document.getElementById("banner-url-input").value.trim()
+
+  if (!title || !url) {
+    alert("Por favor completa todos los campos")
+    return
+  }
+
+  if (!url.startsWith("http")) {
+    alert("Por favor ingresa una URL válida que comience con http:// o https://")
+    return
+  }
+
+  try {
+    const { data, error } = await window.supabaseClient
+      .from("banners")
+      .insert({
+        titulo: title,
+        imagen_url: url,
+        activo: true,
+        posicion: 0,
+      })
+      .select()
+
+    if (error) throw error
+
+    console.log("✅ Banner agregado:", data)
+
+    document.getElementById("banner-title-input").value = ""
+    document.getElementById("banner-url-input").value = ""
+
+    loadBannersForModal()
+    loadBanners()
+
+    alert("¡Banner agregado exitosamente!")
+  } catch (error) {
+    console.error("❌ Error agregando banner:", error)
+    alert("Error al agregar banner: " + error.message)
+  }
+}
+
+async function toggleBannerActive(bannerId, active) {
+  try {
+    const { error } = await window.supabaseClient.from("banners").update({ activo: active }).eq("id", bannerId)
+
+    if (error) throw error
+
+    console.log(`✅ Banner ${bannerId} actualizado`)
+    loadBannersForModal()
+    loadBanners()
+  } catch (error) {
+    console.error("❌ Error actualizando banner:", error)
+    alert("Error al actualizar banner")
+  }
+}
+
+async function deleteBanner(bannerId) {
+  try {
+    const { error } = await window.supabaseClient.from("banners").delete().eq("id", bannerId)
+
+    if (error) throw error
+
+    console.log(`✅ Banner ${bannerId} eliminado`)
+    loadBannersForModal()
+    loadBanners()
+  } catch (error) {
+    console.error("❌ Error eliminando banner:", error)
+    alert("Error al eliminar banner")
+  }
+}
+
+// ============================================
 // INICIALIZACIÓN
 // ============================================
 
@@ -772,6 +997,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadUserData(session.user.id)
     loadCartFromStorage()
     showApp()
+    loadBanners()
   } else {
     console.log("ℹ️ No hay sesión activa")
     showLogin()
@@ -806,6 +1032,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     await loadUserData(data.user.id)
     loadCartFromStorage()
     showApp()
+    loadBanners()
   } catch (error) {
     console.error("❌ Error en login:", error)
     showAuthMessage(
@@ -866,6 +1093,7 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
     setTimeout(async () => {
       await loadUserData(data.user.id)
       showApp()
+      loadBanners()
     }, 1500)
   } catch (error) {
     console.error("❌ Error en registro:", error)
@@ -982,6 +1210,7 @@ function updateUIForRole() {
   const roleBadge = document.getElementById("user-role-badge")
   const adminSection = document.getElementById("admin-section")
   const gestorSection = document.getElementById("gestor-section")
+  const manageBannersBtn = document.getElementById("manage-banners-btn")
 
   if (roleBadge) {
     roleBadge.textContent = `${currentUser.name} (${currentUserRole})`
@@ -992,12 +1221,15 @@ function updateUIForRole() {
   if (currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     gestorSection?.classList.remove("hidden")
+    manageBannersBtn?.classList.remove("hidden")
   } else if (currentUserRole === "gestor") {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.remove("hidden")
+    manageBannersBtn?.classList.add("hidden")
   } else {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
+    manageBannersBtn?.classList.add("hidden")
   }
 }
 
@@ -1130,6 +1362,25 @@ function setupEventListeners() {
     document.getElementById("register-form").classList.remove("hidden")
     document.getElementById("show-register-btn").classList.add("auth-tab-active")
     document.getElementById("show-login-btn").classList.remove("auth-tab-active")
+  })
+
+  document.getElementById("manage-banners-btn")?.addEventListener("click", () => {
+    document.getElementById("banners-modal").classList.remove("hidden")
+    loadBannersForModal()
+  })
+
+  document.getElementById("close-banners-modal")?.addEventListener("click", () => {
+    document.getElementById("banners-modal").classList.add("hidden")
+  })
+
+  document.getElementById("add-banner-btn")?.addEventListener("click", addBanner)
+
+  document.getElementById("banner-prev")?.addEventListener("click", () => {
+    previousBanner()
+  })
+
+  document.getElementById("banner-next")?.addEventListener("click", () => {
+    nextBanner()
   })
 
   document.getElementById("create-user-button")?.addEventListener("click", () => {
@@ -1690,10 +1941,8 @@ function confirmQuantity() {
 }
 
 function addToCart(product, quantity, price, observation = "") {
-  const existingItemIndex = cart.findIndex((item) => 
-    item.id === product.id && 
-    item.price === price && 
-    item.observation === observation
+  const existingItemIndex = cart.findIndex(
+    (item) => item.id === product.id && item.price === price && item.observation === observation,
   )
 
   if (existingItemIndex !== -1) {
@@ -1711,7 +1960,9 @@ function addToCart(product, quantity, price, observation = "") {
   updateCartCount()
   animateCartButton()
 
-  console.log(`✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}${observation ? ` (${observation})` : ''}`)
+  console.log(
+    `✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}${observation ? ` (${observation})` : ""}`,
+  )
 }
 
 function updateCartCount() {
@@ -1778,7 +2029,7 @@ function renderCart() {
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
           <p class="text-gray-600 text-sm">Cantidad: ${item.quantity}</p>
-          ${item.observation ? `<p class="text-blue-600 text-sm font-medium mt-1">📝 ${item.observation}</p>` : ''}
+          ${item.observation ? `<p class="text-blue-600 text-sm font-medium mt-1">📝 ${item.observation}</p>` : ""}
         </div>
       </div>
       <div class="flex items-center justify-between mt-4">
@@ -1998,12 +2249,12 @@ function generateExcelAndSendOrder(responsables, sitio) {
       totalGmayor += subtotal
 
       excelData.push([
-        item.quantity, 
-        codigo, 
-        item.nombre, 
-        `$${precioUnitario.toFixed(2)}`, 
+        item.quantity,
+        codigo,
+        item.nombre,
+        `$${precioUnitario.toFixed(2)}`,
         `$${subtotal.toFixed(2)}`,
-        item.observation || ""
+        item.observation || "",
       ])
     })
 
@@ -2259,7 +2510,7 @@ function handleGlobalSearch(e) {
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     const searchResultUrls = filteredProducts
-      .slice(0, 20) // Primeros 20 resultados
+      .slice(0, 20)
       .map((p) => optimizeImageUrl(p.imagen_url))
       .filter((url) => url && url !== "/generic-product-display.png")
 
