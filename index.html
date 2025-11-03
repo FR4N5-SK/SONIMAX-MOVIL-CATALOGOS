@@ -214,6 +214,93 @@
             </div>
         </div>
 
+        <!-- Banner de Fotos - MODIFICADO PARA MAYOR ALTURA -->
+        <section class="py-2 px-4 my-2">
+            <div class="container mx-auto">
+                <!-- Banner Carrusel -->
+                <div id="banner-carousel" class="relative rounded-lg overflow-hidden shadow-xl">
+                    <!-- Imagen Principal - MODIFICADO: aspect-ratio cambiado de 16/4 a 16/6 para mayor altura -->
+                    <div class="relative w-full" style="aspect-ratio: 16/6;">
+                        <img id="banner-image" 
+                             src="/placeholder.svg?height=600&width=1200" 
+                             alt="Banner" 
+                             class="w-full h-full object-cover transition-opacity duration-500">
+                        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10"></div>
+                    </div>
+
+                    <!-- Botones Navegación -->
+                    <button id="banner-prev" class="absolute left-4 top-1/2 -translate-y-1/2 bg-red-600 hover:bg-red-700 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+                    <button id="banner-next" class="absolute right-4 top-1/2 -translate-y-1/2 bg-red-600 hover:bg-red-700 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+
+                    <!-- Indicadores (Puntos) -->
+                    <div id="banner-indicators" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10"></div>
+                </div>
+
+                <!-- Botón Gestionar Banners (Solo Admin) -->
+                <button id="manage-banners-btn" class="hidden mt-2 mx-auto px-6 py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 text-white rounded-xl hover:from-yellow-700 hover:to-yellow-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    <span>🖼️ Gestionar Banners</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Modal para Gestionar Banners -->
+        <div id="banners-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-black text-gray-800">Gestionar Banners</h2>
+                    <button id="close-banners-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Formulario Agregar Banner -->
+                <div class="mb-6 p-4 bg-gradient-to-r from-red-50 to-black/5 rounded-xl border-2 border-red-200">
+                    <h3 class="font-bold text-lg text-gray-800 mb-4">Agregar Nuevo Banner</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-gray-700 font-bold mb-2">Título del Banner</label>
+                            <input type="text" id="banner-title-input" 
+                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
+                                placeholder="Ej: Promoción de Navidad">
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 font-bold mb-2">URL de la Imagen (1200x450px mínimo)</label>
+                            <input type="url" id="banner-url-input" 
+                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
+                                placeholder="https://ejemplo.com/imagen.jpg">
+                        </div>
+                        <button id="add-banner-btn" class="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
+                            Agregar Banner
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Lista de Banners -->
+                <div>
+                    <h3 class="font-bold text-lg text-gray-800 mb-4">Banners Activos</h3>
+                    <div id="banners-list" class="space-y-3 max-h-[40vh] overflow-y-auto">
+                        <!-- Se cargarán dinámicamente -->
+                    </div>
+                    <div id="no-banners-msg" class="text-center py-8 text-gray-500">
+                        <p>No hay banners agregados. ¡Agrega uno para comenzar!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Sección de administración (solo admin) -->
         <div id="admin-section" class="hidden container mx-auto px-4 py-6">
             <div class="flex flex-wrap gap-3">
@@ -257,7 +344,7 @@
             
             <div id="no-products" class="hidden text-center py-20">
                 <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 00-.707.293h-3.172a1 1 0 00-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2-2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 00-.707.293h-3.172a1 1 0 00-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
                 </svg>
                 <p class="text-gray-500 text-lg font-medium">No se encontraron productos</p>
                 <p class="text-gray-400 text-sm mt-2">Intenta con otros términos de búsqueda</p>
@@ -310,7 +397,7 @@
                 <div class="mb-6">
                     <p class="text-gray-600 mb-4 font-medium">Formato CSV esperado:</p>
                     <code class="block bg-gray-100 p-4 rounded-xl text-sm overflow-x-auto font-mono">
-                        codigo,descripcion,detal,mayor,gmayor,departamento,url<br>
+                        codigo, descripcion,detal,mayor,gmayor,departamento,url<br>
                         PROD001,"Producto 1",100.00,80.00,70.00,Electrónica,https://...
                     </code>
                 </div>
