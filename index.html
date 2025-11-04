@@ -20,80 +20,92 @@
     <link rel="stylesheet" href="styles.css">
     
     <style>
-        /* OPTIMIZACIONES PARA BANNER DE ALTA CALIDAD */
+        /* OPTIMIZACIONES AVANZADAS PARA CALIDAD DE IMAGEN MÁXIMA */
         .banner-container {
-            position: relative;
-            width: 100%;
-            /* Altura adaptativa según el tamaño de pantalla */
-            height: 180px;
-            overflow: hidden;
-            border-radius: 0.5rem;
-        }
-        
-        /* Altura del banner según el tamaño de pantalla */
-        @media (min-width: 640px) {
-            .banner-container {
-                height: 220px;
-            }
-        }
-        
-        @media (min-width: 768px) {
-            .banner-container {
-                height: 280px;
-            }
-        }
-        
-        @media (min-width: 1024px) {
-            .banner-container {
-                height: 350px;
-            }
-        }
-        
-        @media (min-width: 1280px) {
-            .banner-container {
-                height: 400px;
-            }
-        }
-        
-        @media (min-width: 1536px) {
-            .banner-container {
-                height: 450px;
-            }
+            /* Prevenir cualquier compresión o suavizado */
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: optimizeQuality;
+            /* Mejorar la renderización en pantallas de alta densidad */
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            /* Prevenir antialiasing que puede causar borrosidad */
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         
         .banner-image-hq {
-            width: 100%;
-            height: 100%;
-            /* object-fit: cover mantiene la proporción y cubre todo el contenedor */
-            object-fit: cover;
-            object-position: center;
-            /* Renderizado de máxima calidad */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
-            /* Prevenir antialiasing que causa borrosidad */
+            /* Configuraciones críticas para máxima calidad */
+            image-rendering: -webkit-optimize-contrast !important;
+            image-rendering: -moz-crisp-edges !important;
+            image-rendering: crisp-edges !important;
+            image-rendering: optimizeQuality !important;
+            image-rendering: high-quality !important;
+            /* Prevenir interpolación que causa borrosidad */
+            -ms-interpolation-mode: nearest-neighbor;
+            /* Optimizaciones de hardware */
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            /* Prevenir suavizado de fuentes y bordes */
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            /* Aceleración por hardware */
-            transform: translateZ(0);
-            -webkit-transform: translateZ(0);
+            /* Forzar aceleración por hardware */
             will-change: transform;
-            /* Transición suave */
-            transition: opacity 0.5s ease;
+            /* Prevenir compresión automática del navegador */
+            object-fit: cover;
+            object-position: center;
+            /* Máxima calidad en la decodificación */
+            image-orientation: from-image;
         }
         
-        /* Optimizaciones para pantallas de alta densidad (Retina) */
-        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+        /* Optimizaciones específicas para pantallas de alta densidad */
+        @media (-webkit-min-device-pixel-ratio: 1.5), (min-resolution: 144dpi) {
             .banner-image-hq {
-                image-rendering: -webkit-optimize-contrast;
+                image-rendering: -webkit-optimize-contrast !important;
+                image-rendering: optimize-contrast !important;
             }
         }
         
-        /* Prevenir cualquier filtro que pueda degradar la imagen */
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            .banner-image-hq {
+                image-rendering: -webkit-optimize-contrast !important;
+                image-rendering: optimize-contrast !important;
+                image-rendering: high-quality !important;
+            }
+        }
+        
+        @media (-webkit-min-device-pixel-ratio: 3), (min-resolution: 288dpi) {
+            .banner-image-hq {
+                image-rendering: -webkit-optimize-contrast !important;
+                image-rendering: optimize-contrast !important;
+                image-rendering: high-quality !important;
+            }
+        }
+        
+        /* Prevenir cualquier filtro o efecto que pueda degradar la imagen */
         .no-filter {
             filter: none !important;
             -webkit-filter: none !important;
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
+        }
+        
+        /* Contenedor optimizado para el banner */
+        .banner-wrapper {
+            /* Asegurar que el contenedor no afecte la calidad */
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+            will-change: transform;
+            /* Prevenir overflow que pueda causar recortes */
+            overflow: hidden;
+            /* Optimizar para renderización */
+            contain: layout style paint;
         }
     </style>
 </head>
@@ -296,16 +308,20 @@
         <section class="py-2 px-4 my-2">
             <div class="container mx-auto">
                 <!-- Banner Carrusel -->
-                <div id="banner-carousel" class="relative banner-container shadow-xl">
+                <div id="banner-carousel" class="relative rounded-lg overflow-hidden shadow-xl banner-container banner-wrapper">
                     <!-- Imagen Principal - MÁXIMA CALIDAD GARANTIZADA -->
-                    <img id="banner-image" 
-                         src="./banner-sonimax.png" 
-                         alt="Banner SONIMAX MÓVIL - Tecnología al alcance de tus manos" 
-                         class="banner-image-hq no-filter"
-                         loading="eager"
-                         decoding="async"
-                         fetchpriority="high">
-                    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/5"></div>
+                    <div class="relative w-full" style="aspect-ratio: 16/4;">
+                        <img id="banner-image" 
+                             src="./banner-sonimax.png" 
+                             alt="Banner SONIMAX MÓVIL - Tecnología al alcance de tus manos" 
+                             class="w-full h-full object-cover transition-opacity duration-500 banner-image-hq no-filter"
+                             loading="eager"
+                             decoding="sync"
+                             fetchpriority="high"
+                             width="1200"
+                             height="300">
+                        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/5"></div>
+                    </div>
 
                     <!-- Botones Navegación -->
                     <button id="banner-prev" class="absolute left-4 top-1/2 -translate-y-1/2 bg-red-600 hover:bg-red-700 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
@@ -356,11 +372,11 @@
                                 placeholder="Ej: Promoción de Navidad">
                         </div>
                         <div>
-                            <label class="block text-gray-700 font-bold mb-2">URL de la Imagen</label>
+                            <label class="block text-gray-700 font-bold mb-2">URL de la Imagen (Recomendado: 1200x300px o mayor resolución)</label>
                             <input type="url" id="banner-url-input" 
                                 class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
                                 placeholder="https://ejemplo.com/imagen-alta-calidad.jpg">
-                            <p class="text-sm text-gray-600 mt-2">💡 Recomendado: Usa imágenes de al menos 1920x500px para mejor calidad en pantallas grandes</p>
+                            <p class="text-sm text-gray-600 mt-2">💡 Para mejor calidad, usa imágenes de al menos 1200x300px en formato JPG o PNG</p>
                         </div>
                         <button id="add-banner-btn" class="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
                             Agregar Banner
@@ -492,13 +508,13 @@
                         <p class="text-gray-400 text-sm mt-2">o arrastra y suelta aquí</p>
                     </label>
                 </div>
-
+                
                 <div id="csv-file-name" class="hidden mb-4 p-3 bg-blue-50 rounded-xl text-blue-700 text-sm font-medium"></div>
-
+                
                 <button id="upload-csv-submit" class="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
                     Subir y Procesar CSV
                 </button>
-
+                
                 <div id="csv-status" class="hidden mt-4 p-4 rounded-xl text-sm font-medium"></div>
             </div>
         </div>
@@ -514,16 +530,16 @@
                         </svg>
                     </button>
                 </div>
-
+                
                 <div class="mb-6">
                     <label class="block text-gray-700 font-bold mb-3">Selecciona un departamento:</label>
                     <select id="pdf-department-select" class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 transition-all font-medium">
                         <option value="">Cargando departamentos...</option>
                     </select>
                 </div>
-
+                
                 <div id="pdf-status" class="hidden mb-4 p-4 rounded-xl text-sm font-medium"></div>
-
+                
                 <button id="generate-pdf-button" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center justify-center space-x-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -544,7 +560,7 @@
                         </svg>
                     </button>
                 </div>
-
+                
                 <form id="create-user-form" class="space-y-5">
                     <div>
                         <label class="block text-gray-700 font-bold mb-2">Nombre Completo</label>
@@ -559,7 +575,7 @@
                             class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-orange-500 transition-all"
                             placeholder="usuario_unico">
                     </div>
-
+                    
                     <div>
                         <label class="block text-gray-700 font-bold mb-2">Contraseña</label>
                         <input type="password" id="new-user-password" required minlength="6"
@@ -574,13 +590,13 @@
                             <!-- Las opciones se cargarán dinámicamente según el rol del usuario actual -->
                         </select>
                     </div>
-
+                    
                     <button type="submit" 
                         class="w-full bg-orange-600 text-white font-bold py-3 rounded-xl hover:bg-orange-700 transition-all shadow-lg">
                         Crear Usuario
                     </button>
                 </form>
-
+                
                 <div id="create-user-error" class="hidden mt-4 p-4 bg-red-100 border border-red-300 rounded-xl text-red-700 text-sm font-medium"></div>
                 <div id="create-user-success" class="hidden mt-4 p-4 bg-green-100 border border-green-300 rounded-xl text-green-700 text-sm font-medium"></div>
             </div>
@@ -597,9 +613,9 @@
                         </svg>
                     </button>
                 </div>
-
+                
                 <div id="quantity-product-info" class="mb-6 p-4 bg-gray-50 rounded-xl"></div>
-
+                
                 <div class="mb-6">
                     <label class="block text-gray-700 font-bold mb-3">Cantidad:</label>
                     <input type="number" id="quantity-input" min="1" value="1" 
@@ -613,7 +629,7 @@
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all resize-none"
                         placeholder=""></textarea>
                 </div>
-
+                
                 <div class="flex space-x-3">
                     <button id="cancel-quantity" class="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-all font-semibold">
                         Cancelar
@@ -624,8 +640,9 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <script src="supabase-config.js"></script>
-        <script src="app.js"></script>
-    </body>
+    <script src="supabase-config.js"></script>
+    <script src="app.js"></script>
+</body>
 </html>
