@@ -1,5 +1,6 @@
 // SONIMAX MÓVIL - Aplicación Principal
 // Sistema actualizado con USUARIO en lugar de EMAIL con BANNERS integrados
+// VERSIÓN CORREGIDA - Comparación correcta de productos nuevos
 
 /* global XLSX */
 /* eslint-disable no-undef */
@@ -26,6 +27,9 @@ let serviceWorkerRegistration = null
 
 const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
+const NEW_PRODUCTS_KEY = "sonimax_new_products"
+const PRODUCT_SALES_KEY = "sonimax_product_sales"
+const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot local
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
 
@@ -43,6 +47,168 @@ const imageLoadState = {
   priorityQueue: [],
   backgroundQueue: [],
   currentAbortController: null,
+}
+
+// ============================================
+// GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
+// ============================================
+
+function getNewProducts() {
+  try {
+    const saved = localStorage.getItem(NEW_PRODUCTS_KEY)
+    if (saved) {
+      const newProductIds = JSON.parse(saved)
+      return allProducts.filter((p) => newProductIds.includes(p.id))
+    }
+  } catch (error) {
+    console.error("[NEW-PRODUCTS] Error cargando productos nuevos:", error)
+  }
+  return []
+}
+
+function saveNewProducts(productIds) {
+  try {
+    localStorage.setItem(NEW_PRODUCTS_KEY, JSON.stringify(productIds))
+    console.log(`[NEW-PRODUCTS] ${productIds.length} productos nuevos guardados`)
+  } catch (error) {
+    console.error("[NEW-PRODUCTS] Error guardando productos nuevos:", error)
+  }
+}
+
+// Nueva función para guardar snapshot del CSV actual
+function saveCSVSnapshot(products) {
+  try {
+    const snapshot = products.map((p) => ({
+      nombre: p.nombre,
+      descripcion: p.descripcion || "",
+      departamento: p.departamento || "",
+    }))
+    localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+    console.log(`[CSV-SNAPSHOT] Snapshot guardado con ${snapshot.length} productos`)
+  } catch (error) {
+    console.error("[CSV-SNAPSHOT] Error guardando snapshot:", error)
+  }
+}
+
+// Nueva función para obtener snapshot anterior
+function getPreviousCSVSnapshot() {
+  try {
+    const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (error) {
+    console.error("[CSV-SNAPSHOT] Error cargando snapshot anterior:", error)
+  }
+  return []
+}
+
+// Nueva función para comparar productos y detectar nuevos
+function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
+  const newProductIds = []
+
+  // Crear mapa de productos anteriores para búsqueda rápida
+  const previousProductMap = new Map()
+  previousSnapshot.forEach((p) => {
+    const key = `${p.nombre.toLowerCase()}_${(p.descripcion || "").toLowerCase()}_${(p.departamento || "").toLowerCase()}`
+    previousProductMap.set(key, true)
+  })
+
+  console.log(`[COMPARISON] Productos anteriores en snapshot: ${previousSnapshot.length}`)
+  console.log(`[COMPARISON] Productos actuales: ${currentProducts.length}`)
+
+  // Comparar cada producto actual con el snapshot anterior
+  currentProducts.forEach((product) => {
+    const key = `${product.nombre.toLowerCase()}_${(product.descripcion || "").toLowerCase()}_${(product.departamento || "").toLowerCase()}`
+
+    // Si el producto NO estaba en el snapshot anterior, es nuevo
+    if (!previousProductMap.has(key)) {
+      newProductIds.push(product.id)
+      console.log(`[COMPARISON] ✨ Producto NUEVO detectado: ${product.nombre}`)
+    }
+  })
+
+  console.log(`[COMPARISON] Total productos nuevos detectados: ${newProductIds.length}`)
+  return newProductIds
+}
+
+async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
+  try {
+    const { error } = await window.supabaseClient.from("product_sales").insert({
+      product_id: productId,
+      quantity_sold: quantity,
+      user_id: currentUser?.auth_id,
+      sale_price: salePrice,
+      created_at: new Date().toISOString(),
+    })
+
+    if (error) {
+      console.error("[SALES-DB] ❌ Error registrando venta:", error.message)
+      return false
+    } else {
+      console.log(`[SALES-DB] ✅ Venta registrada: Producto ${productId} x${quantity} a $${salePrice}`)
+      return true
+    }
+  } catch (error) {
+    console.error("[SALES-DB] ❌ Error inesperado:", error.message)
+    return false
+  }
+}
+
+async function getBestSellingProducts(limit = 10) {
+  try {
+    console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
+
+    const { data: salesData, error: salesError } = await window.supabaseClient
+      .from("best_selling_products")
+      .select("*")
+      .order("total_sold", { ascending: false })
+      .limit(limit)
+
+    if (salesError) {
+      console.error("[SALES-DB] ❌ Error obteniendo estadísticas:", salesError.message)
+      return []
+    }
+
+    if (!salesData || salesData.length === 0) {
+      console.log("[SALES-DB] ⓘ No hay datos de ventas aún")
+      return []
+    }
+
+    console.log(`[SALES-DB] ✅ ${salesData.length} productos más vendidos obtenidos`)
+    console.log("[SALES-DB] Estructura de datos:", salesData[0])
+    return salesData
+  } catch (error) {
+    console.error("[SALES-DB] ❌ Error inesperado:", error.message)
+    return []
+  }
+}
+
+// Function to fetch all products
+async function fetchAllProducts() {
+  try {
+    const { data, error } = await window.supabaseClient.from("products").select("*")
+
+    if (error) {
+      console.error("[PRODUCTS-DB] Error obteniendo productos:", error)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error("[PRODUCTS-DB] Error inesperado:", error)
+    return []
+  }
+}
+
+function cleanupSalesData() {
+  try {
+    localStorage.removeItem(PRODUCT_SALES_KEY)
+    console.log("[SALES] 🗑️ Datos de ventas locales limpiados para sincronizar con nuevo CSV")
+    // No se limpia la BD aquí, ya que esa es la fuente global
+  } catch (error) {
+    console.error("[SALES] Error limpiando datos de ventas locales:", error)
+  }
 }
 
 // ============================================
@@ -83,7 +249,7 @@ function getProductsHash(products) {
   // Crear hash simple basado en URLs de imágenes
   const urls = products
     .map((p) => p.imagen_url)
-    .filter((url) => url && url !== "/generic-product-display.png")
+    .filter((url) => url && url !== "/images/ProductImages.jpg")
     .sort()
     .join("|")
 
@@ -107,9 +273,7 @@ function checkProductsChanged(products) {
 
     // Obtener solo las URLs nuevas
     const currentUrls = new Set(
-      products
-        .map((p) => optimizeImageUrl(p.imagen_url))
-        .filter((url) => url && url !== "/generic-product-display.png"),
+      products.map((p) => optimizeImageUrl(p.imagen_url)).filter((url) => url && url !== "/images/ProductImages.jpg"),
     )
 
     const newUrls = Array.from(currentUrls).filter((url) => !imageLoadState.loadedImages.has(url))
@@ -336,7 +500,7 @@ async function preloadAllImages() {
 
   const allImageUrls = allProducts
     .map((p) => p.imagen_url)
-    .filter((url) => url && url !== "/generic-product-display.png")
+    .filter((url) => url && url !== "/images/ProductImages.jpg")
     .map((url) => optimizeImageUrl(url))
 
   let urlsToLoad = []
@@ -559,7 +723,7 @@ async function retryFailedImages(cache) {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
-  console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidos`)
+  console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidas`)
   console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas`)
 
   saveImageLoadState()
@@ -597,7 +761,7 @@ async function retryFailedImages(cache) {
 // ============================================
 
 function optimizeImageUrl(url) {
-  if (!url || url === "/generic-product-display.png") {
+  if (!url || url === "/images/ProductImages.jpg") {
     return url
   }
 
@@ -610,7 +774,7 @@ function optimizeImageUrl(url) {
 }
 
 function createImagePlaceholder(url) {
-  if (!url || url === "/generic-product-display.png") {
+  if (!url || url === "/images/ProductImages.jpg") {
     return url
   }
 
@@ -648,7 +812,7 @@ function initImageObserver() {
                 }
               }
               tempImg.onerror = () => {
-                img.src = "/generic-product-display.png"
+                img.src = "/images/ProductImages.jpg"
                 img.classList.remove("image-loading")
                 addRetryButton(img, fullSrc)
               }
@@ -1545,22 +1709,54 @@ async function loadProducts() {
 }
 
 function renderDepartments() {
-  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
-
   const navContainer = document.getElementById("departments-nav")
   const sidebarContainer = document.getElementById("sidebar-departments")
 
   navContainer.innerHTML = ""
   sidebarContainer.innerHTML = ""
 
-  departments.forEach((dept) => {
-    const navBtn = document.createElement("button")
-    navBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
-    navBtn.textContent = dept
-    navBtn.dataset.dept = dept
-    navBtn.addEventListener("click", () => filterByDepartment(dept))
-    navContainer.appendChild(navBtn)
+  // Botón para Mercancía Recién Llegada
+  const newProductsBtn = document.createElement("button")
+  newProductsBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
+  newProductsBtn.innerHTML = "🆕 Mercancía Recién Llegada"
+  newProductsBtn.dataset.dept = "new"
+  newProductsBtn.addEventListener("click", () => filterByDepartment("new"))
+  navContainer.appendChild(newProductsBtn)
 
+  // Botón para Mercancía Más Vendida
+  const bestSellingBtn = document.createElement("button")
+  bestSellingBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
+  bestSellingBtn.innerHTML = "🔥 Mercancía Más Vendida"
+  bestSellingBtn.dataset.dept = "bestselling"
+  bestSellingBtn.addEventListener("click", () => filterByDepartment("bestselling"))
+  navContainer.appendChild(bestSellingBtn)
+
+  // Agregar todos los departamentos al sidebar
+  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
+
+  const sidebarNewBtn = document.createElement("button")
+  sidebarNewBtn.className =
+    "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
+  sidebarNewBtn.innerHTML = "🆕 Mercancía Recién Llegada"
+  sidebarNewBtn.dataset.dept = "new"
+  sidebarNewBtn.addEventListener("click", () => {
+    filterByDepartment("new")
+    closeSidebar()
+  })
+  sidebarContainer.appendChild(sidebarNewBtn)
+
+  const sidebarBestBtn = document.createElement("button")
+  sidebarBestBtn.className =
+    "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
+  sidebarBestBtn.innerHTML = "🔥 Mercancía Más Vendida"
+  sidebarBestBtn.dataset.dept = "bestselling"
+  sidebarBestBtn.addEventListener("click", () => {
+    filterByDepartment("bestselling")
+    closeSidebar()
+  })
+  sidebarContainer.appendChild(sidebarBestBtn)
+
+  departments.forEach((dept) => {
     const sidebarBtn = document.createElement("button")
     sidebarBtn.className =
       "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
@@ -1588,14 +1784,6 @@ function renderDepartments() {
 function filterByDepartment(dept) {
   currentDepartment = dept
 
-  if (dept === "all") {
-    filteredProducts = allProducts
-  } else {
-    filteredProducts = allProducts.filter((p) => p.departamento === dept)
-  }
-
-  currentPage = 1
-
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
     if (btn.dataset.dept === dept) {
@@ -1610,6 +1798,41 @@ function filterByDepartment(dept) {
     deptSearchContainer.classList.remove("hidden")
   }
 
+  if (dept === "all") {
+    filteredProducts = allProducts
+  } else if (dept === "new") {
+    filteredProducts = getNewProducts()
+  } else if (dept === "bestselling") {
+    getBestSellingProducts().then((salesData) => {
+      console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
+      console.log("[SALES-DB] Primer item de sales:", salesData[0])
+      console.log("[SALES-DB] Primer producto en allProducts:", allProducts[0])
+
+      filteredProducts = salesData
+        .map((sale) => {
+          // Try to find using both possible field names
+          const productId = sale.product_id || sale.id
+          const fullProduct = allProducts.find((p) => p.id === productId || p.id === sale.product_id)
+
+          if (!fullProduct) {
+            console.log("[SALES-DB] ⚠️ Producto no encontrado para ID:", productId)
+          }
+
+          return fullProduct ? { ...fullProduct, total_sold: sale.total_sold } : null
+        })
+        .filter((p) => p !== null)
+
+      console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
+      currentPage = 1
+      renderProducts()
+      document.getElementById("products-grid").scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+    return
+  } else {
+    filteredProducts = allProducts.filter((p) => p.departamento === dept)
+  }
+
+  currentPage = 1
   renderProducts()
 }
 
@@ -1726,7 +1949,7 @@ function createProductCard(product) {
     `
   }
 
-  const imageUrl = product.imagen_url || "/generic-product-display.png"
+  const imageUrl = product.imagen_url || "/images/ProductImages.jpg"
   const optimizedUrl = optimizeImageUrl(imageUrl)
   const placeholderUrl = createImagePlaceholder(imageUrl)
 
@@ -1737,7 +1960,7 @@ function createProductCard(product) {
            alt="${product.nombre}"
            class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
            loading="lazy"
-           onerror="this.src='/generic-product-display.png'">
+           onerror="this.src='/images/ProductImages.jpg'">
     </div>
     <div class="p-5">
       <h3 class="font-bold text-lg text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
@@ -1956,6 +2179,9 @@ function addToCart(product, quantity, price, observation = "") {
     })
   }
 
+  // Registrar venta para estadísticas con el precio
+  recordSaleToDatabase(product.id, quantity, price)
+
   saveCartToStorage()
   updateCartCount()
   animateCartButton()
@@ -2017,7 +2243,7 @@ function renderCart() {
       totalGmayor += (product.precio_gmayor || 0) * item.quantity
     }
 
-    const optimizedCartImage = optimizeImageUrl(item.imagen_url || "/generic-product-display.png")
+    const optimizedCartImage = optimizeImageUrl(item.imagen_url || "/images/ProductImages.jpg")
 
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
@@ -2025,7 +2251,7 @@ function renderCart() {
              alt="${item.nombre}"
              class="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
              loading="lazy"
-             onerror="this.src='/generic-product-display.png'">
+             onerror="this.src='/images/ProductImages.jpg'">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
           <p class="text-gray-600 text-sm">Cantidad: ${item.quantity}</p>
@@ -2047,7 +2273,7 @@ function renderCart() {
     const cartImage = cartItemDiv.querySelector("img")
     cartImage.addEventListener("click", (e) => {
       e.stopPropagation()
-      showImageModal(item.imagen_url || "/generic-product-display.png", item.nombre)
+      showImageModal(item.imagen_url || "/images/ProductImages.jpg", item.nombre)
     })
 
     const decreaseBtn = cartItemDiv.querySelector(".cart-decrease-btn")
@@ -2091,15 +2317,17 @@ function renderCart() {
         </div>
       </div>
     `
+    cartTotal.innerHTML = totalHTML
   } else if (currentUserRole === "distribuidor") {
     totalHTML = `$${totalMayor.toFixed(2)}`
+    cartTotal.textContent = totalHTML
   } else if (currentUserRole === "admin") {
     totalHTML = `$${totalGmayor.toFixed(2)}`
+    cartTotal.textContent = totalHTML
   } else {
     totalHTML = `$${totalDetal.toFixed(2)}`
+    cartTotal.textContent = totalHTML
   }
-
-  cartTotal.innerHTML = totalHTML
 
   console.log("Carrito renderizado exitosamente")
 }
@@ -2256,6 +2484,8 @@ function generateExcelAndSendOrder(responsables, sitio) {
         `$${subtotal.toFixed(2)}`,
         item.observation || "",
       ])
+
+      recordSaleToDatabase(item.id, item.quantity, precioUnitario)
     })
 
     excelData.push([])
@@ -2351,6 +2581,8 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
     if (index < cart.length - 1) {
       message += `\n`
     }
+
+    recordSaleToDatabase(item.id, item.quantity, precioUnitario)
   })
 
   message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
@@ -2360,8 +2592,7 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 
   window.open(whatsappURL, "_blank")
   clearCart()
-  document.getElementById("cart-modal").classList.add("hidden")
-  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
+  // No se llama a renderCart() aquí porque clearCart() ya lo hace.
 }
 
 function sendWhatsAppOrder() {
@@ -2400,6 +2631,14 @@ function sendWhatsAppOrder() {
       totalMayor += (product.precio_mayor || 0) * item.quantity
       totalGmayor += (product.precio_gmayor || 0) * item.quantity
     }
+
+    const salePrice =
+      currentUserRole === "gestor"
+        ? item.price
+        : currentUserRole === "distribuidor"
+          ? product?.precio_mayor || 0
+          : product?.precio_gmayor || 0
+    recordSaleToDatabase(item.id, item.quantity, salePrice)
   })
 
   message += `\n\n*TOTALES:*\n`
@@ -2428,9 +2667,6 @@ function sendWhatsAppOrder() {
 
   alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
-
-let searchTimeout = null
-let deptSearchTimeout = null
 
 function normalizeText(text) {
   if (!text) return ""
@@ -2484,6 +2720,9 @@ function searchProducts(products, query) {
   })
 }
 
+let searchTimeout // Declare searchTimeout
+let deptSearchTimeout // Declare deptSearchTimeout
+
 function handleGlobalSearch(e) {
   const query = e.target.value.trim()
 
@@ -2512,7 +2751,7 @@ function handleGlobalSearch(e) {
     const searchResultUrls = filteredProducts
       .slice(0, 20)
       .map((p) => optimizeImageUrl(p.imagen_url))
-      .filter((url) => url && url !== "/generic-product-display.png")
+      .filter((url) => url && url !== "/images/ProductImages.jpg")
 
     console.log(`[SEARCH] 🔍 Priorizando ${searchResultUrls.length} imágenes de búsqueda`)
     loadPriorityImages(searchResultUrls)
@@ -2536,8 +2775,18 @@ function handleDeptSearch(e) {
   deptSearchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda en departamento:", currentDepartment, "Query:", query)
 
-    const productsInDept =
-      currentDepartment === "all" ? allProducts : allProducts.filter((p) => p.departamento === currentDepartment)
+    let productsInDept
+    if (currentDepartment === "all") {
+      productsInDept = allProducts
+    } else if (currentDepartment === "new") {
+      productsInDept = getNewProducts()
+    } else if (currentDepartment === "bestselling") {
+      // Aquí se podría considerar re-ejecutar getBestSellingProducts si la lista se actualiza dinámicamente
+      // o usar una versión cacheada si es apropiado. Por ahora, asumimos que filteredProducts ya contiene los más vendidos si ese es el departamento.
+      productsInDept = filteredProducts // Usar los ya filtrados si 'bestselling' ya ha sido llamado
+    } else {
+      productsInDept = allProducts.filter((p) => p.departamento === currentDepartment)
+    }
 
     filteredProducts = searchProducts(productsInDept, query)
 
@@ -2558,6 +2807,7 @@ function handleCSVFileSelect(e) {
   }
 }
 
+// FUNCIÓN CORREGIDA PARA MANEJAR LA SUBIDA DE CSV
 async function handleCSVUpload() {
   if (!selectedCSVFile) {
     showCSVStatus("Por favor selecciona un archivo CSV", "error")
@@ -2601,7 +2851,12 @@ async function handleCSVUpload() {
         throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
       }
 
+      // OBTENER SNAPSHOT ANTERIOR DEL LOCALSTORAGE PRIMERO
+      const previousSnapshot = getPreviousCSVSnapshot()
+      console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
+
       const products = []
+      const newProductIds = [] // Esta variable se usa para contar los productos *realmente* nuevos, no solo los procesados.
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim()
@@ -2641,6 +2896,7 @@ async function handleCSVUpload() {
 
       showCSVStatus(`Procesando ${products.length} productos...`, "info")
 
+      // LIMPIAR PRODUCTOS EXISTENTES
       const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
       if (deleteError) {
@@ -2648,23 +2904,59 @@ async function handleCSVUpload() {
         throw new Error("Error al limpiar productos existentes")
       }
 
-      const { error } = await window.supabaseClient.from("products").insert(products)
+      // INSERTAR NUEVOS PRODUCTOS
+      const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
 
       if (error) throw error
 
+      // COMPARAR CON SNAPSHOT ANTERIOR PARA DETECTAR PRODUCTOS REALMENTE NUEVOS
+      if (insertedProducts && insertedProducts.length > 0) {
+        const reallyNewProductIds = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
+
+        // GUARDAR SOLO LOS IDs DE PRODUCTOS REALMENTE NUEVOS (máximo 100)
+        if (reallyNewProductIds.length > 0) {
+          const limitedNewIds = reallyNewProductIds.slice(0, 100)
+          saveNewProducts(limitedNewIds)
+          console.log(`[NEW-PRODUCTS] ${limitedNewIds.length} productos REALMENTE nuevos detectados y guardados`)
+        } else {
+          // Si no hay productos nuevos, limpiar la lista de nuevos
+          saveNewProducts([])
+          console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+        }
+
+        // GUARDAR SNAPSHOT ACTUAL PARA PRÓXIMA COMPARACIÓN
+        saveCSVSnapshot(insertedProducts)
+      }
+
       showCSVStatus(
-        `✅ ${products.length} productos subidos exitosamente (productos anteriores reemplazados)`,
+        `✅ ${products.length} productos subidos exitosamente.`, // Se eliminó el conteo de nuevos productos de aquí, se maneja internamente.
         "success",
       )
 
-      localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
-      localStorage.removeItem(PRODUCTS_HASH_KEY)
-      console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
-
       setTimeout(() => {
+        const clearSales = confirm(
+          `Se han cargado ${products.length} productos.\n\n¿Desea limpiar el historial de ventas anteriores?\n\nEsto es útil si estos productos ya no son los mismos que antes.`,
+        )
+
+        if (clearSales) {
+          // Limpiar datos de ventas en BD
+          window.supabaseClient
+            .from("product_sales")
+            .delete()
+            .not("product_id", "is", null)
+            .then(() => {
+              console.log("[SALES-DB] Historial de ventas limpiado")
+            })
+        }
+
+        // Limpiar estado de imágenes para nuevo CSV
+        localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
+        localStorage.removeItem(PRODUCTS_HASH_KEY)
+        console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
+
         document.getElementById("csv-modal").classList.add("hidden")
         loadProducts()
-      }, 2000)
+      }, 1000)
     } catch (error) {
       console.error("❌ Error al procesar CSV:", error)
       showCSVStatus(`Error: ${error.message}`, "error")
@@ -2790,4 +3082,13 @@ function showPDFStatus(message, type) {
         : "bg-blue-100 border border-blue-300 text-blue-700"
   }`
   statusDiv.classList.remove("hidden")
+}
+
+// Nueva función para rastrear ventas de productos
+function trackProductSale(productId) {
+  console.log(`[SALES-TRACKER] Rastreando venta para producto: ${productId}`)
+  // Implementación real podría implicar enviar a Analytics, o simplemente registrar en localStorage temporalmente
+  // para una posterior sincronización si es necesario.
+  // Por ahora, solo registramos en consola.
+  // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
