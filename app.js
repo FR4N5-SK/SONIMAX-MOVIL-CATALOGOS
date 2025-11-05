@@ -82,6 +82,10 @@ function saveCSVSnapshot(products) {
       nombre: p.nombre,
       descripcion: p.descripcion || "",
       departamento: p.departamento || "",
+      precio_cliente: p.precio_cliente,
+      precio_mayor: p.precio_mayor,
+      precio_gmayor: p.precio_gmayor,
+      imagen_url: p.imagen_url,
     }))
     localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
     console.log(`[CSV-SNAPSHOT] Snapshot guardado con ${snapshot.length} productos`)
@@ -115,7 +119,18 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
   })
 
   console.log(`[COMPARISON] Productos anteriores en snapshot: ${previousSnapshot.length}`)
-  console.log(`[COMPARISON] Productos actuales: ${currentProducts.length}`)
+  console.log(`[COMPARISON] Productos actuales a procesar: ${currentProducts.length}`)
+
+  if (previousSnapshot.length > 0 && currentProducts.length > 0) {
+    console.log("[COMPARISON] Primeros 3 productos del snapshot anterior:")
+    previousSnapshot.slice(0, 3).forEach((p) => {
+      console.log(`  - ${p.nombre} | ${p.descripcion} | ${p.departamento}`)
+    })
+    console.log("[COMPARISON] Primeros 3 productos actuales:")
+    currentProducts.slice(0, 3).forEach((p) => {
+      console.log(`  - ${p.nombre} | ${p.descripcion} | ${p.departamento}`)
+    })
+  }
 
   // Comparar cada producto actual con el snapshot anterior
   currentProducts.forEach((product) => {
@@ -125,11 +140,43 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
     if (!previousProductMap.has(key)) {
       newProductIds.push(product.id)
       console.log(`[COMPARISON] ✨ Producto NUEVO detectado: ${product.nombre}`)
+    } else {
+      console.log(`[COMPARISON] ℹ️ Producto existente (no nuevo): ${product.nombre}`)
     }
   })
 
   console.log(`[COMPARISON] Total productos nuevos detectados: ${newProductIds.length}`)
   return newProductIds
+}
+
+function detectDeletedProducts(currentProducts, previousSnapshot) {
+  const deletedProductNames = []
+
+  // Crear mapa de productos actuales para búsqueda rápida
+  const currentProductMap = new Map()
+  currentProducts.forEach((p) => {
+    const key = `${p.nombre.toLowerCase()}_${(p.descripcion || "").toLowerCase()}_${(p.departamento || "").toLowerCase()}`
+    currentProductMap.set(key, true)
+  })
+
+  console.log(`[DELETED-PRODUCTS] Buscando productos eliminados...`)
+
+  // Comparar cada producto anterior con los actuales
+  previousSnapshot.forEach((product) => {
+    const key = `${product.nombre.toLowerCase()}_${(product.descripcion || "").toLowerCase()}_${(product.departamento || "").toLowerCase()}`
+
+    // Si el producto estaba en el snapshot pero NO está en los actuales, fue eliminado
+    if (!currentProductMap.has(key)) {
+      deletedProductNames.push({
+        nombre: product.nombre,
+        descripcion: product.descripcion,
+      })
+      console.log(`[DELETED-PRODUCTS] ❌ Producto ELIMINADO detectado: ${product.nombre}`)
+    }
+  })
+
+  console.log(`[DELETED-PRODUCTS] Total productos eliminados detectados: ${deletedProductNames.length}`)
+  return deletedProductNames
 }
 
 async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
@@ -155,7 +202,7 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
   }
 }
 
-async function getBestSellingProducts(limit = 20) {
+async function getBestSellingProducts(limit = 50) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
@@ -176,7 +223,6 @@ async function getBestSellingProducts(limit = 20) {
     }
 
     console.log(`[SALES-DB] ✅ ${salesData.length} productos más vendidos obtenidos`)
-    console.log("[SALES-DB] Estructura de datos:", salesData[0])
     return salesData
   } catch (error) {
     console.error("[SALES-DB] ❌ Error inesperado:", error.message)
@@ -1616,6 +1662,10 @@ function setupEventListeners() {
 
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
     document.getElementById("csv-modal").classList.remove("hidden")
+    document.getElementById("csv-file-name").classList.add("hidden")
+    document.getElementById("csv-status").classList.add("hidden")
+    document.getElementById("csv-file-input").value = "" // Reset input
+    selectedCSVFile = null
   })
 
   document.getElementById("close-csv-modal")?.addEventListener("click", () => {
@@ -1703,6 +1753,7 @@ async function loadProducts() {
     }, 2000)
   } catch (error) {
     console.error("❌ Error al cargar productos:", error)
+    showNotification("Error al cargar productos. Por favor, recarga la página.", "error")
   } finally {
     document.getElementById("products-loading").classList.add("hidden")
   }
@@ -2851,12 +2902,10 @@ async function handleCSVUpload() {
         throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
       }
 
-      // OBTENER SNAPSHOT ANTERIOR DEL LOCALSTORAGE PRIMERO
       const previousSnapshot = getPreviousCSVSnapshot()
       console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
       const products = []
-      const newProductIds = [] // Esta variable se usa para contar los productos *realmente* nuevos, no solo los procesados.
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim()
@@ -2864,7 +2913,10 @@ async function handleCSVUpload() {
 
         const values = parseCSVLine(line)
 
-        if (values.length < headers.length) continue
+        if (values.length < headers.length) {
+          console.warn(`[CSV] Línea ${i + 1} con menos columnas de las esperadas, saltando:`, values)
+          continue
+        }
 
         const descripcion = values[colIndexes.descripcion]?.trim() || ""
         const codigo = colIndexes.codigo !== -1 ? values[colIndexes.codigo]?.trim() || "" : ""
@@ -2875,11 +2927,14 @@ async function handleCSVUpload() {
         const departamento =
           colIndexes.departamento !== -1 ? values[colIndexes.departamento]?.trim() || "Sin categoría" : "Sin categoría"
 
-        if (!descripcion) continue
+        if (!descripcion) {
+          console.warn(`[CSV] Línea ${i + 1} sin descripción, saltando.`)
+          continue
+        }
 
         const product = {
           nombre: descripcion,
-          descripcion: codigo || "",
+          descripcion: codigo || "", // Usar CODIGO como campo de descripción en la base de datos
           precio_cliente: Number.parseFloat(detal) || 0,
           precio_mayor: Number.parseFloat(mayor) || 0,
           precio_gmayor: Number.parseFloat(gmayor) || 0,
@@ -2896,42 +2951,101 @@ async function handleCSVUpload() {
 
       showCSVStatus(`Procesando ${products.length} productos...`, "info")
 
-      // LIMPIAR PRODUCTOS EXISTENTES
-      const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
+      const deletedProducts = detectDeletedProducts(products, previousSnapshot)
 
-      if (deleteError) {
-        console.error("Error al limpiar productos existentes:", deleteError)
-        throw new Error("Error al limpiar productos existentes")
+      if (deletedProducts.length > 0) {
+        console.log(`[CSV-DELETE] Eliminando ${deletedProducts.length} productos que ya no están en el CSV...`)
+
+        const { data: allProductsInDB } = await window.supabaseClient.from("products").select("id, nombre, descripcion")
+
+        if (allProductsInDB && allProductsInDB.length > 0) {
+          const productsToDelete = []
+
+          allProductsInDB.forEach((dbProduct) => {
+            const isDeleted = deletedProducts.some(
+              (deleted) =>
+                deleted.nombre.toLowerCase() === dbProduct.nombre.toLowerCase() &&
+                deleted.descripcion.toLowerCase() === (dbProduct.descripcion || "").toLowerCase(),
+            )
+            if (isDeleted) {
+              productsToDelete.push(dbProduct.id)
+            }
+          })
+
+          if (productsToDelete.length > 0) {
+            const batchSize = 100
+            for (let i = 0; i < productsToDelete.length; i += batchSize) {
+              const batch = productsToDelete.slice(i, i + batchSize)
+              await window.supabaseClient.from("products").delete().in("id", batch)
+              console.log(`[CSV-DELETE] Lote ${Math.floor(i / batchSize) + 1} eliminado`)
+            }
+            console.log(`[CSV-DELETE] ✅ ${productsToDelete.length} productos eliminados`)
+          }
+        }
       }
 
-      // INSERTAR NUEVOS PRODUCTOS
-      const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
+      const newProductsToInsert = []
+      const existingProductsToKeep = []
 
-      if (error) throw error
+      products.forEach((product) => {
+        const key = `${product.nombre.toLowerCase()}_${(product.descripcion || "").toLowerCase()}_${(product.departamento || "").toLowerCase()}`
+        const wasInPrevious = previousSnapshot.some(
+          (p) =>
+            `${p.nombre.toLowerCase()}_${(p.descripcion || "").toLowerCase()}_${(p.departamento || "").toLowerCase()}` ===
+            key,
+        )
 
-      // COMPARAR CON SNAPSHOT ANTERIOR PARA DETECTAR PRODUCTOS REALMENTE NUEVOS
-      if (insertedProducts && insertedProducts.length > 0) {
-        const reallyNewProductIds = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
-
-        // GUARDAR SOLO LOS IDs DE PRODUCTOS REALMENTE NUEVOS (máximo 100)
-        if (reallyNewProductIds.length > 0) {
-          const limitedNewIds = reallyNewProductIds.slice(0, 100)
-          saveNewProducts(limitedNewIds)
-          console.log(`[NEW-PRODUCTS] ${limitedNewIds.length} productos REALMENTE nuevos detectados y guardados`)
+        if (!wasInPrevious) {
+          newProductsToInsert.push(product)
+          console.log(`[CSV-NEW] ✨ Producto NUEVO para insertar: ${product.nombre}`)
         } else {
-          // Si no hay productos nuevos, limpiar la lista de nuevos
-          saveNewProducts([])
-          console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+          existingProductsToKeep.push(product.nombre)
+          console.log(`[CSV-KEEP] ℹ️ Producto existente, mantener: ${product.nombre}`)
+        }
+      })
+
+      console.log(
+        `[CSV-SUMMARY] Nuevos: ${newProductsToInsert.length} | Mantener: ${existingProductsToKeep.length} | Eliminar: ${deletedProducts.length}`,
+      )
+
+      let insertedProducts = []
+      if (newProductsToInsert.length > 0) {
+        const { data, error } = await window.supabaseClient.from("products").insert(newProductsToInsert).select()
+
+        if (error) {
+          throw new Error(`Error insertando productos nuevos: ${error.message}`)
         }
 
-        // GUARDAR SNAPSHOT ACTUAL PARA PRÓXIMA COMPARACIÓN
-        saveCSVSnapshot(insertedProducts)
+        insertedProducts = data || []
+        console.log(`[CSV-INSERT] ✅ ${insertedProducts.length} productos nuevos insertados`)
       }
 
+      if (insertedProducts.length > 0) {
+        const newProductIds = insertedProducts.slice(0, 100).map((p) => p.id)
+        saveNewProducts(newProductIds)
+        console.log(`[NEW-PRODUCTS] ✅ ${newProductIds.length} productos marcados como NUEVOS`)
+      } else {
+        // Si no hay nuevos y no es el primer CSV, limpiar la lista
+        if (previousSnapshot.length > 0 && newProductsToInsert.length === 0) {
+          saveNewProducts([])
+          console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+        } else if (previousSnapshot.length === 0 && newProductsToInsert.length === 0) {
+          saveNewProducts([])
+          console.log(`[NEW-PRODUCTS] Primer CSV pero sin productos válidos - lista limpiada`)
+        }
+      }
+
+      const completeSnapshot = [...products] // Todos los productos del CSV actual (nuevos + existentes)
+      saveCSVSnapshot(completeSnapshot)
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot actualizado con ${completeSnapshot.length} productos`)
+
       showCSVStatus(
-        `✅ ${products.length} productos subidos exitosamente.`, // Se eliminó el conteo de nuevos productos de aquí, se maneja internamente.
+        `✅ CSV procesado exitosamente! Nuevos: ${insertedProducts.length} | Eliminados: ${deletedProducts.length}`,
         "success",
       )
+      selectedCSVFile = null
+      // </CHANGE> Fixed: Use correct ID "csv-file-input" instead of "csvFile"
+      document.getElementById("csv-file-input").value = ""
 
       setTimeout(() => {
         const clearSales = confirm(
@@ -2939,7 +3053,6 @@ async function handleCSVUpload() {
         )
 
         if (clearSales) {
-          // Limpiar datos de ventas en BD
           window.supabaseClient
             .from("product_sales")
             .delete()
@@ -2949,7 +3062,6 @@ async function handleCSVUpload() {
             })
         }
 
-        // Limpiar estado de imágenes para nuevo CSV
         localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
         localStorage.removeItem(PRODUCTS_HASH_KEY)
         console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
@@ -2961,6 +3073,10 @@ async function handleCSVUpload() {
       console.error("❌ Error al procesar CSV:", error)
       showCSVStatus(`Error: ${error.message}`, "error")
     }
+  }
+
+  reader.onerror = () => {
+    showCSVStatus("Error al leer el archivo", "error")
   }
 
   reader.readAsText(selectedCSVFile)
@@ -3093,3 +3209,27 @@ function trackProductSale(productId) {
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
 
+// Helper function for notifications
+function showNotification(message, type) {
+  const notificationContainer = document.getElementById("notification-container")
+  if (!notificationContainer) return
+
+  const notification = document.createElement("div")
+  notification.className = `p-4 rounded-xl text-sm font-medium mb-4 transition-all duration-300 ease-in-out
+    ${
+      type === "error"
+        ? "bg-red-100 border border-red-300 text-red-700"
+        : type === "success"
+          ? "bg-green-100 border border-green-300 text-green-700"
+          : "bg-blue-100 border border-blue-300 text-blue-700"
+    }`
+  notification.textContent = message
+  notificationContainer.appendChild(notification)
+
+  setTimeout(() => {
+    notification.classList.add("opacity-0", "-translate-y-4")
+    setTimeout(() => {
+      notification.remove()
+    }, 300)
+  }, 5000)
+}
