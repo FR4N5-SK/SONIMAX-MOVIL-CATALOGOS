@@ -75,13 +75,15 @@ function saveNewProducts(productIds) {
   }
 }
 
-// Nueva función para guardar snapshot del CSV actual
 function saveCSVSnapshot(products) {
   try {
     const snapshot = products.map((p) => ({
+      codigo: p.descripcion || "", // El código está en descripcion
       nombre: p.nombre,
-      descripcion: p.descripcion || "",
       departamento: p.departamento || "",
+      precio_cliente: p.precio_cliente || 0,
+      precio_mayor: p.precio_mayor || 0,
+      precio_gmayor: p.precio_gmayor || 0,
     }))
     localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
     console.log(`[CSV-SNAPSHOT] Snapshot guardado con ${snapshot.length} productos`)
@@ -103,33 +105,82 @@ function getPreviousCSVSnapshot() {
   return []
 }
 
-// Nueva función para comparar productos y detectar nuevos
 function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
   const newProductIds = []
+  const modifiedProductIds = []
 
   // Crear mapa de productos anteriores para búsqueda rápida
   const previousProductMap = new Map()
   previousSnapshot.forEach((p) => {
-    const key = `${p.nombre.toLowerCase()}_${(p.descripcion || "").toLowerCase()}_${(p.departamento || "").toLowerCase()}`
-    previousProductMap.set(key, true)
+    // Usar código como clave principal, o nombre si no hay código
+    const key = (p.codigo || p.nombre).toLowerCase().trim()
+    previousProductMap.set(key, p)
   })
 
-  console.log(`[COMPARISON] Productos anteriores en snapshot: ${previousSnapshot.length}`)
-  console.log(`[COMPARISON] Productos actuales: ${currentProducts.length}`)
+  console.log(`[COMPARISON] 📊 Productos anteriores en snapshot: ${previousSnapshot.length}`)
+  console.log(`[COMPARISON] 📊 Productos actuales: ${currentProducts.length}`)
 
   // Comparar cada producto actual con el snapshot anterior
   currentProducts.forEach((product) => {
-    const key = `${product.nombre.toLowerCase()}_${(product.descripcion || "").toLowerCase()}_${(product.departamento || "").toLowerCase()}`
+    const key = (product.descripcion || product.nombre).toLowerCase().trim()
+    const previousProduct = previousProductMap.get(key)
 
-    // Si el producto NO estaba en el snapshot anterior, es nuevo
-    if (!previousProductMap.has(key)) {
+    if (!previousProduct) {
+      // Producto completamente nuevo
       newProductIds.push(product.id)
-      console.log(`[COMPARISON] ✨ Producto NUEVO detectado: ${product.nombre}`)
+      console.log(`[COMPARISON] ✨ Producto NUEVO: ${product.nombre}`)
+    } else {
+      // Verificar si cambió algún dato importante
+      const priceChanged =
+        previousProduct.precio_cliente !== product.precio_cliente ||
+        previousProduct.precio_mayor !== product.precio_mayor ||
+        previousProduct.precio_gmayor !== product.precio_gmayor
+
+      const dataChanged =
+        previousProduct.nombre !== product.nombre || previousProduct.departamento !== product.departamento
+
+      if (priceChanged || dataChanged) {
+        modifiedProductIds.push(product.id)
+        console.log(`[COMPARISON] 🔄 Producto MODIFICADO: ${product.nombre}`)
+        if (priceChanged) {
+          console.log(`   💰 Cambio de precios detectado`)
+        }
+        if (dataChanged) {
+          console.log(`   📝 Cambio de datos detectado`)
+        }
+      }
     }
   })
 
-  console.log(`[COMPARISON] Total productos nuevos detectados: ${newProductIds.length}`)
-  return newProductIds
+  // Detectar productos eliminados
+  const currentProductKeys = new Set(currentProducts.map((p) => (p.descripcion || p.nombre).toLowerCase().trim()))
+  const deletedProducts = []
+
+  previousSnapshot.forEach((p) => {
+    const key = (p.codigo || p.nombre).toLowerCase().trim()
+    if (!currentProductKeys.has(key)) {
+      deletedProducts.push(p.nombre)
+    }
+  })
+
+  console.log(`[COMPARISON] ✅ Resumen de cambios:`)
+  console.log(`   ✨ Productos nuevos: ${newProductIds.length}`)
+  console.log(`   🔄 Productos modificados: ${modifiedProductIds.length}`)
+  console.log(`   🗑️ Productos eliminados: ${deletedProducts.length}`)
+  console.log(
+    `   ➡️ Productos sin cambios: ${currentProducts.length - newProductIds.length - modifiedProductIds.length}`,
+  )
+
+  if (deletedProducts.length > 0 && deletedProducts.length <= 10) {
+    console.log(`[COMPARISON] 🗑️ Productos eliminados:`, deletedProducts)
+  }
+
+  return {
+    newProductIds,
+    modifiedProductIds,
+    deletedCount: deletedProducts.length,
+    deletedProducts: deletedProducts.slice(0, 10), // Solo primeros 10 para mostrar
+  }
 }
 
 async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
@@ -155,7 +206,7 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
   }
 }
 
-async function getBestSellingProducts(limit = 20) {
+async function getBestSellingProducts(limit = 10) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
@@ -2856,7 +2907,6 @@ async function handleCSVUpload() {
       console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
       const products = []
-      const newProductIds = [] // Esta variable se usa para contar los productos *realmente* nuevos, no solo los procesados.
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim()
@@ -2904,34 +2954,61 @@ async function handleCSVUpload() {
         throw new Error("Error al limpiar productos existentes")
       }
 
+      console.log("[CSV] ✅ Productos anteriores eliminados")
+
       // INSERTAR NUEVOS PRODUCTOS
       const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
 
       if (error) throw error
 
-      // COMPARAR CON SNAPSHOT ANTERIOR PARA DETECTAR PRODUCTOS REALMENTE NUEVOS
-      if (insertedProducts && insertedProducts.length > 0) {
-        const reallyNewProductIds = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
+      console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
 
-        // GUARDAR SOLO LOS IDs DE PRODUCTOS REALMENTE NUEVOS (máximo 100)
-        if (reallyNewProductIds.length > 0) {
-          const limitedNewIds = reallyNewProductIds.slice(0, 100)
-          saveNewProducts(limitedNewIds)
-          console.log(`[NEW-PRODUCTS] ${limitedNewIds.length} productos REALMENTE nuevos detectados y guardados`)
+      // COMPARAR CON SNAPSHOT ANTERIOR PARA DETECTAR PRODUCTOS REALMENTE NUEVOS
+      let comparisonResult = { newProductIds: [], modifiedProductIds: [], deletedCount: 0, deletedProducts: [] }
+
+      if (insertedProducts && insertedProducts.length > 0) {
+        if (previousSnapshot.length > 0) {
+          comparisonResult = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
+
+          // GUARDAR SOLO LOS IDs DE PRODUCTOS REALMENTE NUEVOS (máximo 100)
+          if (comparisonResult.newProductIds.length > 0) {
+            const limitedNewIds = comparisonResult.newProductIds.slice(0, 100)
+            saveNewProducts(limitedNewIds)
+            console.log(`[NEW-PRODUCTS] ${limitedNewIds.length} productos REALMENTE nuevos detectados y guardados`)
+          } else {
+            // Si no hay productos nuevos, limpiar la lista de nuevos
+            saveNewProducts([])
+            console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+          }
         } else {
-          // Si no hay productos nuevos, limpiar la lista de nuevos
-          saveNewProducts([])
-          console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+          // Primera vez que se sube CSV, todos son nuevos
+          const allNewIds = insertedProducts.slice(0, 100).map((p) => p.id)
+          saveNewProducts(allNewIds)
+          console.log(`[NEW-PRODUCTS] Primera carga: ${allNewIds.length} productos marcados como nuevos`)
         }
 
         // GUARDAR SNAPSHOT ACTUAL PARA PRÓXIMA COMPARACIÓN
         saveCSVSnapshot(insertedProducts)
       }
 
-      showCSVStatus(
-        `✅ ${products.length} productos subidos exitosamente.`, // Se eliminó el conteo de nuevos productos de aquí, se maneja internamente.
-        "success",
-      )
+      // Mostrar resumen detallado
+      let summaryMessage = `✅ ${products.length} productos cargados exitosamente.\n\n`
+
+      if (previousSnapshot.length > 0) {
+        summaryMessage += `📊 Resumen de cambios:\n`
+        summaryMessage += `• Productos nuevos: ${comparisonResult.newProductIds.length}\n`
+        summaryMessage += `• Productos modificados: ${comparisonResult.modifiedProductIds.length}\n`
+        summaryMessage += `• Productos eliminados: ${comparisonResult.deletedCount}\n`
+
+        if (comparisonResult.deletedProducts.length > 0) {
+          summaryMessage += `\nEjemplos de productos eliminados:\n`
+          comparisonResult.deletedProducts.forEach((name) => {
+            summaryMessage += `  - ${name}\n`
+          })
+        }
+      }
+
+      showCSVStatus(summaryMessage, "success")
 
       setTimeout(() => {
         const clearSales = confirm(
@@ -2945,7 +3022,11 @@ async function handleCSVUpload() {
             .delete()
             .not("product_id", "is", null)
             .then(() => {
-              console.log("[SALES-DB] Historial de ventas limpiado")
+              console.log("[SALES-DB] ✅ Historial de ventas limpiado")
+              alert("Historial de ventas limpiado exitosamente")
+            })
+            .catch((err) => {
+              console.error("[SALES-DB] ❌ Error limpiando ventas:", err)
             })
         }
 
@@ -2956,7 +3037,7 @@ async function handleCSVUpload() {
 
         document.getElementById("csv-modal").classList.add("hidden")
         loadProducts()
-      }, 1000)
+      }, 2000)
     } catch (error) {
       console.error("❌ Error al procesar CSV:", error)
       showCSVStatus(`Error: ${error.message}`, "error")
@@ -3092,4 +3173,3 @@ function trackProductSale(productId) {
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
-
