@@ -53,6 +53,8 @@ const imageLoadState = {
 // GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
 // ============================================
 
+// Esta función ya no es necesaria porque is_new viene de la base de datos
+/*
 function getNewProducts() {
   try {
     const saved = localStorage.getItem(NEW_PRODUCTS_KEY)
@@ -65,6 +67,7 @@ function getNewProducts() {
   }
   return []
 }
+*/
 
 function saveNewProducts(productIds) {
   try {
@@ -307,7 +310,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.parse(saved)
+      const parsed = JSON.JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -1775,13 +1778,9 @@ async function loadProducts() {
       }
     }
 
-    // Al cargar productos, marcar los que se identificaron como 'new'
-    const newProductIds = JSON.parse(localStorage.getItem(NEW_PRODUCTS_KEY) || "[]")
-    allProducts = allProducts.map((product) => ({
-      ...product,
-      is_new: newProductIds.includes(product.id),
-    }))
-    console.log(`[PRODUCTOS] ${newProductIds.length} productos marcados como nuevos`)
+    // Los productos ya vienen con is_new desde Supabase
+    const newProductsCount = allProducts.filter((p) => p.is_new).length
+    console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
 
     filteredProducts = allProducts
     currentPage = 1
@@ -2669,15 +2668,13 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
   message += `*Sitio:* ${sitio}\n\n`
   message += `*PRODUCTOS:*\n`
 
-  let totalGmayor = 0
+  const totalGmayor = 0
 
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
     const codigo = product ? product.descripcion || "S/C" : "S/C"
     const precioUnitario = product ? product.precio_gmayor || 0 : 0
     const subtotal = precioUnitario * item.quantity
-
-    totalGmayor += subtotal
 
     message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
     if (item.observation) {
