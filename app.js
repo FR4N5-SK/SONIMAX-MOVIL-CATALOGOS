@@ -75,7 +75,7 @@ function saveNewProducts(productIds) {
   }
 }
 
-function saveCSVSnapshot(products) {
+async function saveCSVSnapshot(products) {
   try {
     const snapshot = products.map((p) => ({
       codigo: p.descripcion || "", // El código está en descripcion
@@ -85,24 +85,61 @@ function saveCSVSnapshot(products) {
       precio_mayor: p.precio_mayor || 0,
       precio_gmayor: p.precio_gmayor || 0,
     }))
-    localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
-    console.log(`[CSV-SNAPSHOT] Snapshot guardado con ${snapshot.length} productos`)
+
+    // Guardar en Supabase
+    const { data, error } = await window.supabaseClient
+      .from("csv_snapshot")
+      .insert({
+        snapshot_data: snapshot,
+        uploaded_by: currentUser?.id || null,
+      })
+      .select()
+
+    if (error) {
+      console.error("[CSV-SNAPSHOT] Error guardando en Supabase:", error)
+      // Fallback a localStorage si falla Supabase
+      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+      console.log(`[CSV-SNAPSHOT] Snapshot guardado en localStorage (fallback) con ${snapshot.length} productos`)
+    } else {
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en Supabase con ${snapshot.length} productos`)
+      // También guardar en localStorage como backup
+      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+    }
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error guardando snapshot:", error)
   }
 }
 
-// Nueva función para obtener snapshot anterior
-function getPreviousCSVSnapshot() {
+async function getPreviousCSVSnapshot() {
   try {
-    const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
-    if (saved) {
-      return JSON.parse(saved)
+    // Intentar obtener el snapshot más reciente de Supabase
+    const { data, error } = await window.supabaseClient
+      .from("csv_snapshot")
+      .select("snapshot_data, created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error) {
+      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
+      // Fallback a localStorage
+      const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
+      if (saved) {
+        return JSON.parse(saved)
+      }
+      return []
     }
+
+    if (data && data.snapshot_data) {
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde Supabase: ${data.snapshot_data.length} productos`)
+      return data.snapshot_data
+    }
+
+    return []
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error cargando snapshot anterior:", error)
+    return []
   }
-  return []
 }
 
 function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
@@ -206,7 +243,7 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
   }
 }
 
-async function getBestSellingProducts(limit = 20) {
+async function getBestSellingProducts(limit = 10) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
@@ -1738,6 +1775,14 @@ async function loadProducts() {
       }
     }
 
+    // Al cargar productos, marcar los que se identificaron como 'new'
+    const newProductIds = JSON.parse(localStorage.getItem(NEW_PRODUCTS_KEY) || "[]")
+    allProducts = allProducts.map((product) => ({
+      ...product,
+      is_new: newProductIds.includes(product.id),
+    }))
+    console.log(`[PRODUCTOS] ${newProductIds.length} productos marcados como nuevos`)
+
     filteredProducts = allProducts
     currentPage = 1
 
@@ -1852,7 +1897,8 @@ function filterByDepartment(dept) {
   if (dept === "all") {
     filteredProducts = allProducts
   } else if (dept === "new") {
-    filteredProducts = getNewProducts()
+    // Usar el nuevo campo is_new para filtrar
+    filteredProducts = allProducts.filter((p) => p.is_new)
   } else if (dept === "bestselling") {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
@@ -2020,11 +2066,21 @@ function createProductCard(product) {
         ${priceHTML}
       </div>
       ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
+      ${product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : ""}
       <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
         Agregar al Carrito
       </button>
     </div>
   `
+
+  // Añadir indicación visual para productos nuevos
+  if (product.is_new) {
+    const newProductBadge = document.createElement("span")
+    newProductBadge.className =
+      "absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full z-10"
+    newProductBadge.textContent = "¡NUEVO!"
+    card.querySelector(".product-image-container").appendChild(newProductBadge)
+  }
 
   const productImage = card.querySelector(".product-image")
   if (imageObserver && productImage) {
@@ -2830,7 +2886,7 @@ function handleDeptSearch(e) {
     if (currentDepartment === "all") {
       productsInDept = allProducts
     } else if (currentDepartment === "new") {
-      productsInDept = getNewProducts()
+      productsInDept = allProducts.filter((p) => p.is_new)
     } else if (currentDepartment === "bestselling") {
       // Aquí se podría considerar re-ejecutar getBestSellingProducts si la lista se actualiza dinámicamente
       // o usar una versión cacheada si es apropiado. Por ahora, asumimos que filteredProducts ya contiene los más vendidos si ese es el departamento.
@@ -2902,8 +2958,7 @@ async function handleCSVUpload() {
         throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
       }
 
-      // OBTENER SNAPSHOT ANTERIOR DEL LOCALSTORAGE PRIMERO
-      const previousSnapshot = getPreviousCSVSnapshot()
+      const previousSnapshot = await getPreviousCSVSnapshot()
       console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
       const products = []
@@ -2935,6 +2990,7 @@ async function handleCSVUpload() {
           precio_gmayor: Number.parseFloat(gmayor) || 0,
           departamento: departamento,
           imagen_url: url,
+          is_new: false, // Inicialmente todos son false
         }
 
         products.push(product)
@@ -2963,32 +3019,55 @@ async function handleCSVUpload() {
 
       console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
 
-      // COMPARAR CON SNAPSHOT ANTERIOR PARA DETECTAR PRODUCTOS REALMENTE NUEVOS
       let comparisonResult = { newProductIds: [], modifiedProductIds: [], deletedCount: 0, deletedProducts: [] }
 
       if (insertedProducts && insertedProducts.length > 0) {
         if (previousSnapshot.length > 0) {
           comparisonResult = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
 
-          // GUARDAR SOLO LOS IDs DE PRODUCTOS REALMENTE NUEVOS (máximo 100)
           if (comparisonResult.newProductIds.length > 0) {
+            const { error: updateError } = await window.supabaseClient
+              .from("products")
+              .update({ is_new: true })
+              .in("id", comparisonResult.newProductIds)
+
+            if (updateError) {
+              console.error("[NEW-PRODUCTS] Error marcando productos como nuevos:", updateError)
+            } else {
+              console.log(
+                `[NEW-PRODUCTS] ✅ ${comparisonResult.newProductIds.length} productos marcados como nuevos en BD`,
+              )
+            }
+
+            // También guardar en localStorage para compatibilidad
             const limitedNewIds = comparisonResult.newProductIds.slice(0, 100)
             saveNewProducts(limitedNewIds)
-            console.log(`[NEW-PRODUCTS] ${limitedNewIds.length} productos REALMENTE nuevos detectados y guardados`)
           } else {
             // Si no hay productos nuevos, limpiar la lista de nuevos
             saveNewProducts([])
             console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
           }
         } else {
-          // Primera vez que se sube CSV, todos son nuevos
-          const allNewIds = insertedProducts.slice(0, 100).map((p) => p.id)
-          saveNewProducts(allNewIds)
-          console.log(`[NEW-PRODUCTS] Primera carga: ${allNewIds.length} productos marcados como nuevos`)
+          const firstProducts = insertedProducts.slice(0, 100)
+          const firstProductIds = firstProducts.map((p) => p.id)
+
+          const { error: updateError } = await window.supabaseClient
+            .from("products")
+            .update({ is_new: true })
+            .in("id", firstProductIds)
+
+          if (updateError) {
+            console.error("[NEW-PRODUCTS] Error marcando productos como nuevos:", updateError)
+          } else {
+            console.log(
+              `[NEW-PRODUCTS] ✅ Primera carga: ${firstProductIds.length} productos marcados como nuevos en BD`,
+            )
+          }
+
+          saveNewProducts(firstProductIds)
         }
 
-        // GUARDAR SNAPSHOT ACTUAL PARA PRÓXIMA COMPARACIÓN
-        saveCSVSnapshot(insertedProducts)
+        await saveCSVSnapshot(insertedProducts)
       }
 
       // Mostrar resumen detallado
@@ -3173,4 +3252,3 @@ function trackProductSale(productId) {
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
-
