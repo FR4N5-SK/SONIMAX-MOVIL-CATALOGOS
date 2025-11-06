@@ -246,7 +246,7 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
   }
 }
 
-async function getBestSellingProducts(limit = 10) {
+async function getBestSellingProducts(limit = 20) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
@@ -3249,3 +3249,4 @@ function trackProductSale(productId) {
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
+
