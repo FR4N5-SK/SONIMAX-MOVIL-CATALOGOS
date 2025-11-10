@@ -20,76 +20,115 @@
     <link rel="stylesheet" href="styles.css">
     
     <style>
-        /* SOLUCIÓN DEFINITIVA PARA BANNER NÍTIDO EN TODAS LAS RESOLUCIONES */
+        /* SOLUCIÓN MEJORADA PARA BANNER RESPONSIVE Y ALTA CALIDAD */
         .banner-container {
             position: relative;
             width: 100%;
             overflow: hidden;
             border-radius: 0.5rem;
             background: #000;
+            /* Altura adaptativa según el dispositivo */
+            min-height: 180px;
         }
         
-        /* Mantener aspect ratio natural de la imagen sin forzar altura */
+        /* Imagen del banner con máxima calidad */
         .banner-image-hq {
             width: 100%;
-            height: auto;
+            height: 100%;
             display: block;
-            /* CRÍTICO: No usar object-fit para evitar escalado */
-            object-fit: none;
+            /* object-fit: cover mantiene la proporción y cubre todo el contenedor */
+            object-fit: cover;
             object-position: center;
             /* Máxima calidad de renderizado */
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
             image-rendering: high-quality;
-            /* Prevenir antialiasing */
+            /* Prevenir antialiasing que causa borrosidad */
             -webkit-font-smoothing: subpixel-antialiased;
             -moz-osx-font-smoothing: auto;
-            /* Sin transformaciones que puedan degradar */
-            transform: none;
             /* Transición suave solo para opacity */
             transition: opacity 0.5s ease;
-            /* Forzar escala 1:1 */
-            max-width: 100%;
-            min-width: 100%;
         }
         
-        /* Limitar altura máxima en pantallas muy grandes */
-        @media (min-width: 1024px) {
+        /* Móviles pequeños (hasta 640px) */
+        @media (max-width: 640px) {
             .banner-container {
-                max-height: 400px;
-                overflow: hidden;
+                min-height: 160px;
+                max-height: 200px;
             }
             .banner-image-hq {
-                object-fit: cover;
-                height: 400px;
-                width: 100%;
+                height: 100%;
+                min-height: 160px;
             }
         }
         
-        @media (min-width: 1280px) {
+        /* Móviles medianos y tablets pequeñas (641px - 768px) */
+        @media (min-width: 641px) and (max-width: 768px) {
             .banner-container {
-                max-height: 450px;
+                min-height: 220px;
+                max-height: 280px;
             }
             .banner-image-hq {
-                height: 450px;
+                height: 100%;
+                min-height: 220px;
             }
         }
         
+        /* Tablets (769px - 1023px) */
+        @media (min-width: 769px) and (max-width: 1023px) {
+            .banner-container {
+                min-height: 280px;
+                max-height: 350px;
+            }
+            .banner-image-hq {
+                height: 100%;
+                min-height: 280px;
+            }
+        }
+        
+        /* Laptops y pantallas medianas (1024px - 1279px) */
+        @media (min-width: 1024px) and (max-width: 1279px) {
+            .banner-container {
+                max-height: 380px;
+            }
+            .banner-image-hq {
+                height: 380px;
+            }
+        }
+        
+        /* Pantallas grandes (1280px - 1535px) */
+        @media (min-width: 1280px) and (max-width: 1535px) {
+            .banner-container {
+                max-height: 420px;
+            }
+            .banner-image-hq {
+                height: 420px;
+            }
+        }
+        
+        /* Pantallas extra grandes (1536px+) */
         @media (min-width: 1536px) {
             .banner-container {
-                max-height: 500px;
+                max-height: 480px;
             }
             .banner-image-hq {
-                height: 500px;
+                height: 480px;
             }
         }
         
-        /* Prevenir cualquier filtro */
+        /* Prevenir cualquier filtro que pueda degradar la imagen */
         .no-filter {
             filter: none !important;
             -webkit-filter: none !important;
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
+        }
+        
+        /* Optimización para imágenes de alta resolución en pantallas Retina */
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            .banner-image-hq {
+                image-rendering: -webkit-optimize-contrast;
+            }
         }
     </style>
 </head>
@@ -288,12 +327,12 @@
             </div>
         </div>
 
-        <!-- Banner de Fotos - SOLUCIÓN DEFINITIVA PARA NITIDEZ -->
+        <!-- Banner de Fotos - SOLUCIÓN MEJORADA PARA RESPONSIVE Y ALTA CALIDAD -->
         <section class="py-2 px-4 my-2">
             <div class="container mx-auto">
                 <!-- Banner Carrusel -->
                 <div id="banner-carousel" class="relative banner-container shadow-xl">
-                    <!-- Imagen Principal - SIN ESCALADO, MÁXIMA CALIDAD -->
+                    <!-- Imagen Principal - RESPONSIVE Y ALTA CALIDAD -->
                     <img id="banner-image" 
                          src="./banner-sonimax.png" 
                          alt="Banner SONIMAX MÓVIL - Tecnología al alcance de tus manos" 
@@ -355,8 +394,8 @@
                             <label class="block text-gray-700 font-bold mb-2">URL de la Imagen</label>
                             <input type="url" id="banner-url-input" 
                                 class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
-                                placeholder="https://ejemplo.com/imagen-alta-calidad.jpg">
-                            <p class="text-sm text-gray-600 mt-2">💡 <strong>IMPORTANTE:</strong> Para evitar borrosidad, usa imágenes de <strong>mínimo 2400x600px</strong> en formato PNG o JPG de alta calidad (sin comprimir)</p>
+                                placeholder="/images/highqualityimage.jpg">
+                            <p class="text-sm text-gray-600 mt-2">💡 <strong>RECOMENDACIÓN:</strong> Para mejor visualización en todos los dispositivos, usa imágenes de <strong>mínimo 1920x600px</strong> en formato PNG o JPG de alta calidad. La imagen se adaptará automáticamente a cada tamaño de pantalla sin perder calidad.</p>
                         </div>
                         <button id="add-banner-btn" class="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
                             Agregar Banner
