@@ -499,9 +499,9 @@
 
         <!-- Modal CSV -->
         <div id="csv-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8">
+            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
                 <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-black text-gray-800">Subir Productos CSV</h2>
+                    <h2 class="text-2xl font-black text-gray-800">Subir Productos CSV + Excel</h2>
                     <button id="close-csv-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -510,34 +510,55 @@
                 </div>
                 
                 <div class="mb-6">
-                    <p class="text-gray-600 mb-4 font-medium">Formato CSV esperado:</p>
-                    <code class="block bg-gray-100 p-4 rounded-xl text-sm overflow-x-auto font-mono">
-                        codigo, descripcion,detal,mayor,gmayor,departamento,url<br>
-                        PROD001,"Producto 1",100.00,80.00,70.00,Electrónica,https://...
-                    </code>
+                    <p class="text-gray-600 mb-4 font-medium">Instrucciones:</p>
+                    <div class="bg-blue-50 p-4 rounded-xl text-sm space-y-2">
+                        <p class="font-semibold text-blue-900">1. Archivo CSV (Productos con precios)</p>
+                        <code class="block bg-white p-2 rounded text-xs font-mono overflow-x-auto">
+                            CODIGO,DESCRIPCION,DETAL,MAYOR,GMAYOR,DEPARTAMENTO,URL
+                        </code>
+                        <p class="font-semibold text-blue-900 mt-3">2. Archivo Excel (Con cantidades en columna H)</p>
+                        <p class="text-gray-600">El sistema buscará coincidencias por CÓDIGO y DESCRIPCIÓN para agregar las cantidades.</p>
+                    </div>
                 </div>
                 
-                <div class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center mb-4 hover:border-red-400 transition-all">
-                    <input type="file" id="csv-file-input" accept=".csv" class="hidden">
-                    <label for="csv-file-input" class="cursor-pointer">
-                        <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                        </svg>
-                        <p class="text-gray-600 font-semibold">Haz clic para seleccionar archivo CSV</p>
-                        <p class="text-gray-400 text-sm mt-2">o arrastra y suelta aquí</p>
-                    </label>
+                <!-- Archivo CSV -->
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-2">1️⃣ Archivo CSV de Productos</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-red-400 transition-all">
+                        <input type="file" id="csv-file-input" accept=".csv" class="hidden">
+                        <label for="csv-file-input" class="cursor-pointer">
+                            <svg class="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                            <p class="text-gray-600 font-semibold text-sm">Seleccionar CSV</p>
+                        </label>
+                    </div>
+                    <div id="csv-file-name" class="hidden mt-2 p-3 bg-green-50 rounded-xl text-green-700 text-sm font-medium"></div>
                 </div>
 
-                <div id="csv-file-name" class="hidden mb-4 p-3 bg-blue-50 rounded-xl text-blue-700 text-sm font-medium"></div>
+                <!-- Archivo Excel -->
+                <div class="mb-6">
+                    <label class="block text-gray-700 font-semibold mb-2">2️⃣ Archivo Excel con Cantidades (Columna H)</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-orange-400 transition-all">
+                        <input type="file" id="excel-file-input" accept=".xlsx,.xls" class="hidden">
+                        <label for="excel-file-input" class="cursor-pointer">
+                            <svg class="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p class="text-gray-600 font-semibold text-sm">Seleccionar Excel</p>
+                        </label>
+                    </div>
+                    <div id="excel-file-name" class="hidden mt-2 p-3 bg-orange-50 rounded-xl text-orange-700 text-sm font-medium"></div>
+                </div>
 
                 <button id="upload-csv-submit" class="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
-                    Subir y Procesar CSV
+                    Subir y Procesar Archivos
                 </button>
 
-                <div id="csv-status" class="hidden mt-4 p-4 rounded-xl text-sm font-medium"></div>
+                <div id="csv-status" class="hidden mt-4 p-4 rounded-xl text-sm font-medium whitespace-pre-wrap"></div>
             </div>
         </div>
-
+        
         <!-- Modal para exportar PDF -->
         <div id="pdf-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
             <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
@@ -661,6 +682,7 @@
         </div>
 
         <script src="supabase-config.js"></script>
+        <script src="sw.js"></script>
         <script src="app.js"></script>
     </body>
 </html>
