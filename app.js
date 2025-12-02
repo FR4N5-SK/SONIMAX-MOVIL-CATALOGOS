@@ -1722,8 +1722,9 @@ function setupEventListeners() {
   })
 
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
-  document.getElementById("excel-file-input")?.addEventListener("change", handleExcelFileSelect) // Agregar event listener para el archivo Excel
+  document.getElementById("excel-file-input")?.addEventListener("change", handleExcelFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
+  document.getElementById("upload-excel-submit")?.addEventListener("click", handleExcelUpload) // Agregar listener para Excel
 
   document.getElementById("export-pdf-button")?.addEventListener("click", () => {
     document.getElementById("pdf-modal").classList.remove("hidden")
@@ -1905,8 +1906,8 @@ function filterByDepartment(dept) {
   if (dept === "all") {
     filteredProducts = allProducts
   } else if (dept === "new") {
-    // Usar el nuevo campo is_new para filtrar
-    filteredProducts = allProducts.filter((p) => p.is_new)
+    // Usar el nuevo campo is_new para filtrar y limitar a 20
+    filteredProducts = allProducts.filter((p) => p.is_new).slice(0, 20)
   } else if (dept === "bestselling") {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
@@ -2055,7 +2056,7 @@ function createProductCard(product) {
   }
 
   let cantidadHTML = ""
-  if (currentUserRole === "gestor" && product.cantidad_actual !== undefined) {
+  if ((currentUserRole === "gestor" || currentUserRole === "admin") && product.cantidad_actual !== undefined) {
     const stockClass =
       product.cantidad_actual > 0
         ? "bg-green-100 text-green-700 border-green-300"
@@ -3002,18 +3003,98 @@ async function parseExcelFile(file) {
   })
 }
 
+async function handleExcelUpload() {
+  if (!selectedExcelFile) {
+    showCSVStatus("Por favor selecciona un archivo Excel", "error")
+    return
+  }
+
+  if (currentUserRole !== "admin") {
+    showCSVStatus("Solo los administradores pueden actualizar cantidades", "error")
+    return
+  }
+
+  showCSVStatus("Procesando archivo Excel...", "info")
+
+  try {
+    console.log("[EXCEL-UPLOAD] Iniciando parseo del archivo Excel")
+    const cantidadesMap = await parseExcelFile(selectedExcelFile)
+    console.log("[EXCEL-UPLOAD] Cantidades extraídas:", cantidadesMap.size)
+
+    // Obtener todos los productos de la base de datos
+    const { data: products, error: fetchError } = await window.supabaseClient
+      .from("products")
+      .select("id, nombre, descripcion, cantidad_actual")
+
+    if (fetchError) {
+      throw new Error(`Error obteniendo productos: ${fetchError.message}`)
+    }
+
+    if (!products || products.length === 0) {
+      throw new Error("No hay productos en la base de datos")
+    }
+
+    console.log("[EXCEL-UPLOAD] Productos en BD:", products.length)
+
+    // Actualizar cantidades de productos
+    let updatedCount = 0
+    const updateErrors = []
+
+    for (const product of products) {
+      const key1 = (product.descripcion || "").toLowerCase()
+      const key2 = (product.nombre || "").toLowerCase()
+      const key3 = `${product.descripcion}_${product.nombre}`.toLowerCase()
+
+      const newCantidad = cantidadesMap.get(key1) || cantidadesMap.get(key2) || cantidadesMap.get(key3) || 0
+
+      if (newCantidad !== product.cantidad_actual) {
+        const { error: updateError } = await window.supabaseClient
+          .from("products")
+          .update({ cantidad_actual: newCantidad })
+          .eq("id", product.id)
+
+        if (updateError) {
+          updateErrors.push(`${product.nombre}: ${updateError.message}`)
+          console.error(`[EXCEL-UPLOAD] ❌ Error actualizando ${product.nombre}:`, updateError)
+        } else {
+          updatedCount++
+          console.log(`[EXCEL-UPLOAD] ✅ ${product.nombre}: ${newCantidad} unidades`)
+        }
+      }
+    }
+
+    // Mostrar resumen
+    let summaryMessage = `✅ Actualización completada!\n\n`
+    summaryMessage += `📦 Productos actualizados: ${updatedCount}/${products.length}\n`
+
+    if (updateErrors.length > 0) {
+      summaryMessage += `❌ Errores: ${updateErrors.length}\n`
+      if (updateErrors.length <= 5) {
+        summaryMessage += updateErrors.join("\n")
+      }
+    }
+
+    showCSVStatus(summaryMessage, "success")
+
+    setTimeout(() => {
+      // Limpiar el archivo seleccionado
+      document.getElementById("excel-file-input").value = ""
+      selectedExcelFile = null
+      document.getElementById("excel-file-name").classList.add("hidden")
+
+      document.getElementById("csv-modal").classList.add("hidden")
+      loadProducts()
+    }, 2000)
+  } catch (error) {
+    console.error("[EXCEL-UPLOAD] ❌ Error:", error)
+    showCSVStatus(`Error: ${error.message}`, "error")
+  }
+}
+
 async function handleCSVUpload() {
   if (!selectedCSVFile) {
     showCSVStatus("Por favor selecciona un archivo CSV", "error")
     return
-  }
-
-  // El Excel es opcional, pero mostrar advertencia
-  if (!selectedExcelFile) {
-    const continuar = confirm(
-      "No has seleccionado archivo Excel. Las cantidades no se agregarán.\n\n¿Deseas continuar?",
-    )
-    if (!continuar) return
   }
 
   if (currentUserRole !== "admin") {
@@ -3021,16 +3102,9 @@ async function handleCSVUpload() {
     return
   }
 
-  showCSVStatus("Procesando archivos...", "info")
+  showCSVStatus("Procesando archivo CSV...", "info")
 
   try {
-    let cantidadesMap = new Map()
-    if (selectedExcelFile) {
-      showCSVStatus("Extrayendo cantidades del Excel...", "info")
-      cantidadesMap = await parseExcelFile(selectedExcelFile)
-      console.log("[UPLOAD] Cantidades disponibles:", cantidadesMap.size)
-    }
-
     // Parsear CSV
     const reader = new FileReader()
 
@@ -3068,8 +3142,6 @@ async function handleCSVUpload() {
         console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
         const products = []
-        let matchedCount = 0
-        let notMatchedCount = 0
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim()
@@ -3092,23 +3164,6 @@ async function handleCSVUpload() {
 
           if (!descripcion) continue
 
-          let cantidad = 0
-          if (cantidadesMap.size > 0) {
-            const key1 = codigo.toLowerCase()
-            const key2 = descripcion.toLowerCase()
-            const key3 = `${codigo}_${descripcion}`.toLowerCase()
-
-            // Intentar diferentes combinaciones
-            cantidad = cantidadesMap.get(key1) || cantidadesMap.get(key2) || cantidadesMap.get(key3) || 0
-
-            if (cantidad > 0) {
-              matchedCount++
-              console.log(`[MATCH] ✅ ${codigo} - ${descripcion}: ${cantidad} unidades`)
-            } else {
-              notMatchedCount++
-            }
-          }
-
           const product = {
             nombre: descripcion,
             descripcion: codigo || "",
@@ -3118,7 +3173,7 @@ async function handleCSVUpload() {
             departamento: departamento,
             imagen_url: url,
             is_new: false,
-            cantidad_actual: cantidad, // Agregar cantidad
+            cantidad_actual: 0, // Iniciar en 0, se actualiza con Excel
           }
 
           products.push(product)
@@ -3198,12 +3253,6 @@ async function handleCSVUpload() {
 
         let summaryMessage = `✅ ${products.length} productos cargados exitosamente.\n\n`
 
-        if (cantidadesMap.size > 0) {
-          summaryMessage += `📊 Resumen de cantidades del Excel:\n`
-          summaryMessage += `• Productos con cantidad asignada: ${matchedCount}\n`
-          summaryMessage += `• Productos sin coincidencia: ${notMatchedCount}\n\n`
-        }
-
         if (previousSnapshot.length > 0) {
           summaryMessage += `📊 Resumen de cambios:\n`
           summaryMessage += `• Productos nuevos: ${comparisonResult.newProductIds.length}\n`
@@ -3243,16 +3292,18 @@ async function handleCSVUpload() {
           localStorage.removeItem(PRODUCTS_HASH_KEY)
           console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
 
-          document.getElementById("csv-modal").classList.add("hidden")
-          selectedCSVFile = null
-          selectedExcelFile = null
+          // Limpiar archivos seleccionados
           document.getElementById("csv-file-input").value = ""
-          document.getElementById("excel-file-input").value = ""
+          selectedCSVFile = null
           document.getElementById("csv-file-name").classList.add("hidden")
+
+          document.getElementById("excel-file-input").value = ""
+          selectedExcelFile = null
           document.getElementById("excel-file-name").classList.add("hidden")
 
+          document.getElementById("csv-modal").classList.add("hidden")
           loadProducts()
-        }, 3000)
+        }, 2000)
       } catch (error) {
         console.error("❌ Error al procesar CSV:", error)
         showCSVStatus(`Error: ${error.message}`, "error")
@@ -3261,7 +3312,7 @@ async function handleCSVUpload() {
 
     reader.readAsText(selectedCSVFile)
   } catch (error) {
-    console.error("❌ Error general:", error)
+    console.error("❌ Error:", error)
     showCSVStatus(`Error: ${error.message}`, "error")
   }
 }
