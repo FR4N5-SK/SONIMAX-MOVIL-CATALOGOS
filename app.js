@@ -246,7 +246,7 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
   }
 }
 
-async function getBestSellingProducts(limit = 20) {
+async function getBestSellingProducts(limit = 10) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
@@ -310,7 +310,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
+      const parsed = JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -1707,6 +1707,14 @@ function setupEventListeners() {
 
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
     document.getElementById("csv-modal").classList.remove("hidden")
+    // Resetear campos al abrir el modal
+    selectedCSVFile = null
+    selectedExcelFile = null
+    document.getElementById("csv-file-input").value = ""
+    document.getElementById("excel-file-input").value = ""
+    document.getElementById("csv-file-name").classList.add("hidden")
+    document.getElementById("excel-file-name").classList.add("hidden")
+    showCSVStatus("", "info") // Limpiar estado previo
   })
 
   document.getElementById("close-csv-modal")?.addEventListener("click", () => {
@@ -1714,6 +1722,7 @@ function setupEventListeners() {
   })
 
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
+  document.getElementById("excel-file-input")?.addEventListener("change", handleExcelFileSelect) // Agregar event listener para el archivo Excel
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
 
   document.getElementById("export-pdf-button")?.addEventListener("click", () => {
@@ -2045,6 +2054,21 @@ function createProductCard(product) {
     `
   }
 
+  let cantidadHTML = ""
+  if (currentUserRole === "gestor" && product.cantidad_actual !== undefined) {
+    const stockClass =
+      product.cantidad_actual > 0
+        ? "bg-green-100 text-green-700 border-green-300"
+        : "bg-red-100 text-red-700 border-red-300"
+    const stockIcon = product.cantidad_actual > 0 ? "✓" : "✗"
+    cantidadHTML = `
+      <div class="mt-3 p-2 ${stockClass} border rounded-lg flex items-center justify-between">
+        <span class="text-xs font-semibold">Stock Disponible:</span>
+        <span class="text-sm font-black">${stockIcon} ${product.cantidad_actual} unidades</span>
+      </div>
+    `
+  }
+
   const imageUrl = product.imagen_url || "/images/ProductImages.jpg"
   const optimizedUrl = optimizeImageUrl(imageUrl)
   const placeholderUrl = createImagePlaceholder(imageUrl)
@@ -2064,6 +2088,7 @@ function createProductCard(product) {
       <div class="mb-4">
         ${priceHTML}
       </div>
+      ${cantidadHTML}
       ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
       ${product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : ""}
       <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
@@ -2902,20 +2927,93 @@ function handleDeptSearch(e) {
 }
 
 let selectedCSVFile = null
+let selectedExcelFile = null
 
 function handleCSVFileSelect(e) {
   selectedCSVFile = e.target.files[0]
   if (selectedCSVFile) {
-    document.getElementById("csv-file-name").textContent = `Archivo seleccionado: ${selectedCSVFile.name}`
+    document.getElementById("csv-file-name").textContent = `✅ ${selectedCSVFile.name}`
     document.getElementById("csv-file-name").classList.remove("hidden")
   }
 }
 
-// FUNCIÓN CORREGIDA PARA MANEJAR LA SUBIDA DE CSV
+function handleExcelFileSelect(e) {
+  selectedExcelFile = e.target.files[0]
+  if (selectedExcelFile) {
+    document.getElementById("excel-file-name").textContent = `✅ ${selectedExcelFile.name}`
+    document.getElementById("excel-file-name").classList.remove("hidden")
+  }
+}
+
+async function parseExcelFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result)
+        const workbook = window.XLSX.read(data, { type: "array" })
+
+        // Obtener la primera hoja
+        const firstSheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[firstSheetName]
+
+        // Convertir a JSON
+        const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 })
+
+        console.log("[EXCEL] Datos parseados:", jsonData.length, "filas")
+
+        // Crear mapa de cantidades por código y descripción
+        const cantidadesMap = new Map()
+
+        // Saltar encabezado (fila 0)
+        for (let i = 1; i < jsonData.length; i++) {
+          const row = jsonData[i]
+
+          // Columna A = Código (índice 0)
+          // Columna B = Nombre/Descripción (índice 1)
+          // Columna H = Existencia Actual (índice 7)
+          const codigo = row[0] ? String(row[0]).trim() : ""
+          const nombre = row[1] ? String(row[1]).trim() : ""
+          const cantidad = row[7] ? Number.parseInt(row[7]) : 0
+
+          if (codigo || nombre) {
+            // Crear múltiples claves para facilitar el match
+            const key1 = codigo.toLowerCase()
+            const key2 = nombre.toLowerCase()
+            const key3 = `${codigo}_${nombre}`.toLowerCase()
+
+            if (key1) cantidadesMap.set(key1, cantidad)
+            if (key2) cantidadesMap.set(key2, cantidad)
+            if (key3) cantidadesMap.set(key3, cantidad)
+          }
+        }
+
+        console.log("[EXCEL] Cantidades extraídas:", cantidadesMap.size, "productos")
+        resolve(cantidadesMap)
+      } catch (error) {
+        console.error("[EXCEL] Error parseando:", error)
+        reject(error)
+      }
+    }
+
+    reader.onerror = (error) => reject(error)
+    reader.readAsArrayBuffer(file)
+  })
+}
+
 async function handleCSVUpload() {
   if (!selectedCSVFile) {
     showCSVStatus("Por favor selecciona un archivo CSV", "error")
     return
+  }
+
+  // El Excel es opcional, pero mostrar advertencia
+  if (!selectedExcelFile) {
+    const continuar = confirm(
+      "No has seleccionado archivo Excel. Las cantidades no se agregarán.\n\n¿Deseas continuar?",
+    )
+    if (!continuar) return
   }
 
   if (currentUserRole !== "admin") {
@@ -2923,204 +3021,249 @@ async function handleCSVUpload() {
     return
   }
 
-  const reader = new FileReader()
+  showCSVStatus("Procesando archivos...", "info")
 
-  reader.onload = async (e) => {
-    try {
-      const text = e.target.result
-      const lines = text.split("\n").filter((line) => line.trim())
+  try {
+    let cantidadesMap = new Map()
+    if (selectedExcelFile) {
+      showCSVStatus("Extrayendo cantidades del Excel...", "info")
+      cantidadesMap = await parseExcelFile(selectedExcelFile)
+      console.log("[UPLOAD] Cantidades disponibles:", cantidadesMap.size)
+    }
 
-      if (lines.length < 2) {
-        throw new Error("El archivo CSV está vacío o no tiene datos")
-      }
+    // Parsear CSV
+    const reader = new FileReader()
 
-      const headers = lines[0].split(",").map((h) => h.trim().toUpperCase())
+    reader.onload = async (e) => {
+      try {
+        const text = e.target.result
+        const lines = text.split("\n").filter((line) => line.trim())
 
-      const colIndexes = {
-        descripcion: headers.indexOf("DESCRIPCION"),
-        codigo: headers.indexOf("CODIGO"),
-        detal: headers.indexOf("DETAL"),
-        mayor: headers.indexOf("MAYOR"),
-        gmayor: headers.indexOf("GMAYOR"),
-        url: headers.indexOf("URL"),
-        departamento: headers.indexOf("DEPARTAMENTO"),
-      }
-
-      if (
-        colIndexes.descripcion === -1 ||
-        colIndexes.detal === -1 ||
-        colIndexes.mayor === -1 ||
-        colIndexes.gmayor === -1
-      ) {
-        throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
-      }
-
-      const previousSnapshot = await getPreviousCSVSnapshot()
-      console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
-
-      const products = []
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim()
-        if (!line) continue
-
-        const values = parseCSVLine(line)
-
-        if (values.length < headers.length) continue
-
-        const descripcion = values[colIndexes.descripcion]?.trim() || ""
-        const codigo = colIndexes.codigo !== -1 ? values[colIndexes.codigo]?.trim() || "" : ""
-        const detal = values[colIndexes.detal]?.trim() || "0"
-        const mayor = values[colIndexes.mayor]?.trim() || "0"
-        const gmayor = values[colIndexes.gmayor]?.trim() || "0"
-        const url = colIndexes.url !== -1 ? values[colIndexes.url]?.trim() || null : null
-        const departamento =
-          colIndexes.departamento !== -1 ? values[colIndexes.departamento]?.trim() || "Sin categoría" : "Sin categoría"
-
-        if (!descripcion) continue
-
-        const product = {
-          nombre: descripcion,
-          descripcion: codigo || "",
-          precio_cliente: Number.parseFloat(detal) || 0,
-          precio_mayor: Number.parseFloat(mayor) || 0,
-          precio_gmayor: Number.parseFloat(gmayor) || 0,
-          departamento: departamento,
-          imagen_url: url,
-          is_new: false, // Inicialmente todos son false
+        if (lines.length < 2) {
+          throw new Error("El archivo CSV está vacío o no tiene datos")
         }
 
-        products.push(product)
-      }
+        const headers = lines[0].split(",").map((h) => h.trim().toUpperCase())
 
-      if (products.length === 0) {
-        throw new Error("No se encontraron productos válidos en el CSV")
-      }
+        const colIndexes = {
+          descripcion: headers.indexOf("DESCRIPCION"),
+          codigo: headers.indexOf("CODIGO"),
+          detal: headers.indexOf("DETAL"),
+          mayor: headers.indexOf("MAYOR"),
+          gmayor: headers.indexOf("GMAYOR"),
+          url: headers.indexOf("URL"),
+          departamento: headers.indexOf("DEPARTAMENTO"),
+        }
 
-      showCSVStatus(`Procesando ${products.length} productos...`, "info")
+        if (
+          colIndexes.descripcion === -1 ||
+          colIndexes.detal === -1 ||
+          colIndexes.mayor === -1 ||
+          colIndexes.gmayor === -1
+        ) {
+          throw new Error("El CSV debe contener las columnas: DESCRIPCION, DETAL, MAYOR, GMAYOR")
+        }
 
-      // LIMPIAR PRODUCTOS EXISTENTES
-      const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
+        const previousSnapshot = await getPreviousCSVSnapshot()
+        console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
-      if (deleteError) {
-        console.error("Error al limpiar productos existentes:", deleteError)
-        throw new Error("Error al limpiar productos existentes")
-      }
+        const products = []
+        let matchedCount = 0
+        let notMatchedCount = 0
 
-      console.log("[CSV] ✅ Productos anteriores eliminados")
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim()
+          if (!line) continue
 
-      // INSERTAR NUEVOS PRODUCTOS
-      const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
+          const values = parseCSVLine(line)
 
-      if (error) throw error
+          if (values.length < headers.length) continue
 
-      console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
+          const descripcion = values[colIndexes.descripcion]?.trim() || ""
+          const codigo = colIndexes.codigo !== -1 ? values[colIndexes.codigo]?.trim() || "" : ""
+          const detal = values[colIndexes.detal]?.trim() || "0"
+          const mayor = values[colIndexes.mayor]?.trim() || "0"
+          const gmayor = values[colIndexes.gmayor]?.trim() || "0"
+          const url = colIndexes.url !== -1 ? values[colIndexes.url]?.trim() || null : null
+          const departamento =
+            colIndexes.departamento !== -1
+              ? values[colIndexes.departamento]?.trim() || "Sin categoría"
+              : "Sin categoría"
 
-      let comparisonResult = { newProductIds: [], modifiedProductIds: [], deletedCount: 0, deletedProducts: [] }
+          if (!descripcion) continue
 
-      if (insertedProducts && insertedProducts.length > 0) {
-        if (previousSnapshot.length > 0) {
-          comparisonResult = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
+          let cantidad = 0
+          if (cantidadesMap.size > 0) {
+            const key1 = codigo.toLowerCase()
+            const key2 = descripcion.toLowerCase()
+            const key3 = `${codigo}_${descripcion}`.toLowerCase()
 
-          if (comparisonResult.newProductIds.length > 0) {
+            // Intentar diferentes combinaciones
+            cantidad = cantidadesMap.get(key1) || cantidadesMap.get(key2) || cantidadesMap.get(key3) || 0
+
+            if (cantidad > 0) {
+              matchedCount++
+              console.log(`[MATCH] ✅ ${codigo} - ${descripcion}: ${cantidad} unidades`)
+            } else {
+              notMatchedCount++
+            }
+          }
+
+          const product = {
+            nombre: descripcion,
+            descripcion: codigo || "",
+            precio_cliente: Number.parseFloat(detal) || 0,
+            precio_mayor: Number.parseFloat(mayor) || 0,
+            precio_gmayor: Number.parseFloat(gmayor) || 0,
+            departamento: departamento,
+            imagen_url: url,
+            is_new: false,
+            cantidad_actual: cantidad, // Agregar cantidad
+          }
+
+          products.push(product)
+        }
+
+        if (products.length === 0) {
+          throw new Error("No se encontraron productos válidos en el CSV")
+        }
+
+        showCSVStatus(`Insertando ${products.length} productos en la base de datos...`, "info")
+
+        // LIMPIAR PRODUCTOS EXISTENTES
+        const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
+
+        if (deleteError) {
+          console.error("Error al limpiar productos existentes:", deleteError)
+          throw new Error("Error al limpiar productos existentes")
+        }
+
+        console.log("[CSV] ✅ Productos anteriores eliminados")
+
+        // INSERTAR NUEVOS PRODUCTOS
+        const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
+
+        if (error) throw error
+
+        console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
+
+        let comparisonResult = { newProductIds: [], modifiedProductIds: [], deletedCount: 0, deletedProducts: [] }
+
+        if (insertedProducts && insertedProducts.length > 0) {
+          if (previousSnapshot.length > 0) {
+            comparisonResult = compareProductsAndDetectNew(insertedProducts, previousSnapshot)
+
+            if (comparisonResult.newProductIds.length > 0) {
+              const { error: updateError } = await window.supabaseClient
+                .from("products")
+                .update({ is_new: true })
+                .in("id", comparisonResult.newProductIds)
+
+              if (updateError) {
+                console.error("[NEW-PRODUCTS] Error marcando productos como nuevos:", updateError)
+              } else {
+                console.log(
+                  `[NEW-PRODUCTS] ✅ ${comparisonResult.newProductIds.length} productos marcados como nuevos en BD`,
+                )
+              }
+
+              const limitedNewIds = comparisonResult.newProductIds.slice(0, 100)
+              saveNewProducts(limitedNewIds)
+            } else {
+              saveNewProducts([])
+              console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
+            }
+          } else {
+            const firstProducts = insertedProducts.slice(0, 100)
+            const firstProductIds = firstProducts.map((p) => p.id)
+
             const { error: updateError } = await window.supabaseClient
               .from("products")
               .update({ is_new: true })
-              .in("id", comparisonResult.newProductIds)
+              .in("id", firstProductIds)
 
             if (updateError) {
               console.error("[NEW-PRODUCTS] Error marcando productos como nuevos:", updateError)
             } else {
               console.log(
-                `[NEW-PRODUCTS] ✅ ${comparisonResult.newProductIds.length} productos marcados como nuevos en BD`,
+                `[NEW-PRODUCTS] ✅ Primera carga: ${firstProductIds.length} productos marcados como nuevos en BD`,
               )
             }
 
-            // También guardar en localStorage para compatibilidad
-            const limitedNewIds = comparisonResult.newProductIds.slice(0, 100)
-            saveNewProducts(limitedNewIds)
-          } else {
-            // Si no hay productos nuevos, limpiar la lista de nuevos
-            saveNewProducts([])
-            console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
-          }
-        } else {
-          const firstProducts = insertedProducts.slice(0, 100)
-          const firstProductIds = firstProducts.map((p) => p.id)
-
-          const { error: updateError } = await window.supabaseClient
-            .from("products")
-            .update({ is_new: true })
-            .in("id", firstProductIds)
-
-          if (updateError) {
-            console.error("[NEW-PRODUCTS] Error marcando productos como nuevos:", updateError)
-          } else {
-            console.log(
-              `[NEW-PRODUCTS] ✅ Primera carga: ${firstProductIds.length} productos marcados como nuevos en BD`,
-            )
+            saveNewProducts(firstProductIds)
           }
 
-          saveNewProducts(firstProductIds)
+          await saveCSVSnapshot(insertedProducts)
         }
 
-        await saveCSVSnapshot(insertedProducts)
-      }
+        let summaryMessage = `✅ ${products.length} productos cargados exitosamente.\n\n`
 
-      // Mostrar resumen detallado
-      let summaryMessage = `✅ ${products.length} productos cargados exitosamente.\n\n`
-
-      if (previousSnapshot.length > 0) {
-        summaryMessage += `📊 Resumen de cambios:\n`
-        summaryMessage += `• Productos nuevos: ${comparisonResult.newProductIds.length}\n`
-        summaryMessage += `• Productos modificados: ${comparisonResult.modifiedProductIds.length}\n`
-        summaryMessage += `• Productos eliminados: ${comparisonResult.deletedCount}\n`
-
-        if (comparisonResult.deletedProducts.length > 0) {
-          summaryMessage += `\nEjemplos de productos eliminados:\n`
-          comparisonResult.deletedProducts.forEach((name) => {
-            summaryMessage += `  - ${name}\n`
-          })
+        if (cantidadesMap.size > 0) {
+          summaryMessage += `📊 Resumen de cantidades del Excel:\n`
+          summaryMessage += `• Productos con cantidad asignada: ${matchedCount}\n`
+          summaryMessage += `• Productos sin coincidencia: ${notMatchedCount}\n\n`
         }
-      }
 
-      showCSVStatus(summaryMessage, "success")
+        if (previousSnapshot.length > 0) {
+          summaryMessage += `📊 Resumen de cambios:\n`
+          summaryMessage += `• Productos nuevos: ${comparisonResult.newProductIds.length}\n`
+          summaryMessage += `• Productos modificados: ${comparisonResult.modifiedProductIds.length}\n`
+          summaryMessage += `• Productos eliminados: ${comparisonResult.deletedCount}\n`
 
-      setTimeout(() => {
-        const clearSales = confirm(
-          `Se han cargado ${products.length} productos.\n\n¿Desea limpiar el historial de ventas anteriores?\n\nEsto es útil si estos productos ya no son los mismos que antes.`,
-        )
-
-        if (clearSales) {
-          // Limpiar datos de ventas en BD
-          window.supabaseClient
-            .from("product_sales")
-            .delete()
-            .not("product_id", "is", null)
-            .then(() => {
-              console.log("[SALES-DB] ✅ Historial de ventas limpiado")
-              alert("Historial de ventas limpiado exitosamente")
+          if (comparisonResult.deletedProducts.length > 0) {
+            summaryMessage += `\nEjemplos de productos eliminados:\n`
+            comparisonResult.deletedProducts.forEach((name) => {
+              summaryMessage += `  - ${name}\n`
             })
-            .catch((err) => {
-              console.error("[SALES-DB] ❌ Error limpiando ventas:", err)
-            })
+          }
         }
 
-        // Limpiar estado de imágenes para nuevo CSV
-        localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
-        localStorage.removeItem(PRODUCTS_HASH_KEY)
-        console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
+        showCSVStatus(summaryMessage, "success")
 
-        document.getElementById("csv-modal").classList.add("hidden")
-        loadProducts()
-      }, 2000)
-    } catch (error) {
-      console.error("❌ Error al procesar CSV:", error)
-      showCSVStatus(`Error: ${error.message}`, "error")
+        setTimeout(() => {
+          const clearSales = confirm(
+            `Se han cargado ${products.length} productos.\n\n¿Desea limpiar el historial de ventas anteriores?\n\nEsto es útil si estos productos ya no son los mismos que antes.`,
+          )
+
+          if (clearSales) {
+            window.supabaseClient
+              .from("product_sales")
+              .delete()
+              .not("product_id", "is", null)
+              .then(() => {
+                console.log("[SALES-DB] ✅ Historial de ventas limpiado")
+                alert("Historial de ventas limpiado exitosamente")
+              })
+              .catch((err) => {
+                console.error("[SALES-DB] ❌ Error limpiando ventas:", err)
+              })
+          }
+
+          localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
+          localStorage.removeItem(PRODUCTS_HASH_KEY)
+          console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
+
+          document.getElementById("csv-modal").classList.add("hidden")
+          selectedCSVFile = null
+          selectedExcelFile = null
+          document.getElementById("csv-file-input").value = ""
+          document.getElementById("excel-file-input").value = ""
+          document.getElementById("csv-file-name").classList.add("hidden")
+          document.getElementById("excel-file-name").classList.add("hidden")
+
+          loadProducts()
+        }, 3000)
+      } catch (error) {
+        console.error("❌ Error al procesar CSV:", error)
+        showCSVStatus(`Error: ${error.message}`, "error")
+      }
     }
-  }
 
-  reader.readAsText(selectedCSVFile)
+    reader.readAsText(selectedCSVFile)
+  } catch (error) {
+    console.error("❌ Error general:", error)
+    showCSVStatus(`Error: ${error.message}`, "error")
+  }
 }
 
 function parseCSVLine(line) {
@@ -3249,4 +3392,3 @@ function trackProductSale(productId) {
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
-
