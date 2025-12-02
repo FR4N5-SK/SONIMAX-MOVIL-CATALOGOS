@@ -37,6 +37,9 @@ let banners = []
 let currentBannerIndex = 0
 let bannerAutoPlayInterval = null
 
+let autoRefreshInterval = null
+const AUTO_REFRESH_TIME = 10 * 60 * 1000 // 10 minutos en milisegundos
+
 const imageLoadState = {
   loadedImages: new Set(),
   failedImages: new Map(), // url -> attemptCount
@@ -1518,6 +1521,9 @@ function showApp() {
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
   loadProducts()
+
+  startAutoRefresh()
+  setupVisibilityListener()
 }
 
 function showAuthMessage(message, type) {
@@ -3442,4 +3448,36 @@ function trackProductSale(productId) {
   // para una posterior sincronización si es necesario.
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
+}
+
+function startAutoRefresh() {
+  // Limpiar intervalo anterior si existe
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval)
+  }
+
+  // Configurar auto-refresh cada 10 minutos
+  autoRefreshInterval = setInterval(() => {
+    console.log("🔄 Auto-refresh: Actualizando productos (cada 10 minutos)...")
+    loadProducts()
+  }, AUTO_REFRESH_TIME)
+}
+
+function setupVisibilityListener() {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      console.log("👁️ Página activada: Actualizando productos...")
+      // Recargar productos cuando el usuario abre la página después de tenerla en segundo plano
+      loadProducts()
+      // Reiniciar el auto-refresh
+      startAutoRefresh()
+    } else {
+      console.log("👁️ Página en segundo plano")
+      // Detener auto-refresh cuando la página está en segundo plano
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval)
+        autoRefreshInterval = null
+      }
+    }
+  })
 }
