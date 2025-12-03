@@ -1,7 +1,3 @@
-// SONIMAX MÓVIL - Aplicación Principal
-// Sistema actualizado con USUARIO en lugar de EMAIL con BANNERS integrados
-// VERSIÓN CORREGIDA - Comparación correcta de productos nuevos
-
 /* global XLSX */
 /* eslint-disable no-undef */
 
@@ -17,11 +13,9 @@ let filteredProducts = []
 let cart = []
 let currentDepartment = "all"
 let selectedProductForQuantity = null
-
 let currentPage = 1
 const PRODUCTS_PER_PAGE = 50
 let isLoadingMore = false
-
 let imageObserver = null
 let serviceWorkerRegistration = null
 
@@ -29,23 +23,23 @@ const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
 const NEW_PRODUCTS_KEY = "sonimax_new_products"
 const PRODUCT_SALES_KEY = "sonimax_product_sales"
-const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot local
-const MAX_RETRY_ATTEMPTS = 3
-const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
+const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot"
+const UI_STATE_KEY = "sonimax_ui_state"
+const PRODUCTS_CACHE_KEY = "sonimax_products_cache"
 
+const MAX_RETRY_ATTEMPTS = 3
+const RETRY_DELAY = 1500
 let banners = []
 let currentBannerIndex = 0
 let bannerAutoPlayInterval = null
-
 let autoRefreshInterval = null
-const AUTO_REFRESH_TIME = 10 * 60 * 1000 // 10 minutos en milisegundos
+const AUTO_REFRESH_TIME = 10 * 60 * 1000
 
 const imageLoadState = {
   loadedImages: new Set(),
-  failedImages: new Map(), // url -> attemptCount
+  failedImages: new Map(),
   inProgress: false,
   lastUpdate: null,
-  // Nuevos campos para priorización
   isPaused: false,
   priorityQueue: [],
   backgroundQueue: [],
@@ -53,25 +47,81 @@ const imageLoadState = {
 }
 
 // ============================================
-// GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
+// PERSISTENCIA DE ESTADO DE NAVEGACIÓN
 // ============================================
+function saveUIState() {
+  const state = {
+    currentDepartment: currentDepartment,
+    currentPage: currentPage,
+    lastSearchQuery: document.getElementById("global-search")?.value || "",
+    timestamp: Date.now(),
+  }
+  localStorage.setItem(UI_STATE_KEY, JSON.stringify(state))
+  console.log("[UI-STATE] Estado guardado:", state)
+}
 
-// Esta función ya no es necesaria porque is_new viene de la base de datos
-/*
-function getNewProducts() {
+function restoreUIState() {
   try {
-    const saved = localStorage.getItem(NEW_PRODUCTS_KEY)
+    const saved = localStorage.getItem(UI_STATE_KEY)
     if (saved) {
-      const newProductIds = JSON.parse(saved)
-      return allProducts.filter((p) => newProductIds.includes(p.id))
+      const state = JSON.parse(saved)
+      if (Date.now() - state.timestamp < 30 * 60 * 1000) {
+        console.log("[UI-STATE] ✅ Restaurando estado:", state)
+        currentDepartment = state.currentDepartment
+        currentPage = state.currentPage
+
+        if (state.lastSearchQuery) {
+          const searchInput = document.getElementById("global-search")
+          if (searchInput) {
+            searchInput.value = state.lastSearchQuery
+            filteredProducts = searchProducts(allProducts, state.lastSearchQuery)
+          }
+        }
+        return true
+      }
     }
   } catch (error) {
-    console.error("[NEW-PRODUCTS] Error cargando productos nuevos:", error)
+    console.error("[UI-STATE] Error restaurando estado:", error)
   }
-  return []
+  return false
 }
-*/
 
+// ============================================
+// CACHÉ DE PRODUCTOS
+// ============================================
+function savProductsCache(products) {
+  try {
+    const cacheData = {
+      products: products,
+      timestamp: Date.now(),
+      count: products.length,
+    }
+    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(cacheData))
+    console.log(`[PRODUCTS-CACHE] ${products.length} productos cacheados`)
+  } catch (error) {
+    console.error("[PRODUCTS-CACHE] Error cacheando:", error)
+  }
+}
+
+function getProductsCache() {
+  try {
+    const saved = localStorage.getItem(PRODUCTS_CACHE_KEY)
+    if (saved) {
+      const cacheData = JSON.parse(saved)
+      if (Date.now() - cacheData.timestamp < 60 * 60 * 1000) {
+        console.log(`[PRODUCTS-CACHE] ✅ ${cacheData.count} productos cargados del caché`)
+        return cacheData.products
+      }
+    }
+  } catch (error) {
+    console.error("[PRODUCTS-CACHE] Error cargando caché:", error)
+  }
+  return null
+}
+
+// ============================================
+// GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS
+// ============================================
 function saveNewProducts(productIds) {
   try {
     localStorage.setItem(NEW_PRODUCTS_KEY, JSON.stringify(productIds))
@@ -84,7 +134,7 @@ function saveNewProducts(productIds) {
 async function saveCSVSnapshot(products) {
   try {
     const snapshot = products.map((p) => ({
-      codigo: p.descripcion || "", // El código está en descripcion
+      codigo: p.descripcion || "",
       nombre: p.nombre,
       departamento: p.departamento || "",
       precio_cliente: p.precio_cliente || 0,
@@ -92,7 +142,6 @@ async function saveCSVSnapshot(products) {
       precio_gmayor: p.precio_gmayor || 0,
     }))
 
-    // Guardar en Supabase
     const { data, error } = await window.supabaseClient
       .from("csv_snapshot")
       .insert({
@@ -103,12 +152,10 @@ async function saveCSVSnapshot(products) {
 
     if (error) {
       console.error("[CSV-SNAPSHOT] Error guardando en Supabase:", error)
-      // Fallback a localStorage si falla Supabase
       localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
       console.log(`[CSV-SNAPSHOT] Snapshot guardado en localStorage (fallback) con ${snapshot.length} productos`)
     } else {
       console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en Supabase con ${snapshot.length} productos`)
-      // También guardar en localStorage como backup
       localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
     }
   } catch (error) {
@@ -118,7 +165,6 @@ async function saveCSVSnapshot(products) {
 
 async function getPreviousCSVSnapshot() {
   try {
-    // Intentar obtener el snapshot más reciente de Supabase
     const { data, error } = await window.supabaseClient
       .from("csv_snapshot")
       .select("snapshot_data, created_at")
@@ -128,7 +174,6 @@ async function getPreviousCSVSnapshot() {
 
     if (error) {
       console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
-      // Fallback a localStorage
       const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
       if (saved) {
         return JSON.parse(saved)
@@ -152,10 +197,8 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
   const newProductIds = []
   const modifiedProductIds = []
 
-  // Crear mapa de productos anteriores para búsqueda rápida
   const previousProductMap = new Map()
   previousSnapshot.forEach((p) => {
-    // Usar código como clave principal, o nombre si no hay código
     const key = (p.codigo || p.nombre).toLowerCase().trim()
     previousProductMap.set(key, p)
   })
@@ -163,42 +206,28 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
   console.log(`[COMPARISON] 📊 Productos anteriores en snapshot: ${previousSnapshot.length}`)
   console.log(`[COMPARISON] 📊 Productos actuales: ${currentProducts.length}`)
 
-  // Comparar cada producto actual con el snapshot anterior
   currentProducts.forEach((product) => {
     const key = (product.descripcion || product.nombre).toLowerCase().trim()
     const previousProduct = previousProductMap.get(key)
-
     if (!previousProduct) {
-      // Producto completamente nuevo
       newProductIds.push(product.id)
       console.log(`[COMPARISON] ✨ Producto NUEVO: ${product.nombre}`)
     } else {
-      // Verificar si cambió algún dato importante
       const priceChanged =
         previousProduct.precio_cliente !== product.precio_cliente ||
         previousProduct.precio_mayor !== product.precio_mayor ||
         previousProduct.precio_gmayor !== product.precio_gmayor
-
       const dataChanged =
         previousProduct.nombre !== product.nombre || previousProduct.departamento !== product.departamento
-
       if (priceChanged || dataChanged) {
         modifiedProductIds.push(product.id)
         console.log(`[COMPARISON] 🔄 Producto MODIFICADO: ${product.nombre}`)
-        if (priceChanged) {
-          console.log(`   💰 Cambio de precios detectado`)
-        }
-        if (dataChanged) {
-          console.log(`   📝 Cambio de datos detectado`)
-        }
       }
     }
   })
 
-  // Detectar productos eliminados
   const currentProductKeys = new Set(currentProducts.map((p) => (p.descripcion || p.nombre).toLowerCase().trim()))
   const deletedProducts = []
-
   previousSnapshot.forEach((p) => {
     const key = (p.codigo || p.nombre).toLowerCase().trim()
     if (!currentProductKeys.has(key)) {
@@ -210,19 +239,12 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
   console.log(`   ✨ Productos nuevos: ${newProductIds.length}`)
   console.log(`   🔄 Productos modificados: ${modifiedProductIds.length}`)
   console.log(`   🗑️ Productos eliminados: ${deletedProducts.length}`)
-  console.log(
-    `   ➡️ Productos sin cambios: ${currentProducts.length - newProductIds.length - modifiedProductIds.length}`,
-  )
-
-  if (deletedProducts.length > 0 && deletedProducts.length <= 10) {
-    console.log(`[COMPARISON] 🗑️ Productos eliminados:`, deletedProducts)
-  }
 
   return {
     newProductIds,
     modifiedProductIds,
     deletedCount: deletedProducts.length,
-    deletedProducts: deletedProducts.slice(0, 10), // Solo primeros 10 para mostrar
+    deletedProducts: deletedProducts.slice(0, 10),
   }
 }
 
@@ -252,7 +274,6 @@ async function recordSaleToDatabase(productId, quantity = 1, salePrice = 0) {
 async function getBestSellingProducts(limit = 10) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
-
     const { data: salesData, error: salesError } = await window.supabaseClient
       .from("best_selling_products")
       .select("*")
@@ -270,7 +291,6 @@ async function getBestSellingProducts(limit = 10) {
     }
 
     console.log(`[SALES-DB] ✅ ${salesData.length} productos más vendidos obtenidos`)
-    console.log("[SALES-DB] Estructura de datos:", salesData[0])
     return salesData
   } catch (error) {
     console.error("[SALES-DB] ❌ Error inesperado:", error.message)
@@ -278,42 +298,54 @@ async function getBestSellingProducts(limit = 10) {
   }
 }
 
-// Function to fetch all products
 async function fetchAllProducts() {
   try {
-    const { data, error } = await window.supabaseClient.from("products").select("*")
+    let allData = []
+    let start = 0
+    const batchSize = 1000
+    let hasMore = true
 
-    if (error) {
-      console.error("[PRODUCTS-DB] Error obteniendo productos:", error)
-      return []
+    while (hasMore) {
+      const { data, error } = await window.supabaseClient
+        .from("products")
+        .select("*")
+        .range(start, start + batchSize - 1)
+
+      if (error) {
+        console.error("[PRODUCTS-DB] Error obteniendo productos:", error)
+        return allData.length > 0 ? allData : []
+      }
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...data]
+        console.log(`[PRODUCTS-DB] 📦 Cargados ${allData.length} productos en total...`)
+
+        if (data.length < batchSize) {
+          hasMore = false
+        } else {
+          start += batchSize
+        }
+      } else {
+        hasMore = false
+      }
     }
 
-    return data || []
+    console.log(`[PRODUCTS-DB] ✅ Total final: ${allData.length} productos`)
+    return allData
   } catch (error) {
     console.error("[PRODUCTS-DB] Error inesperado:", error)
     return []
   }
 }
 
-function cleanupSalesData() {
-  try {
-    localStorage.removeItem(PRODUCT_SALES_KEY)
-    console.log("[SALES] 🗑️ Datos de ventas locales limpiados para sincronizar con nuevo CSV")
-    // No se limpia la BD aquí, ya que esa es la fuente global
-  } catch (error) {
-    console.error("[SALES] Error limpiando datos de ventas locales:", error)
-  }
-}
-
 // ============================================
 // GESTIÓN DE ESTADO DE CARGA DE IMÁGENES
 // ============================================
-
 function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
+      const parsed = JSON.parse(saved)
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -340,14 +372,12 @@ function saveImageLoadState() {
 }
 
 function getProductsHash(products) {
-  // Crear hash simple basado en URLs de imágenes
   const urls = products
     .map((p) => p.imagen_url)
     .filter((url) => url && url !== "/images/ProductImages.jpg")
     .sort()
     .join("|")
 
-  // Hash simple
   let hash = 0
   for (let i = 0; i < urls.length; i++) {
     const char = urls.charCodeAt(i)
@@ -360,42 +390,34 @@ function getProductsHash(products) {
 function checkProductsChanged(products) {
   const currentHash = getProductsHash(products)
   const savedHash = localStorage.getItem(PRODUCTS_HASH_KEY)
-
   if (savedHash !== currentHash) {
     console.log("[IMG-STATE] Productos cambiaron, detectando nuevas imágenes...")
     localStorage.setItem(PRODUCTS_HASH_KEY, currentHash)
 
-    // Obtener solo las URLs nuevas
     const currentUrls = new Set(
       products.map((p) => optimizeImageUrl(p.imagen_url)).filter((url) => url && url !== "/images/ProductImages.jpg"),
     )
-
     const newUrls = Array.from(currentUrls).filter((url) => !imageLoadState.loadedImages.has(url))
     console.log(`[IMG-STATE] ${newUrls.length} imágenes nuevas detectadas`)
-
     return { changed: true, newUrls }
   }
-
   return { changed: false, newUrls: [] }
 }
 
 // ============================================
 // SERVICE WORKER Y CACHÉ DE IMÁGENES
 // ============================================
-
 async function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     try {
       serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js")
       console.log("✅ Service Worker registrado para caché de imágenes")
-
       navigator.serviceWorker.addEventListener("message", (event) => {
         if (event.data && event.data.type === "PRELOAD_PROGRESS") {
           console.log(
             `[IMG-LOAD] Progreso: ${event.data.loaded}/${event.data.total} (Lote ${event.data.batch}/${event.data.totalBatches})`,
           )
         }
-
         if (event.data && event.data.type === "PRELOAD_COMPLETE") {
           console.log(`[IMG-LOAD] ✅ Precarga completada: ${event.data.count}/${event.data.total} imágenes`)
         }
@@ -411,11 +433,9 @@ function pauseBackgroundDownloads() {
     console.log("[IMG-PRIORITY] ⏸️ Descargas ya pausadas")
     return
   }
-
   console.log("[IMG-PRIORITY] ⏸️ PAUSANDO descargas en segundo plano")
   imageLoadState.isPaused = true
 
-  // Cancelar descarga actual si existe
   if (imageLoadState.currentAbortController) {
     imageLoadState.currentAbortController.abort()
     console.log("[IMG-PRIORITY] ❌ Descarga actual cancelada")
@@ -427,11 +447,9 @@ function resumeBackgroundDownloads() {
     console.log("[IMG-PRIORITY] ▶️ Descargas ya activas")
     return
   }
-
   console.log("[IMG-PRIORITY] ▶️ REANUDANDO descargas en segundo plano")
   imageLoadState.isPaused = false
 
-  // Reanudar proceso de carga si hay imágenes pendientes
   if (imageLoadState.backgroundQueue.length > 0) {
     console.log(`[IMG-PRIORITY] 📋 Continuando con ${imageLoadState.backgroundQueue.length} imágenes en cola`)
     setTimeout(() => processBackgroundQueue(), 1000)
@@ -443,22 +461,16 @@ async function loadPriorityImages(urls) {
     console.log("[IMG-PRIORITY] ⚠️ No hay imágenes prioritarias para cargar")
     return
   }
-
   console.log(`[IMG-PRIORITY] 🚀 Cargando ${urls.length} imágenes PRIORITARIAS`)
 
-  // Pausar descargas en segundo plano
   pauseBackgroundDownloads()
 
   const cache = await caches.open("sonimax-images-store")
-
-  // Filtrar solo las que no están cargadas
   const urlsToLoad = urls.filter((url) => !imageLoadState.loadedImages.has(url))
-
   console.log(`[IMG-PRIORITY] 📊 ${urlsToLoad.length} imágenes prioritarias necesitan descarga`)
 
   const priorityPromises = urlsToLoad.map(async (url) => {
     try {
-      // Verificar si ya está en caché
       const cachedResponse = await cache.match(url)
       if (cachedResponse) {
         imageLoadState.loadedImages.add(url)
@@ -467,21 +479,16 @@ async function loadPriorityImages(urls) {
         return
       }
 
-      // Descargar con alta prioridad
       console.log(`[IMG-PRIORITY] ⬇️ Descargando PRIORITARIA: ${url.substring(url.lastIndexOf("/") + 1)}`)
-
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 8000)
-
       const response = await fetch(url, {
         mode: "no-cors",
         cache: "force-cache",
         signal: controller.signal,
-        priority: "high", // Alta prioridad
+        priority: "high",
       })
-
       clearTimeout(timeoutId)
-
       if (response) {
         await cache.put(url, response)
         imageLoadState.loadedImages.add(url)
@@ -498,11 +505,9 @@ async function loadPriorityImages(urls) {
   })
 
   await Promise.allSettled(priorityPromises)
-
   saveImageLoadState()
-
   setTimeout(() => {
-    console.log("[IMG-PRIORITY] ⏱️ Reanudando descargas en segundo plano...")
+    console.log("[IMG-PRIORITY] ⏱️ Reanundando descargas en segundo plano...")
     resumeBackgroundDownloads()
   }, 500)
 }
@@ -512,7 +517,6 @@ async function processBackgroundQueue() {
     console.log("[IMG-PRIORITY] ⏸️ Proceso pausado, esperando...")
     return
   }
-
   if (imageLoadState.backgroundQueue.length === 0) {
     console.log("[IMG-PRIORITY] ✅ Cola de segundo plano vacía")
     return
@@ -520,21 +524,17 @@ async function processBackgroundQueue() {
 
   const cache = await caches.open("sonimax-images-store")
   const BATCH_SIZE = 10
-
   while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
     const batch = imageLoadState.backgroundQueue.splice(0, BATCH_SIZE)
-
     console.log(
       `[IMG-PRIORITY] 📦 Procesando lote de ${batch.length} imágenes (${imageLoadState.backgroundQueue.length} restantes)`,
     )
-
     for (const url of batch) {
       if (imageLoadState.isPaused) {
         console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
         imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
         return
       }
-
       try {
         const cachedResponse = await cache.match(url)
         if (cachedResponse) {
@@ -544,17 +544,13 @@ async function processBackgroundQueue() {
 
         const controller = new AbortController()
         imageLoadState.currentAbortController = controller
-
         const timeoutId = setTimeout(() => controller.abort(), 10000)
-
         const response = await fetch(url, {
           mode: "no-cors",
           cache: "force-cache",
           signal: controller.signal,
         })
-
         clearTimeout(timeoutId)
-
         if (response) {
           await cache.put(url, response)
           imageLoadState.loadedImages.add(url)
@@ -564,21 +560,18 @@ async function processBackgroundQueue() {
       } catch (error) {
         if (error.name === "AbortError") {
           console.log(`[IMG-PRIORITY] ⏸️ Descarga cancelada: ${url.substring(url.lastIndexOf("/") + 1)}`)
-          imageLoadState.backgroundQueue.unshift(url) // Devolver a la cola
+          imageLoadState.backgroundQueue.unshift(url)
         } else {
           console.log(`[IMG-PRIORITY] ❌ Error: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`)
           const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
           imageLoadState.failedImages.set(url, attemptCount)
         }
       }
-
       imageLoadState.currentAbortController = null
     }
-
     await new Promise((resolve) => setTimeout(resolve, 50))
     saveImageLoadState()
   }
-
   console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
 }
 
@@ -587,18 +580,14 @@ async function preloadAllImages() {
     console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
     return
   }
-
   loadImageLoadState()
-
   const { changed, newUrls } = checkProductsChanged(allProducts)
-
   const allImageUrls = allProducts
     .map((p) => p.imagen_url)
     .filter((url) => url && url !== "/images/ProductImages.jpg")
     .map((url) => optimizeImageUrl(url))
 
   let urlsToLoad = []
-
   if (changed && newUrls.length > 0) {
     urlsToLoad = newUrls
     console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
@@ -606,12 +595,10 @@ async function preloadAllImages() {
     urlsToLoad = allImageUrls.filter(
       (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
     )
-
     if (urlsToLoad.length === 0) {
       console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
       return
     }
-
     console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
   }
 
@@ -621,12 +608,9 @@ async function preloadAllImages() {
   }
 
   imageLoadState.inProgress = true
-
   imageLoadState.backgroundQueue = [...urlsToLoad]
   console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
-
   await processBackgroundQueue()
-
   imageLoadState.inProgress = false
   saveImageLoadState()
 }
@@ -635,11 +619,7 @@ async function loadImagesWithRetry(urls) {
   const cache = await caches.open("sonimax-images-store")
   const BATCH_SIZE = 10
   const CONCURRENT_BATCHES = 4
-
   console.log(`[IMG-LOAD] 🚀 Iniciando carga de ${urls.length} imágenes...`)
-  console.log(`[IMG-LOAD] 📊 Ya cargadas: ${imageLoadState.loadedImages.size}`)
-  console.log(`[IMG-LOAD] 📊 Con errores previos: ${imageLoadState.failedImages.size}`)
-  console.log(`[IMG-LOAD] 📊 Por cargar ahora: ${urls.length}`)
 
   const batches = []
   for (let i = 0; i < urls.length; i += BATCH_SIZE) {
@@ -648,37 +628,25 @@ async function loadImagesWithRetry(urls) {
 
   let totalLoaded = 0
   let totalFailed = 0
-
   for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
     const batchGroup = []
-
     for (let j = 0; j < CONCURRENT_BATCHES && i + j < batches.length; j++) {
       const batchIndex = i + j
       batchGroup.push(processBatch(cache, batches[batchIndex], batchIndex + 1, batches.length))
     }
-
     const results = await Promise.allSettled(batchGroup)
-
     results.forEach((result) => {
       if (result.status === "fulfilled") {
         totalLoaded += result.value.loaded
         totalFailed += result.value.failed
       }
     })
-
-    const remaining = urls.length - (totalLoaded + totalFailed)
-    console.log(
-      `[IMG-LOAD] 📊 Progreso: ${totalLoaded} exitosas, ${totalFailed} fallidas, ${remaining} restantes de ${urls.length} totales`,
-    )
-
     saveImageLoadState()
-
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
 
   console.log(`[IMG-LOAD] ✅ Carga inicial completada`)
   console.log(`[IMG-LOAD] 📊 Resultado: ${totalLoaded} exitosas, ${totalFailed} fallidas de ${urls.length} totales`)
-  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas en total`)
 
   if (totalFailed > 0) {
     console.log(`[IMG-LOAD] 🔄 Iniciando proceso de reintentos para ${totalFailed} imágenes fallidas...`)
@@ -689,7 +657,6 @@ async function loadImagesWithRetry(urls) {
 async function processBatch(cache, batch, batchNum, totalBatches) {
   let loaded = 0
   let failed = 0
-
   const promises = batch.map(async (url) => {
     try {
       const cachedResponse = await cache.match(url)
@@ -702,15 +669,12 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
-
       const response = await fetch(url, {
         mode: "no-cors",
         cache: "force-cache",
         signal: controller.signal,
       })
-
       clearTimeout(timeoutId)
-
       if (response) {
         await cache.put(url, response)
         imageLoadState.loadedImages.add(url)
@@ -718,7 +682,6 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
         console.log(`[IMG-LOAD] ✅ Descargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
         return { success: true, cached: false }
       }
-
       console.log(`[IMG-LOAD] ❌ Sin respuesta: ${url.substring(url.lastIndexOf("/") + 1)}`)
       return { success: false, error: "No response" }
     } catch (error) {
@@ -732,7 +695,6 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
   })
 
   const results = await Promise.allSettled(promises)
-
   results.forEach((result) => {
     if (result.status === "fulfilled" && result.value.success) {
       loaded++
@@ -740,9 +702,7 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
       failed++
     }
   })
-
   console.log(`[IMG-LOAD] Lote ${batchNum}/${totalBatches}: ${loaded} exitosas, ${failed} fallidas`)
-
   return { loaded, failed }
 }
 
@@ -758,35 +718,30 @@ async function retryFailedImages(cache) {
 
   console.log(`[IMG-LOAD] 🔄 Reintentando ${failedUrls.length} imágenes fallidas...`)
   console.log(`[IMG-LOAD] ⏳ Esperando ${RETRY_DELAY / 1000} segundos antes de reintentar...`)
-
   await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY))
 
   let retrySuccess = 0
   let retryFailed = 0
-
   const RETRY_CONCURRENT = 5
+
   for (let i = 0; i < failedUrls.length; i += RETRY_CONCURRENT) {
     const batch = failedUrls.slice(i, i + RETRY_CONCURRENT)
-
     const retryPromises = batch.map(async (url) => {
       const currentAttempt = imageLoadState.failedImages.get(url) || 0
-
       console.log(
-        `[IMG-LOAD] 🔄 Reintentando intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(url.lastIndexOf("/") + 1)}`,
+        `[IMG-LOAD] 🔄 Reintentando intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(
+          url.lastIndexOf("/") + 1,
+        )}`,
       )
-
       try {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 10000)
-
         const response = await fetch(url, {
           mode: "no-cors",
           cache: "force-cache",
           signal: controller.signal,
         })
-
         clearTimeout(timeoutId)
-
         if (response) {
           await cache.put(url, response)
           imageLoadState.loadedImages.add(url)
@@ -806,20 +761,19 @@ async function retryFailedImages(cache) {
         imageLoadState.failedImages.set(url, attempts)
         retryFailed++
         console.log(
-          `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+          `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(
+            url.lastIndexOf("/") + 1,
+          )} - ${error.message}`,
         )
         return { success: false }
       }
     })
-
     await Promise.allSettled(retryPromises)
-
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 
   console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidas`)
   console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas`)
-
   saveImageLoadState()
 
   const stillFailed = Array.from(imageLoadState.failedImages.entries()).filter(
@@ -835,7 +789,6 @@ async function retryFailedImages(cache) {
     const permanentlyFailed = Array.from(imageLoadState.failedImages.entries()).filter(
       ([url, attempts]) => attempts >= MAX_RETRY_ATTEMPTS,
     )
-
     if (permanentlyFailed.length > 0) {
       console.log(
         `[IMG-LOAD] ⚠️ ${permanentlyFailed.length} imágenes no pudieron cargarse después de ${MAX_RETRY_ATTEMPTS} intentos:`,
@@ -853,17 +806,14 @@ async function retryFailedImages(cache) {
 // ============================================
 // OPTIMIZACIÓN DE IMÁGENES
 // ============================================
-
 function optimizeImageUrl(url) {
   if (!url || url === "/images/ProductImages.jpg") {
     return url
   }
-
   if (url.includes("ibb.co")) {
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=400&quality=70`
   }
-
   return url
 }
 
@@ -871,12 +821,10 @@ function createImagePlaceholder(url) {
   if (!url || url === "/images/ProductImages.jpg") {
     return url
   }
-
   if (url.includes("ibb.co")) {
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=50&quality=30`
   }
-
   return url
 }
 
@@ -888,13 +836,11 @@ function initImageObserver() {
           if (entry.isIntersecting) {
             const img = entry.target
             const fullSrc = img.dataset.src
-
             if (fullSrc) {
               console.log(
                 `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
               )
               loadPriorityImages([fullSrc])
-
               const tempImg = new Image()
               tempImg.onload = () => {
                 img.src = fullSrc
@@ -911,7 +857,6 @@ function initImageObserver() {
                 addRetryButton(img, fullSrc)
               }
               tempImg.src = fullSrc
-
               observer.unobserve(img)
             }
           }
@@ -926,12 +871,10 @@ function initImageObserver() {
 }
 
 function addRetryButton(imgElement, imageUrl) {
-  // Verificar si ya existe un botón de retry
   const existingBtn = imgElement.parentElement.querySelector(".image-retry-btn")
   if (existingBtn) return
 
   console.log(`[IMG-RETRY] 🔄 Agregando botón de retry para: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
-
   const retryBtn = document.createElement("button")
   retryBtn.className = "image-retry-btn"
   retryBtn.innerHTML = `
@@ -940,42 +883,33 @@ function addRetryButton(imgElement, imageUrl) {
     </svg>
   `
   retryBtn.title = "Reintentar cargar imagen"
-
   retryBtn.addEventListener("click", async (e) => {
     e.stopPropagation()
     console.log(`[IMG-RETRY] 🔄 Reintentando carga: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
-
     retryBtn.classList.add("spinning")
-
     try {
       const cache = await caches.open("sonimax-images-store")
       await cache.delete(imageUrl)
       imageLoadState.loadedImages.delete(imageUrl)
       imageLoadState.failedImages.delete(imageUrl)
-
       console.log(`[IMG-RETRY] 🗑️ Caché limpiada para: ${imageUrl.substring(imageUrl.lastIndexOf("/") + 1)}`)
 
       const cacheBustUrl = imageUrl.includes("?") ? `${imageUrl}&_t=${Date.now()}` : `${imageUrl}?_t=${Date.now()}`
 
-      // Intentar cargar la imagen con cache busting
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
-
       const response = await fetch(cacheBustUrl, {
         mode: "no-cors",
-        cache: "reload", // Forzar recarga desde servidor
+        cache: "reload",
         signal: controller.signal,
       })
-
       clearTimeout(timeoutId)
-
       if (response) {
         await cache.put(imageUrl, response.clone())
         imageLoadState.loadedImages.add(imageUrl)
         console.log(`[IMG-RETRY] 💾 Imagen guardada en caché`)
       }
 
-      // Cargar la imagen en el elemento
       const tempImg = new Image()
       tempImg.onload = () => {
         imgElement.src = imageUrl
@@ -995,14 +929,12 @@ function addRetryButton(imgElement, imageUrl) {
       console.log(`[IMG-RETRY] ❌ Error en retry: ${error.message}`)
     }
   })
-
   imgElement.parentElement.appendChild(retryBtn)
 }
 
 // ============================================
-// SISTEMA DE BANNERS (ROJO Y NEGRO)
+// SISTEMA DE BANNERS
 // ============================================
-
 async function loadBanners() {
   try {
     const { data, error } = await window.supabaseClient
@@ -1012,15 +944,12 @@ async function loadBanners() {
       .order("posicion", { ascending: true })
 
     if (error) throw error
-
     banners = data || []
-
     if (banners.length > 0) {
       displayBanner(0)
       startBannerAutoPlay()
       renderBannerIndicators()
     }
-
     console.log(`✅ ${banners.length} banners cargados`)
   } catch (error) {
     console.error("❌ Error cargando banners:", error)
@@ -1030,16 +959,13 @@ async function loadBanners() {
 
 function displayBanner(index) {
   if (banners.length === 0) return
-
   currentBannerIndex = index % banners.length
   const banner = banners[currentBannerIndex]
-
   const bannerImage = document.getElementById("banner-image")
   if (bannerImage) {
     bannerImage.src = banner.imagen_url
     bannerImage.alt = banner.titulo
   }
-
   updateBannerIndicators()
 }
 
@@ -1047,10 +973,9 @@ function startBannerAutoPlay() {
   if (bannerAutoPlayInterval) {
     clearInterval(bannerAutoPlayInterval)
   }
-
   bannerAutoPlayInterval = setInterval(() => {
     nextBanner()
-  }, 5000) // Cambia cada 5 segundos
+  }, 5000)
 }
 
 function nextBanner() {
@@ -1072,9 +997,7 @@ function restartBannerAutoPlay() {
 function renderBannerIndicators() {
   const container = document.getElementById("banner-indicators")
   if (!container) return
-
   container.innerHTML = ""
-
   banners.forEach((_, index) => {
     const dot = document.createElement("button")
     dot.className = `banner-indicator w-3 h-3 rounded-full transition-all ${
@@ -1107,21 +1030,16 @@ async function loadBannersForModal() {
       .from("banners")
       .select("*")
       .order("posicion", { ascending: true })
-
     if (error) throw error
-
     const list = document.getElementById("banners-list")
     const noMsg = document.getElementById("no-banners-msg")
-
     if (!data || data.length === 0) {
       list.innerHTML = ""
       noMsg.classList.remove("hidden")
       return
     }
-
     noMsg.classList.add("hidden")
     list.innerHTML = ""
-
     data.forEach((banner) => {
       const item = document.createElement("div")
       item.className = "p-4 border-2 border-gray-200 rounded-xl hover:border-red-400 transition-all"
@@ -1142,20 +1060,16 @@ async function loadBannersForModal() {
           </div>
         </div>
       `
-
       const toggleBtn = item.querySelector(".toggle-banner-btn")
       const deleteBtn = item.querySelector(".delete-banner-btn")
-
       toggleBtn.addEventListener("click", async () => {
         await toggleBannerActive(banner.id, !banner.activo)
       })
-
       deleteBtn.addEventListener("click", async () => {
         if (confirm(`¿Eliminar banner "${banner.titulo}"?`)) {
           await deleteBanner(banner.id)
         }
       })
-
       list.appendChild(item)
     })
   } catch (error) {
@@ -1166,17 +1080,14 @@ async function loadBannersForModal() {
 async function addBanner() {
   const title = document.getElementById("banner-title-input").value.trim()
   const url = document.getElementById("banner-url-input").value.trim()
-
   if (!title || !url) {
     alert("Por favor completa todos los campos")
     return
   }
-
   if (!url.startsWith("http")) {
     alert("Por favor ingresa una URL válida que comience con http:// o https://")
     return
   }
-
   try {
     const { data, error } = await window.supabaseClient
       .from("banners")
@@ -1187,17 +1098,12 @@ async function addBanner() {
         posicion: 0,
       })
       .select()
-
     if (error) throw error
-
     console.log("✅ Banner agregado:", data)
-
     document.getElementById("banner-title-input").value = ""
     document.getElementById("banner-url-input").value = ""
-
     loadBannersForModal()
     loadBanners()
-
     alert("¡Banner agregado exitosamente!")
   } catch (error) {
     console.error("❌ Error agregando banner:", error)
@@ -1208,9 +1114,7 @@ async function addBanner() {
 async function toggleBannerActive(bannerId, active) {
   try {
     const { error } = await window.supabaseClient.from("banners").update({ activo: active }).eq("id", bannerId)
-
     if (error) throw error
-
     console.log(`✅ Banner ${bannerId} actualizado`)
     loadBannersForModal()
     loadBanners()
@@ -1223,9 +1127,7 @@ async function toggleBannerActive(bannerId, active) {
 async function deleteBanner(bannerId) {
   try {
     const { error } = await window.supabaseClient.from("banners").delete().eq("id", bannerId)
-
     if (error) throw error
-
     console.log(`✅ Banner ${bannerId} eliminado`)
     loadBannersForModal()
     loadBanners()
@@ -1238,18 +1140,13 @@ async function deleteBanner(bannerId) {
 // ============================================
 // INICIALIZACIÓN
 // ============================================
-
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("🚀 Iniciando SONIMAX MÓVIL...")
-
   await registerServiceWorker()
-
   initImageObserver()
-
   const {
     data: { session },
   } = await window.supabaseClient.auth.getSession()
-
   if (session) {
     console.log("✅ Sesión activa encontrada")
     await loadUserData(session.user.id)
@@ -1260,7 +1157,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("ℹ️ No hay sesión activa")
     showLogin()
   }
-
   setupEventListeners()
 })
 
@@ -1268,24 +1164,19 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   e.preventDefault()
   const username = document.getElementById("login-username").value.trim().toLowerCase()
   const password = document.getElementById("login-password").value
-
   showAuthMessage("Iniciando sesión...", "info")
-
   try {
     const internalEmail = `${username}@sonimax.internal`
-
     const { data, error } = await window.supabaseClient.auth.signInWithPassword({
       email: internalEmail,
       password: password,
     })
-
     if (error) {
       if (error.message.includes("Invalid login credentials")) {
         throw new Error("Usuario o contraseña incorrectos")
       }
       throw error
     }
-
     console.log("✅ Login exitoso")
     await loadUserData(data.user.id)
     loadCartFromStorage()
@@ -1307,22 +1198,17 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
   const name = document.getElementById("register-name").value.trim()
   const username = document.getElementById("register-username").value.trim().toLowerCase()
   const password = document.getElementById("register-password").value
-
   showAuthMessage("Creando cuenta...", "info")
-
   try {
     const { data: existingUser } = await window.supabaseClient
       .from("users")
       .select("username")
       .eq("username", username)
       .single()
-
     if (existingUser) {
       throw new Error("El nombre de usuario ya está en uso")
     }
-
     const internalEmail = `${username}@sonimax.internal`
-
     const { data, error } = await window.supabaseClient.auth.signUp({
       email: internalEmail,
       password: password,
@@ -1333,21 +1219,16 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
         },
       },
     })
-
     if (error) throw error
-
     const { error: updateError } = await window.supabaseClient
       .from("users")
       .update({ username: username, name: name })
       .eq("auth_id", data.user.id)
-
     if (updateError) {
       console.error("Error actualizando usuario:", updateError)
     }
-
     console.log("✅ Registro exitoso")
     showAuthMessage("¡Cuenta creada exitosamente! Iniciando sesión...", "success")
-
     setTimeout(async () => {
       await loadUserData(data.user.id)
       showApp()
@@ -1370,22 +1251,17 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
   const username = document.getElementById("new-user-username").value.trim().toLowerCase()
   const password = document.getElementById("new-user-password").value
   const role = document.getElementById("new-user-role").value
-
   showCreateUserMessage("Creando usuario...", "info")
-
   try {
     const { data: existingUser } = await window.supabaseClient
       .from("users")
       .select("username")
       .eq("username", username)
       .maybeSingle()
-
     if (existingUser) {
       throw new Error("El nombre de usuario ya está en uso")
     }
-
     const internalEmail = `${username}@sonimax.internal`
-
     const { data, error } = await window.supabaseClient.auth.signUp({
       email: internalEmail,
       password: password,
@@ -1397,11 +1273,8 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
         },
       },
     })
-
     if (error) throw error
-
-    await new Promise((resolve) => setTimeout(resolve, 500))
-
+    await new Promise((resolve) => setTimeout(resolve, 50))
     const { error: updateError } = await window.supabaseClient
       .from("users")
       .update({
@@ -1409,17 +1282,13 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
         created_by: currentUser.auth_id,
       })
       .eq("auth_id", data.user.id)
-
     if (updateError) {
       console.error("Error actualizando rol:", updateError)
       throw new Error("Usuario creado pero no se pudo asignar el rol correctamente")
     }
-
     console.log("✅ Usuario creado exitosamente con rol:", role)
     showCreateUserMessage(`Usuario "${username}" creado exitosamente con rol de ${role}`, "success")
-
     document.getElementById("create-user-form").reset()
-
     setTimeout(() => {
       document.getElementById("create-user-modal").classList.add("hidden")
     }, 2000)
@@ -1431,29 +1300,23 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
 
 async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
-
   try {
     const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
-
     if (error) {
       console.error("Error obteniendo datos:", error)
       throw error
     }
-
     if (!data) {
       console.error("No se encontró el usuario")
       throw new Error("Usuario no encontrado")
     }
-
     currentUser = data
     currentUserRole = data.role
-
     console.log("✅ Datos de usuario cargados:", {
       username: data.username,
       name: data.name,
       role: data.role,
     })
-
     updateUIForRole()
   } catch (error) {
     console.error("❌ Error al cargar datos del usuario:", error)
@@ -1464,18 +1327,15 @@ async function loadUserData(userId) {
 
 function updateUIForRole() {
   console.log("Actualizando UI para rol:", currentUserRole)
-
   const roleBadge = document.getElementById("user-role-badge")
   const adminSection = document.getElementById("admin-section")
   const gestorSection = document.getElementById("gestor-section")
   const manageBannersBtn = document.getElementById("manage-banners-btn")
-
   if (roleBadge) {
     roleBadge.textContent = `${currentUser.name} (${currentUserRole})`
     roleBadge.className = `role-badge-${currentUserRole}`
     roleBadge.classList.remove("hidden")
   }
-
   if (currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     gestorSection?.classList.remove("hidden")
@@ -1520,7 +1380,17 @@ function showApp() {
   document.getElementById("loading-screen").classList.add("hidden")
   document.getElementById("login-screen").classList.add("hidden")
   document.getElementById("app-screen").classList.remove("hidden")
-  loadProducts()
+
+  const stateRestored = restoreUIState()
+
+  if (!stateRestored) {
+    console.log("[UI-STATE] No hay estado guardado, cargando productos normally")
+    loadProducts()
+  } else {
+    console.log("[UI-STATE] Usando estado restaurado, renderizando con estado previo")
+    renderDepartments()
+    renderProducts()
+  }
 
   startAutoRefresh()
   setupVisibilityListener()
@@ -1529,10 +1399,8 @@ function showApp() {
 function showAuthMessage(message, type) {
   const errorDiv = document.getElementById("auth-error")
   const successDiv = document.getElementById("auth-success")
-
   errorDiv.classList.add("hidden")
   successDiv.classList.add("hidden")
-
   if (type === "error") {
     errorDiv.textContent = message
     errorDiv.classList.remove("hidden")
@@ -1548,10 +1416,8 @@ function showAuthMessage(message, type) {
 function showCreateUserMessage(message, type) {
   const errorDiv = document.getElementById("create-user-error")
   const successDiv = document.getElementById("create-user-success")
-
   errorDiv.classList.add("hidden")
   successDiv.classList.add("hidden")
-
   if (type === "error") {
     errorDiv.textContent = message
     errorDiv.classList.remove("hidden")
@@ -1580,24 +1446,20 @@ function showImageModal(imageSrc, productName) {
       </div>
     `
     document.body.appendChild(imageModal)
-
     document.getElementById("close-image-modal").addEventListener("click", closeImageModal)
     imageModal.addEventListener("click", (e) => {
       if (e.target === imageModal) {
         closeImageModal()
       }
     })
-
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
         closeImageModal()
       }
     })
   }
-
   document.getElementById("modal-image").src = optimizeImageUrl(imageSrc)
   document.getElementById("modal-image-title").textContent = productName
-
   imageModal.classList.remove("hidden")
   document.body.style.overflow = "hidden"
 }
@@ -1617,38 +1479,29 @@ function setupEventListeners() {
     document.getElementById("show-login-btn").classList.add("auth-tab-active")
     document.getElementById("show-register-btn").classList.remove("auth-tab-active")
   })
-
   document.getElementById("show-register-btn")?.addEventListener("click", () => {
     document.getElementById("login-form").classList.add("hidden")
     document.getElementById("register-form").classList.remove("hidden")
     document.getElementById("show-register-btn").classList.add("auth-tab-active")
     document.getElementById("show-login-btn").classList.remove("auth-tab-active")
   })
-
   document.getElementById("manage-banners-btn")?.addEventListener("click", () => {
     document.getElementById("banners-modal").classList.remove("hidden")
     loadBannersForModal()
   })
-
   document.getElementById("close-banners-modal")?.addEventListener("click", () => {
     document.getElementById("banners-modal").classList.add("hidden")
   })
-
   document.getElementById("add-banner-btn")?.addEventListener("click", addBanner)
-
   document.getElementById("banner-prev")?.addEventListener("click", () => {
     previousBanner()
   })
-
   document.getElementById("banner-next")?.addEventListener("click", () => {
     nextBanner()
   })
-
   document.getElementById("create-user-button")?.addEventListener("click", () => {
     const roleSelect = document.getElementById("new-user-role")
-
     roleSelect.innerHTML = ""
-
     if (currentUserRole === "gestor") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
@@ -1663,36 +1516,28 @@ function setupEventListeners() {
         <option value="admin">Administrador</option>
       `
     }
-
     document.getElementById("create-user-modal").classList.remove("hidden")
     document.getElementById("create-user-error").classList.add("hidden")
     document.getElementById("create-user-success").classList.add("hidden")
   })
-
   document.getElementById("close-create-user-modal")?.addEventListener("click", () => {
     document.getElementById("create-user-modal").classList.add("hidden")
   })
-
   document.getElementById("open-sidebar")?.addEventListener("click", () => {
     document.getElementById("sidebar-menu").classList.add("open")
     document.getElementById("sidebar-overlay").classList.remove("hidden")
   })
-
   document.getElementById("close-sidebar")?.addEventListener("click", closeSidebar)
   document.getElementById("sidebar-overlay")?.addEventListener("click", closeSidebar)
-
   document.getElementById("cart-button")?.addEventListener("click", () => {
     document.getElementById("cart-modal").classList.remove("hidden")
     renderCart()
   })
-
   document.getElementById("close-cart")?.addEventListener("click", () => {
     document.getElementById("cart-modal").classList.add("hidden")
   })
-
   document.getElementById("global-search")?.addEventListener("input", handleGlobalSearch)
   document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
-
   document.getElementById("send-whatsapp")?.addEventListener("click", () => {
     if (currentUserRole === "admin") {
       showOrderDetailsModal()
@@ -1700,57 +1545,44 @@ function setupEventListeners() {
       sendWhatsAppOrder()
     }
   })
-
   document.getElementById("close-order-details-modal")?.addEventListener("click", () => {
     document.getElementById("order-details-modal").classList.add("hidden")
   })
-
   document.getElementById("cancel-order-details")?.addEventListener("click", () => {
     document.getElementById("order-details-modal").classList.add("hidden")
   })
-
   document.getElementById("confirm-order-details")?.addEventListener("click", confirmOrderDetails)
-
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
     document.getElementById("csv-modal").classList.remove("hidden")
-    // Resetear campos al abrir el modal
     selectedCSVFile = null
     selectedExcelFile = null
     document.getElementById("csv-file-input").value = ""
     document.getElementById("excel-file-input").value = ""
     document.getElementById("csv-file-name").classList.add("hidden")
     document.getElementById("excel-file-name").classList.add("hidden")
-    showCSVStatus("", "info") // Limpiar estado previo
+    showCSVStatus("", "info")
   })
-
   document.getElementById("close-csv-modal")?.addEventListener("click", () => {
     document.getElementById("csv-modal").classList.add("hidden")
   })
-
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
   document.getElementById("excel-file-input")?.addEventListener("change", handleExcelFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
-  document.getElementById("upload-excel-submit")?.addEventListener("click", handleExcelUpload) // Agregar listener para Excel
-
+  document.getElementById("upload-excel-submit")?.addEventListener("click", handleExcelUpload)
   document.getElementById("export-pdf-button")?.addEventListener("click", () => {
     document.getElementById("pdf-modal").classList.remove("hidden")
     loadDepartmentsForPDF()
   })
-
   document.getElementById("close-pdf-modal")?.addEventListener("click", () => {
     document.getElementById("pdf-modal").classList.add("hidden")
   })
-
   document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
-
   document.getElementById("close-quantity-modal")?.addEventListener("click", () => {
     document.getElementById("quantity-modal").classList.add("hidden")
   })
-
   document.getElementById("cancel-quantity")?.addEventListener("click", () => {
     document.getElementById("quantity-modal").classList.add("hidden")
   })
-
   document.getElementById("confirm-quantity")?.addEventListener("click", confirmQuantity)
 }
 
@@ -1761,54 +1593,30 @@ function closeSidebar() {
 
 async function loadProducts() {
   console.log("Iniciando carga de productos...")
-
   try {
     document.getElementById("products-loading").classList.remove("hidden")
     document.getElementById("products-grid").innerHTML = ""
-
     allProducts = []
-    let start = 0
-    const batchSize = 500
-    let hasMore = true
 
-    while (hasMore) {
-      const { data, error } = await window.supabaseClient
-        .from("products")
-        .select("*")
-        .order("nombre", { ascending: true })
-        .range(start, start + batchSize - 1)
-
-      if (error) throw error
-
-      if (data && data.length > 0) {
-        allProducts = [...allProducts, ...data]
-        console.log(`📦 Cargados ${allProducts.length} productos...`)
-
-        if (data.length < batchSize) {
-          hasMore = false
-        } else {
-          start += batchSize
-        }
-      } else {
-        hasMore = false
-      }
+    const cachedProducts = getProductsCache()
+    if (cachedProducts && cachedProducts.length > 0) {
+      allProducts = cachedProducts
+      console.log(`[PRODUCTS-CACHE] Usando ${allProducts.length} productos del caché`)
+    } else {
+      // Cargar de la base de datos
+      allProducts = await fetchAllProducts()
+      savProductsCache(allProducts)
     }
 
-    // Los productos ya vienen con is_new desde Supabase
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
-
     filteredProducts = allProducts
     currentPage = 1
-
     console.log("Renderizando departamentos...")
     renderDepartments()
-
     console.log("Renderizando productos...")
     renderProducts()
-
     console.log(`✅ ${allProducts.length} productos cargados en total`)
-
     setTimeout(() => {
       preloadAllImages()
     }, 2000)
@@ -1822,11 +1630,9 @@ async function loadProducts() {
 function renderDepartments() {
   const navContainer = document.getElementById("departments-nav")
   const sidebarContainer = document.getElementById("sidebar-departments")
-
   navContainer.innerHTML = ""
   sidebarContainer.innerHTML = ""
 
-  // Botón para Mercancía Recién Llegada
   const newProductsBtn = document.createElement("button")
   newProductsBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
   newProductsBtn.innerHTML = "🆕 Mercancía Recién Llegada"
@@ -1834,7 +1640,6 @@ function renderDepartments() {
   newProductsBtn.addEventListener("click", () => filterByDepartment("new"))
   navContainer.appendChild(newProductsBtn)
 
-  // Botón para Mercancía Más Vendida
   const bestSellingBtn = document.createElement("button")
   bestSellingBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm"
   bestSellingBtn.innerHTML = "🔥 Mercancía Más Vendida"
@@ -1842,9 +1647,7 @@ function renderDepartments() {
   bestSellingBtn.addEventListener("click", () => filterByDepartment("bestselling"))
   navContainer.appendChild(bestSellingBtn)
 
-  // Agregar todos los departamentos al sidebar
   const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
-
   const sidebarNewBtn = document.createElement("button")
   sidebarNewBtn.className =
     "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
@@ -1894,6 +1697,8 @@ function renderDepartments() {
 
 function filterByDepartment(dept) {
   currentDepartment = dept
+  currentPage = 1
+  saveUIState() // Guardar estado cuando cambia de departamento
 
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
@@ -1912,28 +1717,20 @@ function filterByDepartment(dept) {
   if (dept === "all") {
     filteredProducts = allProducts
   } else if (dept === "new") {
-    // Usar el nuevo campo is_new para filtrar y limitar a 20
     filteredProducts = allProducts.filter((p) => p.is_new).slice(0, 20)
   } else if (dept === "bestselling") {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
-      console.log("[SALES-DB] Primer item de sales:", salesData[0])
-      console.log("[SALES-DB] Primer producto en allProducts:", allProducts[0])
-
       filteredProducts = salesData
         .map((sale) => {
-          // Try to find using both possible field names
           const productId = sale.product_id || sale.id
           const fullProduct = allProducts.find((p) => p.id === productId || p.id === sale.product_id)
-
           if (!fullProduct) {
             console.log("[SALES-DB] ⚠️ Producto no encontrado para ID:", productId)
           }
-
           return fullProduct ? { ...fullProduct, total_sold: sale.total_sold } : null
         })
         .filter((p) => p !== null)
-
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
       renderProducts()
@@ -1950,10 +1747,8 @@ function filterByDepartment(dept) {
 
 function renderProducts() {
   console.log("Renderizando productos, página:", currentPage)
-
   const grid = document.getElementById("products-grid")
   const noProducts = document.getElementById("no-products")
-
   if (currentPage === 1) {
     grid.innerHTML = ""
   }
@@ -1964,13 +1759,11 @@ function renderProducts() {
   }
 
   noProducts.classList.add("hidden")
-
   const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE
   const endIndex = startIndex + PRODUCTS_PER_PAGE
   const productsToRender = filteredProducts.slice(startIndex, endIndex)
 
   const fragment = document.createDocumentFragment()
-
   productsToRender.forEach((product) => {
     try {
       const card = createProductCard(product)
@@ -1981,16 +1774,13 @@ function renderProducts() {
   })
 
   grid.appendChild(fragment)
-
   updateLoadMoreButton()
-
   console.log("Productos renderizados:", productsToRender.length)
 }
 
 function updateLoadMoreButton() {
   const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE)
   let loadMoreBtn = document.getElementById("load-more-btn")
-
   if (!loadMoreBtn) {
     loadMoreBtn = document.createElement("button")
     loadMoreBtn.id = "load-more-btn"
@@ -1998,11 +1788,9 @@ function updateLoadMoreButton() {
       "w-full max-w-md mx-auto mt-8 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-4 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg"
     loadMoreBtn.textContent = "Cargar más productos"
     loadMoreBtn.addEventListener("click", loadMoreProducts)
-
     const grid = document.getElementById("products-grid")
     grid.parentElement.appendChild(loadMoreBtn)
   }
-
   if (currentPage >= totalPages) {
     loadMoreBtn.classList.add("hidden")
   } else {
@@ -2013,7 +1801,6 @@ function updateLoadMoreButton() {
 
 function loadMoreProducts() {
   if (isLoadingMore) return
-
   isLoadingMore = true
   currentPage++
   renderProducts()
@@ -2023,7 +1810,6 @@ function loadMoreProducts() {
 function createProductCard(product) {
   const card = document.createElement("div")
   card.className = "product-card"
-
   const priceInfo = getPriceForRole(product)
 
   let priceHTML = ""
@@ -2104,7 +1890,6 @@ function createProductCard(product) {
     </div>
   `
 
-  // Añadir indicación visual para productos nuevos
   if (product.is_new) {
     const newProductBadge = document.createElement("span")
     newProductBadge.className =
@@ -2166,7 +1951,6 @@ function getPriceForRole(product) {
 
 function saveCartToStorage() {
   if (!currentUser) return
-
   const cartKey = `sonimax_cart_${currentUser.auth_id}`
   localStorage.setItem(cartKey, JSON.stringify(cart))
   console.log(`💾 Carrito guardado para usuario ${currentUser.username}`)
@@ -2174,10 +1958,8 @@ function saveCartToStorage() {
 
 function loadCartFromStorage() {
   if (!currentUser) return
-
   const cartKey = `sonimax_cart_${currentUser.auth_id}`
   const savedCart = localStorage.getItem(cartKey)
-
   if (savedCart) {
     try {
       cart = JSON.parse(savedCart)
@@ -2207,7 +1989,6 @@ function openQuantityModal(product) {
   const productInfo = document.getElementById("quantity-product-info")
   const quantityInput = document.getElementById("quantity-input")
   const observationInput = document.getElementById("observation-input")
-
   const priceInfo = getPriceForRole(product)
 
   let priceHTML = ""
@@ -2275,7 +2056,6 @@ function openQuantityModal(product) {
 function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
   const observation = document.getElementById("observation-input").value.trim()
-
   if (quantity < 1) {
     alert("La cantidad debe ser al menos 1")
     return
@@ -2317,13 +2097,10 @@ function addToCart(product, quantity, price, observation = "") {
     })
   }
 
-  // Registrar venta para estadísticas con el precio
   recordSaleToDatabase(product.id, quantity, price)
-
   saveCartToStorage()
   updateCartCount()
   animateCartButton()
-
   console.log(
     `✅ Agregado al carrito: ${product.nombre} x${quantity} a $${price.toFixed(2)}${observation ? ` (${observation})` : ""}`,
   )
@@ -2342,10 +2119,8 @@ function animateCartButton() {
 
 function renderCart() {
   console.log("Renderizando carrito con", cart.length, "items")
-
   const cartItems = document.getElementById("cart-items")
   const cartTotal = document.getElementById("cart-total")
-
   if (!cartItems || !cartTotal) {
     console.error("Error: elementos del carrito no encontrados")
     return
@@ -2365,7 +2140,6 @@ function renderCart() {
   }
 
   cartItems.innerHTML = ""
-
   let totalDetal = 0
   let totalMayor = 0
   let totalGmayor = 0
@@ -2373,7 +2147,6 @@ function renderCart() {
   cart.forEach((item, index) => {
     const cartItemDiv = document.createElement("div")
     cartItemDiv.className = "cart-item"
-
     const product = allProducts.find((p) => p.id === item.id)
     if (product) {
       totalDetal += (product.precio_cliente || 0) * item.quantity
@@ -2382,7 +2155,6 @@ function renderCart() {
     }
 
     const optimizedCartImage = optimizeImageUrl(item.imagen_url || "/images/ProductImages.jpg")
-
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
         <img src="${optimizedCartImage}"
@@ -2422,12 +2194,10 @@ function renderCart() {
       console.log("Disminuyendo cantidad del item", index)
       updateCartItemQuantityByIndex(index, -1)
     })
-
     increaseBtn.addEventListener("click", () => {
       console.log("Aumentando cantidad del item", index)
       updateCartItemQuantityByIndex(index, 1)
     })
-
     removeBtn.addEventListener("click", () => {
       console.log("Eliminando item", index)
       removeFromCartByIndex(index)
@@ -2437,7 +2207,6 @@ function renderCart() {
   })
 
   let totalHTML = ""
-
   if (currentUserRole === "gestor") {
     totalHTML = `
       <div class="space-y-2">
@@ -2472,9 +2241,7 @@ function renderCart() {
 
 function updateCartItemQuantityByIndex(index, change) {
   if (index < 0 || index >= cart.length) return
-
   cart[index].quantity += change
-
   if (cart[index].quantity <= 0) {
     removeFromCartByIndex(index)
   } else {
@@ -2486,7 +2253,6 @@ function updateCartItemQuantityByIndex(index, change) {
 
 function removeFromCartByIndex(index) {
   if (index < 0 || index >= cart.length) return
-
   cart.splice(index, 1)
   saveCartToStorage()
   updateCartCount()
@@ -2511,21 +2277,21 @@ function showOrderDetailsModal() {
             <h2 class="text-2xl font-bold text-gray-800">Detalles del Pedido</h2>
             <button id="close-order-details-modal" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">×</button>
           </div>
-          
+
           <div class="space-y-4">
             <div>
               <label for="order-responsables" class="block text-sm font-semibold text-gray-700 mb-2">Responsables:</label>
               <input type="text" id="order-responsables" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Ingrese los responsables">
             </div>
-            
+
             <div>
               <label for="order-sitio" class="block text-sm font-semibold text-gray-700 mb-2">Sitio:</label>
               <input type="text" id="order-sitio" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Ingrese el sitio" required>
             </div>
           </div>
-          
+
           <div id="order-details-error" class="hidden mt-4 p-4 bg-red-100 border border-red-300 text-red-700 rounded-xl text-sm font-medium"></div>
-          
+
           <div class="flex space-x-3 mt-6">
             <button id="cancel-order-details" class="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition-all">
               Cancelar
@@ -2538,17 +2304,13 @@ function showOrderDetailsModal() {
       </div>
     `
     document.body.appendChild(orderModal)
-
     document.getElementById("close-order-details-modal").addEventListener("click", () => {
       orderModal.classList.add("hidden")
     })
-
     document.getElementById("cancel-order-details").addEventListener("click", () => {
       orderModal.classList.add("hidden")
     })
-
     document.getElementById("confirm-order-details").addEventListener("click", confirmOrderDetails)
-
     orderModal.addEventListener("click", (e) => {
       if (e.target === orderModal) {
         orderModal.classList.add("hidden")
@@ -2580,18 +2342,14 @@ function confirmOrderDetails() {
   }
 
   errorDiv.classList.add("hidden")
-
   generateExcelAndSendOrder(responsables, sitio)
 }
 
 function generateExcelAndSendOrder(responsables, sitio) {
   console.log("Generando Excel y enviando pedido para admin...")
-
   try {
     const wb = window.XLSX.utils.book_new()
-
     const excelData = []
-
     excelData.push(["PEDIDO SONIMAX MÓVIL"])
     excelData.push([])
     excelData.push(["Cliente:", currentUser.name])
@@ -2601,19 +2359,15 @@ function generateExcelAndSendOrder(responsables, sitio) {
     excelData.push(["Sitio:", sitio])
     excelData.push(["Fecha:", new Date().toLocaleDateString()])
     excelData.push([])
-
     excelData.push(["CANTIDAD", "CÓDIGO", "DESCRIPCIÓN", "PRECIO UNITARIO", "SUBTOTAL", "OBSERVACIÓN"])
 
     let totalGmayor = 0
-
     cart.forEach((item) => {
       const product = allProducts.find((p) => p.id === item.id)
       const codigo = product ? product.descripcion || "S/C" : "S/C"
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
-
       totalGmayor += subtotal
-
       excelData.push([
         item.quantity,
         codigo,
@@ -2622,7 +2376,6 @@ function generateExcelAndSendOrder(responsables, sitio) {
         `$${subtotal.toFixed(2)}`,
         item.observation || "",
       ])
-
       recordSaleToDatabase(item.id, item.quantity, precioUnitario)
     })
 
@@ -2630,16 +2383,12 @@ function generateExcelAndSendOrder(responsables, sitio) {
     excelData.push(["", "", "", "", "TOTAL:", `$${totalGmayor.toFixed(2)}`])
 
     const ws = window.XLSX.utils.aoa_to_sheet(excelData)
-
     const colWidths = [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 30 }]
     ws["!cols"] = colWidths
-
     window.XLSX.utils.book_append_sheet(wb, ws, "Pedido")
 
     const fileName = `${sitio.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx`
-
     window.XLSX.writeFile(wb, fileName)
-
     console.log(`✅ Excel generado: ${fileName}`)
 
     let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
@@ -2649,44 +2398,34 @@ function generateExcelAndSendOrder(responsables, sitio) {
     }
     message += `*Sitio:* ${sitio}\n\n`
     message += `*PRODUCTOS:*\n`
-
     cart.forEach((item, index) => {
       const product = allProducts.find((p) => p.id === item.id)
       const codigo = product ? product.descripcion || "S/C" : "S/C"
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
-
       message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
       if (item.observation) {
         message += `\n   📝 _${item.observation}_`
       }
       message += `\n`
-
       if (index < cart.length - 1) {
         message += `\n`
       }
     })
-
     message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
     message += `\n\n📊 *Archivo Excel adjunto con detalles completos*`
 
     console.log("Mensaje generado:", message)
-
     const encodedMessage = encodeURIComponent(message)
     const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
-
     console.log("Abriendo WhatsApp...")
     window.open(whatsappURL, "_blank")
-
     clearCart()
-
     document.getElementById("cart-modal").classList.add("hidden")
-
     alert(`Pedido enviado por WhatsApp y Excel descargado como: ${fileName}\nEl carrito ha sido limpiado.`)
   } catch (error) {
     console.error("❌ Error al generar Excel:", error)
     alert("Error al generar el archivo Excel. Se enviará solo el mensaje de WhatsApp.")
-
     sendWhatsAppOrderFallback(responsables, sitio)
   }
 }
@@ -2699,41 +2438,33 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
   }
   message += `*Sitio:* ${sitio}\n\n`
   message += `*PRODUCTOS:*\n`
-
-  const totalGmayor = 0
-
+  let totalGmayor = 0
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
     const codigo = product ? product.descripcion || "S/C" : "S/C"
     const precioUnitario = product ? product.precio_gmayor || 0 : 0
     const subtotal = precioUnitario * item.quantity
-
+    totalGmayor += subtotal
     message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
     if (item.observation) {
       message += `\n   📝 _${item.observation}_`
     }
     message += `\n`
-
     if (index < cart.length - 1) {
       message += `\n`
     }
-
     recordSaleToDatabase(item.id, item.quantity, precioUnitario)
   })
-
   message += `\n\n*TOTAL G.MAYOR:* $${totalGmayor.toFixed(2)}`
 
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
-
   window.open(whatsappURL, "_blank")
   clearCart()
-  // No se llama a renderCart() aquí porque clearCart() ya lo hace.
 }
 
 function sendWhatsAppOrder() {
   console.log("Enviando pedido por WhatsApp...")
-
   if (cart.length === 0) {
     alert("El carrito está vacío")
     return
@@ -2751,13 +2482,11 @@ function sendWhatsAppOrder() {
     const product = allProducts.find((p) => p.id === item.id)
     const codigo = product ? product.descripcion || "S/C" : "S/C"
     const subtotal = item.price * item.quantity
-
     message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
     if (item.observation) {
       message += `\n   📝 _${item.observation}_`
     }
     message += `\n`
-
     if (index < cart.length - 1) {
       message += `\n`
     }
@@ -2778,7 +2507,6 @@ function sendWhatsAppOrder() {
   })
 
   message += `\n\n*TOTALES:*\n`
-
   if (currentUserRole === "gestor") {
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
@@ -2790,20 +2518,18 @@ function sendWhatsAppOrder() {
   }
 
   console.log("Mensaje generado:", message)
-
   const encodedMessage = encodeURIComponent(message)
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
-
   console.log("Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
-
   clearCart()
-
   document.getElementById("cart-modal").classList.add("hidden")
-
   alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
 }
 
+// ============================================
+// BÚSQUEDA Y FILTRADO
+// ============================================
 function normalizeText(text) {
   if (!text) return ""
   return text
@@ -2811,6 +2537,47 @@ function normalizeText(text) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
+}
+
+function normalizeForComparison(text) {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[°º]/g, "o") // Replace degree symbols
+    .replace(/[™®©]/g, "") // Remove trademark symbols
+    .replace(/[-_]/g, " ") // Replace hyphens and underscores with spaces
+    .replace(/\s+/g, " ") // Normalize spaces again after replacements
+}
+
+function calculateSimilarity(str1, str2) {
+  // Remove spaces for comparison
+  const s1 = str1.replace(/\s+/g, "")
+  const s2 = str2.replace(/\s+/g, "")
+
+  if (s1 === s2) return 1.0
+  if (s1.length === 0 || s2.length === 0) return 0
+
+  // Levenshtein distance algorithm
+  const matrix = Array(s2.length + 1)
+    .fill(null)
+    .map(() => Array(s1.length + 1).fill(0))
+
+  for (let i = 0; i <= s1.length; i++) matrix[0][i] = i
+  for (let j = 0; j <= s2.length; j++) matrix[j][0] = j
+
+  for (let j = 1; j <= s2.length; j++) {
+    for (let i = 1; i <= s1.length; i++) {
+      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1
+      matrix[j][i] = Math.min(matrix[j][i - 1] + 1, matrix[j - 1][i] + 1, matrix[j - 1][i - 1] + indicator)
+    }
+  }
+
+  const distance = matrix[s2.length][s1.length]
+  const maxLen = Math.max(s1.length, s2.length)
+  return 1.0 - distance / maxLen
 }
 
 function getSearchWords(query) {
@@ -2836,7 +2603,6 @@ function searchProducts(products, query) {
     const normalizedName = normalizeText(product.nombre)
     const normalizedDescription = normalizeText(product.descripcion)
     const normalizedDepartment = normalizeText(product.departamento)
-
     const combinedText = `${normalizedName} ${normalizedDescription} ${normalizedDepartment}`
 
     const allWordsFound = searchWords.every((word) => {
@@ -2856,19 +2622,18 @@ function searchProducts(products, query) {
   })
 }
 
-let searchTimeout // Declare searchTimeout
-let deptSearchTimeout // Declare deptSearchTimeout
+let searchTimeout
+let deptSearchTimeout
 
 function handleGlobalSearch(e) {
   const query = e.target.value.trim()
-
   clearTimeout(searchTimeout)
-
   const searchLoading = document.getElementById("search-loading")
 
   if (query === "") {
     filteredProducts = allProducts
     currentPage = 1
+    saveUIState() // Guardar estado al limpiar búsqueda
     renderProducts()
     if (searchLoading) searchLoading.classList.add("hidden")
     resumeBackgroundDownloads()
@@ -2879,20 +2644,18 @@ function handleGlobalSearch(e) {
 
   searchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda global:", query)
-
     filteredProducts = searchProducts(allProducts, query)
-
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     const searchResultUrls = filteredProducts
       .slice(0, 20)
       .map((p) => optimizeImageUrl(p.imagen_url))
       .filter((url) => url && url !== "/images/ProductImages.jpg")
-
     console.log(`[SEARCH] 🔍 Priorizando ${searchResultUrls.length} imágenes de búsqueda`)
     loadPriorityImages(searchResultUrls)
 
     currentPage = 1
+    saveUIState() // Guardar estado después de búsqueda
     renderProducts()
     if (searchLoading) searchLoading.classList.add("hidden")
   }, 300)
@@ -2900,7 +2663,6 @@ function handleGlobalSearch(e) {
 
 function handleDeptSearch(e) {
   const query = e.target.value.trim()
-
   clearTimeout(deptSearchTimeout)
 
   if (query === "") {
@@ -2910,29 +2672,28 @@ function handleDeptSearch(e) {
 
   deptSearchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda en departamento:", currentDepartment, "Query:", query)
-
     let productsInDept
+
     if (currentDepartment === "all") {
       productsInDept = allProducts
     } else if (currentDepartment === "new") {
       productsInDept = allProducts.filter((p) => p.is_new)
     } else if (currentDepartment === "bestselling") {
-      // Aquí se podría considerar re-ejecutar getBestSellingProducts si la lista se actualiza dinámicamente
-      // o usar una versión cacheada si es apropiado. Por ahora, asumimos que filteredProducts ya contiene los más vendidos si ese es el departamento.
-      productsInDept = filteredProducts // Usar los ya filtrados si 'bestselling' ya ha sido llamado
+      productsInDept = filteredProducts
     } else {
       productsInDept = allProducts.filter((p) => p.departamento === currentDepartment)
     }
 
     filteredProducts = searchProducts(productsInDept, query)
-
     console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
-
     currentPage = 1
     renderProducts()
   }, 300)
 }
 
+// ============================================
+// CARGA DE ARCHIVOS
+// ============================================
 let selectedCSVFile = null
 let selectedExcelFile = null
 
@@ -2955,47 +2716,32 @@ function handleExcelFileSelect(e) {
 async function parseExcelFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result)
         const workbook = window.XLSX.read(data, { type: "array" })
-
-        // Obtener la primera hoja
         const firstSheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[firstSheetName]
-
-        // Convertir a JSON
         const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 })
-
         console.log("[EXCEL] Datos parseados:", jsonData.length, "filas")
 
-        // Crear mapa de cantidades por código y descripción
         const cantidadesMap = new Map()
-
-        // Saltar encabezado (fila 0)
         for (let i = 1; i < jsonData.length; i++) {
           const row = jsonData[i]
-
-          // Columna A = Código (índice 0)
-          // Columna B = Nombre/Descripción (índice 1)
-          // Columna H = Existencia Actual (índice 7)
           const codigo = row[0] ? String(row[0]).trim() : ""
           const nombre = row[1] ? String(row[1]).trim() : ""
           const cantidad = row[7] ? Number.parseInt(row[7]) : 0
 
           if (codigo || nombre) {
-            // Crear múltiples claves para facilitar el match
-            const key1 = codigo.toLowerCase()
-            const key2 = nombre.toLowerCase()
-            const key3 = `${codigo}_${nombre}`.toLowerCase()
+            const key1 = normalizeForComparison(codigo)
+            const key2 = normalizeForComparison(nombre)
+            const key3 = normalizeForComparison(`${codigo} ${nombre}`)
 
             if (key1) cantidadesMap.set(key1, cantidad)
             if (key2) cantidadesMap.set(key2, cantidad)
             if (key3) cantidadesMap.set(key3, cantidad)
           }
         }
-
         console.log("[EXCEL] Cantidades extraídas:", cantidadesMap.size, "productos")
         resolve(cantidadesMap)
       } catch (error) {
@@ -3003,7 +2749,6 @@ async function parseExcelFile(file) {
         reject(error)
       }
     }
-
     reader.onerror = (error) => reject(error)
     reader.readAsArrayBuffer(file)
   })
@@ -3027,13 +2772,34 @@ async function handleExcelUpload() {
     const cantidadesMap = await parseExcelFile(selectedExcelFile)
     console.log("[EXCEL-UPLOAD] Cantidades extraídas:", cantidadesMap.size)
 
-    // Obtener todos los productos de la base de datos
-    const { data: products, error: fetchError } = await window.supabaseClient
-      .from("products")
-      .select("id, nombre, descripcion, cantidad_actual")
+    console.log("[EXCEL-UPLOAD] Cargando TODOS los productos con paginación...")
+    let products = []
+    let start = 0
+    const batchSize = 1000
+    let hasMore = true
 
-    if (fetchError) {
-      throw new Error(`Error obteniendo productos: ${fetchError.message}`)
+    while (hasMore) {
+      const { data, error } = await window.supabaseClient
+        .from("products")
+        .select("id, nombre, descripcion, cantidad_actual")
+        .range(start, start + batchSize - 1)
+
+      if (error) {
+        throw new Error(`Error obteniendo productos: ${error.message}`)
+      }
+
+      if (data && data.length > 0) {
+        products = [...products, ...data]
+        console.log(`[EXCEL-UPLOAD] 📦 ${products.length} productos cargados...`)
+
+        if (data.length < batchSize) {
+          hasMore = false
+        } else {
+          start += batchSize
+        }
+      } else {
+        hasMore = false
+      }
     }
 
     if (!products || products.length === 0) {
@@ -3042,52 +2808,104 @@ async function handleExcelUpload() {
 
     console.log("[EXCEL-UPLOAD] Productos en BD:", products.length)
 
-    // Actualizar cantidades de productos
     let updatedCount = 0
     const updateErrors = []
+    const unmatchedFromExcel = new Map(cantidadesMap)
 
     for (const product of products) {
-      const key1 = (product.descripcion || "").toLowerCase()
-      const key2 = (product.nombre || "").toLowerCase()
-      const key3 = `${product.descripcion}_${product.nombre}`.toLowerCase()
+      let newCantidad = 0
+      let matched = false
+      let bestMatchScore = 0
+      let bestMatchKey = null // Track the best matching key for fuzzy matches
 
-      const newCantidad = cantidadesMap.get(key1) || cantidadesMap.get(key2) || cantidadesMap.get(key3) || 0
+      const productDescNorm = normalizeForComparison(product.descripcion)
+      const productNameNorm = normalizeForComparison(product.nombre)
 
-      if (newCantidad !== product.cantidad_actual) {
-        const { error: updateError } = await window.supabaseClient
-          .from("products")
-          .update({ cantidad_actual: newCantidad })
-          .eq("id", product.id)
+      for (const [key, cantidad] of cantidadesMap.entries()) {
+        const keyNorm = normalizeForComparison(key)
 
-        if (updateError) {
-          updateErrors.push(`${product.nombre}: ${updateError.message}`)
-          console.error(`[EXCEL-UPLOAD] ❌ Error actualizando ${product.nombre}:`, updateError)
-        } else {
-          updatedCount++
-          console.log(`[EXCEL-UPLOAD] ✅ ${product.nombre}: ${newCantidad} unidades`)
+        if (keyNorm === productDescNorm || keyNorm === productNameNorm) {
+          // Tier 1: Exact match
+          newCantidad = cantidad
+          matched = true
+          unmatchedFromExcel.delete(key)
+          console.log(`[EXCEL-UPLOAD] ✅ Exact match: ${product.nombre} <- ${key}`)
+          break
+        }
+
+        if (productDescNorm.includes(keyNorm) || productNameNorm.includes(keyNorm)) {
+          // Tier 2: Substring match
+          newCantidad = cantidad
+          matched = true
+          unmatchedFromExcel.delete(key)
+          console.log(`[EXCEL-UPLOAD] ✅ Substring match: ${product.nombre} <- ${key}`)
+          break
+        }
+
+        // Tier 3: Fuzzy match with 70% threshold
+        const similarity = calculateSimilarity(keyNorm, productDescNorm)
+        const nameSimilarity = calculateSimilarity(keyNorm, productNameNorm)
+        const maxSimilarity = Math.max(similarity, nameSimilarity)
+
+        if (maxSimilarity > 0.7 && maxSimilarity > bestMatchScore) {
+          bestMatchScore = maxSimilarity
+          bestMatchKey = key // Save the key for later deletion
+          newCantidad = cantidad
+          matched = true
+          console.log(
+            `[EXCEL-UPLOAD] 🟡 Fuzzy match (${(maxSimilarity * 100).toFixed(0)}%): ${product.nombre} <- ${key}`,
+          )
+          // Don't delete yet - keep looking for better matches
+        }
+      }
+
+      if (matched) {
+        if (bestMatchScore > 0.7 && bestMatchKey) {
+          unmatchedFromExcel.delete(bestMatchKey) // Delete the best matching key found
+        }
+
+        if (newCantidad !== product.cantidad_actual) {
+          const { error: updateError } = await window.supabaseClient
+            .from("products")
+            .update({ cantidad_actual: newCantidad })
+            .eq("id", product.id)
+
+          if (updateError) {
+            updateErrors.push(`${product.nombre}: ${updateError.message}`)
+            console.error(`[EXCEL-UPLOAD] ❌ Error actualizando ${product.nombre}:`, updateError)
+          } else {
+            updatedCount++
+            console.log(`[EXCEL-UPLOAD] ✅ ${product.nombre}: ${newCantidad} unidades`)
+          }
         }
       }
     }
 
-    // Mostrar resumen
+    if (unmatchedFromExcel.size > 0) {
+      console.warn(`[EXCEL-UPLOAD] ⚠️ ${unmatchedFromExcel.size} registros del Excel no se matchearon:`)
+      Array.from(unmatchedFromExcel.keys())
+        .slice(0, 10)
+        .forEach((key) => console.warn(`[EXCEL-UPLOAD]   - "${key}"`))
+    }
+
     let summaryMessage = `✅ Actualización completada!\n\n`
     summaryMessage += `📦 Productos actualizados: ${updatedCount}/${products.length}\n`
-
     if (updateErrors.length > 0) {
       summaryMessage += `❌ Errores: ${updateErrors.length}\n`
       if (updateErrors.length <= 5) {
         summaryMessage += updateErrors.join("\n")
       }
     }
+    if (unmatchedFromExcel.size > 0) {
+      summaryMessage += `⚠️ Registros no matcheados: ${unmatchedFromExcel.size}\n`
+    }
 
     showCSVStatus(summaryMessage, "success")
 
     setTimeout(() => {
-      // Limpiar el archivo seleccionado
       document.getElementById("excel-file-input").value = ""
       selectedExcelFile = null
       document.getElementById("excel-file-name").classList.add("hidden")
-
       document.getElementById("csv-modal").classList.add("hidden")
       loadProducts()
     }, 2000)
@@ -3111,9 +2929,7 @@ async function handleCSVUpload() {
   showCSVStatus("Procesando archivo CSV...", "info")
 
   try {
-    // Parsear CSV
     const reader = new FileReader()
-
     reader.onload = async (e) => {
       try {
         const text = e.target.result
@@ -3124,7 +2940,6 @@ async function handleCSVUpload() {
         }
 
         const headers = lines[0].split(",").map((h) => h.trim().toUpperCase())
-
         const colIndexes = {
           descripcion: headers.indexOf("DESCRIPCION"),
           codigo: headers.indexOf("CODIGO"),
@@ -3148,13 +2963,11 @@ async function handleCSVUpload() {
         console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
         const products = []
-
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim()
           if (!line) continue
 
           const values = parseCSVLine(line)
-
           if (values.length < headers.length) continue
 
           const descripcion = values[colIndexes.descripcion]?.trim() || ""
@@ -3179,7 +2992,7 @@ async function handleCSVUpload() {
             departamento: departamento,
             imagen_url: url,
             is_new: false,
-            cantidad_actual: 0, // Iniciar en 0, se actualiza con Excel
+            cantidad_actual: 0,
           }
 
           products.push(product)
@@ -3191,9 +3004,7 @@ async function handleCSVUpload() {
 
         showCSVStatus(`Insertando ${products.length} productos en la base de datos...`, "info")
 
-        // LIMPIAR PRODUCTOS EXISTENTES
         const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
-
         if (deleteError) {
           console.error("Error al limpiar productos existentes:", deleteError)
           throw new Error("Error al limpiar productos existentes")
@@ -3201,9 +3012,7 @@ async function handleCSVUpload() {
 
         console.log("[CSV] ✅ Productos anteriores eliminados")
 
-        // INSERTAR NUEVOS PRODUCTOS
         const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
-
         if (error) throw error
 
         console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
@@ -3227,9 +3036,6 @@ async function handleCSVUpload() {
                   `[NEW-PRODUCTS] ✅ ${comparisonResult.newProductIds.length} productos marcados como nuevos en BD`,
                 )
               }
-
-              const limitedNewIds = comparisonResult.newProductIds.slice(0, 100)
-              saveNewProducts(limitedNewIds)
             } else {
               saveNewProducts([])
               console.log(`[NEW-PRODUCTS] No se detectaron productos nuevos - lista limpiada`)
@@ -3237,7 +3043,6 @@ async function handleCSVUpload() {
           } else {
             const firstProducts = insertedProducts.slice(0, 100)
             const firstProductIds = firstProducts.map((p) => p.id)
-
             const { error: updateError } = await window.supabaseClient
               .from("products")
               .update({ is_new: true })
@@ -3250,7 +3055,6 @@ async function handleCSVUpload() {
                 `[NEW-PRODUCTS] ✅ Primera carga: ${firstProductIds.length} productos marcados como nuevos en BD`,
               )
             }
-
             saveNewProducts(firstProductIds)
           }
 
@@ -3258,13 +3062,11 @@ async function handleCSVUpload() {
         }
 
         let summaryMessage = `✅ ${products.length} productos cargados exitosamente.\n\n`
-
         if (previousSnapshot.length > 0) {
           summaryMessage += `📊 Resumen de cambios:\n`
           summaryMessage += `• Productos nuevos: ${comparisonResult.newProductIds.length}\n`
           summaryMessage += `• Productos modificados: ${comparisonResult.modifiedProductIds.length}\n`
           summaryMessage += `• Productos eliminados: ${comparisonResult.deletedCount}\n`
-
           if (comparisonResult.deletedProducts.length > 0) {
             summaryMessage += `\nEjemplos de productos eliminados:\n`
             comparisonResult.deletedProducts.forEach((name) => {
@@ -3279,7 +3081,6 @@ async function handleCSVUpload() {
           const clearSales = confirm(
             `Se han cargado ${products.length} productos.\n\n¿Desea limpiar el historial de ventas anteriores?\n\nEsto es útil si estos productos ya no son los mismos que antes.`,
           )
-
           if (clearSales) {
             window.supabaseClient
               .from("product_sales")
@@ -3298,15 +3099,12 @@ async function handleCSVUpload() {
           localStorage.removeItem(PRODUCTS_HASH_KEY)
           console.log("[CSV] Estado de imágenes limpiado para nuevo CSV")
 
-          // Limpiar archivos seleccionados
           document.getElementById("csv-file-input").value = ""
           selectedCSVFile = null
           document.getElementById("csv-file-name").classList.add("hidden")
-
           document.getElementById("excel-file-input").value = ""
           selectedExcelFile = null
           document.getElementById("excel-file-name").classList.add("hidden")
-
           document.getElementById("csv-modal").classList.add("hidden")
           loadProducts()
         }, 2000)
@@ -3315,7 +3113,6 @@ async function handleCSVUpload() {
         showCSVStatus(`Error: ${error.message}`, "error")
       }
     }
-
     reader.readAsText(selectedCSVFile)
   } catch (error) {
     console.error("❌ Error:", error)
@@ -3330,7 +3127,6 @@ function parseCSVLine(line) {
 
   for (let i = 0; i < line.length; i++) {
     const char = line[i]
-
     if (char === '"') {
       inQuotes = !inQuotes
     } else if (char === "," && !inQuotes) {
@@ -3340,7 +3136,6 @@ function parseCSVLine(line) {
       current += char
     }
   }
-
   values.push(current)
   return values
 }
@@ -3361,9 +3156,7 @@ function showCSVStatus(message, type) {
 async function loadDepartmentsForPDF() {
   const select = document.getElementById("pdf-department-select")
   const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
-
   select.innerHTML = '<option value="">Selecciona un departamento...</option>'
-
   departments.forEach((dept) => {
     const option = document.createElement("option")
     option.value = dept
@@ -3374,7 +3167,6 @@ async function loadDepartmentsForPDF() {
 
 async function generatePDF() {
   const department = document.getElementById("pdf-department-select").value
-
   if (!department) {
     showPDFStatus("Por favor selecciona un departamento", "error")
     return
@@ -3387,15 +3179,12 @@ async function generatePDF() {
 
   try {
     showPDFStatus("Generando PDF...", "info")
-
     const { jsPDF } = window.jspdf
     const doc = new jsPDF()
-
     const productsInDept = allProducts.filter((p) => p.departamento === department)
 
     doc.setFontSize(18)
     doc.text(`SONIMAX MÓVIL - ${department}`, 14, 20)
-
     doc.setFontSize(10)
     doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28)
     doc.text(`Total de productos: ${productsInDept.length}`, 14, 34)
@@ -3416,9 +3205,7 @@ async function generatePDF() {
     })
 
     doc.save(`SONIMAX_${department}_${new Date().toISOString().split("T")[0]}.pdf`)
-
     showPDFStatus("✅ PDF generado exitosamente", "success")
-
     setTimeout(() => {
       document.getElementById("pdf-modal").classList.add("hidden")
     }, 2000)
@@ -3441,22 +3228,11 @@ function showPDFStatus(message, type) {
   statusDiv.classList.remove("hidden")
 }
 
-// Nueva función para rastrear ventas de productos
-function trackProductSale(productId) {
-  console.log(`[SALES-TRACKER] Rastreando venta para producto: ${productId}`)
-  // Implementación real podría implicar enviar a Analytics, o simplemente registrar en localStorage temporalmente
-  // para una posterior sincronización si es necesario.
-  // Por ahora, solo registramos en consola.
-  // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
-}
-
 function startAutoRefresh() {
-  // Limpiar intervalo anterior si existe
   if (autoRefreshInterval) {
     clearInterval(autoRefreshInterval)
   }
 
-  // Configurar auto-refresh cada 10 minutos
   autoRefreshInterval = setInterval(() => {
     console.log("🔄 Auto-refresh: Actualizando productos (cada 10 minutos)...")
     loadProducts()
@@ -3467,13 +3243,10 @@ function setupVisibilityListener() {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       console.log("👁️ Página activada: Actualizando productos...")
-      // Recargar productos cuando el usuario abre la página después de tenerla en segundo plano
       loadProducts()
-      // Reiniciar el auto-refresh
       startAutoRefresh()
     } else {
       console.log("👁️ Página en segundo plano")
-      // Detener auto-refresh cuando la página está en segundo plano
       if (autoRefreshInterval) {
         clearInterval(autoRefreshInterval)
         autoRefreshInterval = null
