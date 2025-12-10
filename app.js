@@ -310,7 +310,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
+      const parsed = JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -3249,3 +3249,239 @@ function trackProductSale(productId) {
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
 }
+
+// ============================================
+// FUNCIONES PARA AGREGAR Y ELIMINAR PRODUCTOS
+// ============================================
+
+// Cargar departamentos disponibles en el select
+async function loadDepartmentsForProduct() {
+  const select = document.getElementById("product-departamento")
+  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))].sort()
+
+  // Limpiar opciones existentes (mantener la primera)
+  while (select.options.length > 1) {
+    select.remove(1)
+  }
+
+  departments.forEach((dept) => {
+    const option = document.createElement("option")
+    option.value = dept
+    option.textContent = dept
+    select.appendChild(option)
+  })
+}
+
+// Mostrar estado en el modal de agregar producto
+function showAddProductStatus(message, type = "info") {
+  const statusDiv = document.getElementById("add-product-status")
+  statusDiv.className = "p-4 rounded-xl text-sm font-medium"
+
+  if (type === "success") {
+    statusDiv.className += " bg-green-50 border border-green-500 text-green-700"
+  } else if (type === "error") {
+    statusDiv.className += " bg-red-50 border border-red-500 text-red-700"
+  } else {
+    statusDiv.className += " bg-blue-50 border border-blue-500 text-blue-700"
+  }
+
+  statusDiv.textContent = message
+  statusDiv.classList.remove("hidden")
+}
+
+// Manejar agregar producto individual
+async function handleAddProduct(e) {
+  e.preventDefault()
+
+  if (currentUserRole !== "admin") {
+    showAddProductStatus("Solo los administradores pueden agregar productos", "error")
+    return
+  }
+
+  const codigo = document.getElementById("product-codigo").value.trim()
+  const descripcion = document.getElementById("product-descripcion").value.trim()
+  const detal = Number.parseFloat(document.getElementById("product-detal").value)
+  const mayor = Number.parseFloat(document.getElementById("product-mayor").value)
+  const gmayor = Number.parseFloat(document.getElementById("product-gmayor").value)
+  const departamento = document.getElementById("product-departamento").value.trim()
+  const url = document.getElementById("product-url").value.trim() || null
+
+  if (!descripcion || !departamento || isNaN(detal) || isNaN(mayor) || isNaN(gmayor)) {
+    showAddProductStatus("Por favor completa todos los campos requeridos", "error")
+    return
+  }
+
+  if (detal <= 0 || mayor <= 0 || gmayor <= 0) {
+    showAddProductStatus("Los precios deben ser mayores a 0", "error")
+    return
+  }
+
+  showAddProductStatus("Agregando producto...", "info")
+
+  try {
+    const newProduct = {
+      nombre: descripcion,
+      descripcion: codigo || "",
+      precio_cliente: detal,
+      precio_mayor: mayor,
+      precio_gmayor: gmayor,
+      departamento: departamento,
+      imagen_url: url,
+      is_new: true, // Marcar como producto nuevo
+    }
+
+    const { data, error } = await window.supabaseClient.from("products").insert([newProduct]).select()
+
+    if (error) {
+      console.error("[ADD-PRODUCT] Error:", error)
+      throw error
+    }
+
+    showAddProductStatus(`✅ Producto "${descripcion}" agregado exitosamente`, "success")
+
+    // Limpiar formulario
+    document.getElementById("add-product-form").reset()
+
+    setTimeout(() => {
+      document.getElementById("add-product-modal").classList.add("hidden")
+      loadProducts()
+    }, 1500)
+  } catch (error) {
+    console.error("[ADD-PRODUCT] Error inesperado:", error)
+    showAddProductStatus(`Error: ${error.message || "No se pudo agregar el producto"}`, "error")
+  }
+}
+
+// Buscar productos para eliminar
+async function searchProductsToDelete() {
+  const searchInput = document.getElementById("delete-product-search").value.trim().toLowerCase()
+  const listContainer = document.getElementById("delete-product-list")
+
+  if (searchInput.length === 0) {
+    listContainer.innerHTML =
+      '<p class="text-gray-500 text-center py-8">Empieza a escribir para buscar productos...</p>'
+    return
+  }
+
+  const results = allProducts.filter(
+    (p) =>
+      p.nombre.toLowerCase().includes(searchInput) ||
+      p.descripcion.toLowerCase().includes(searchInput) ||
+      p.departamento.toLowerCase().includes(searchInput),
+  )
+
+  if (results.length === 0) {
+    listContainer.innerHTML = '<p class="text-gray-500 text-center py-8">No se encontraron productos</p>'
+    return
+  }
+
+  listContainer.innerHTML = results
+    .map(
+      (product) => `
+        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-all">
+            <div class="flex-1">
+                <p class="font-semibold text-gray-800">${product.nombre}</p>
+                <p class="text-xs text-gray-600">
+                    ${product.descripcion ? `Código: ${product.descripcion} • ` : ""}
+                    Depto: ${product.departamento}
+                </p>
+            </div>
+            <button type="button" class="delete-btn px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all text-sm font-semibold" data-product-id="${product.id}">
+                Eliminar
+            </button>
+        </div>
+      `,
+    )
+    .join("")
+
+  // Agregar eventos a botones de eliminar
+  document.querySelectorAll(".delete-btn").forEach((btn) => {
+    btn.addEventListener("click", () => deleteProductById(btn.dataset.productId))
+  })
+}
+
+// Eliminar producto por ID
+async function deleteProductById(productId) {
+  if (!confirm("¿Estás seguro de que deseas eliminar este producto? Esta acción no se puede deshacer.")) {
+    return
+  }
+
+  const statusDiv = document.getElementById("delete-product-status")
+  statusDiv.classList.remove("hidden")
+  statusDiv.className = "p-4 rounded-xl text-sm font-medium bg-blue-50 border border-blue-500 text-blue-700"
+  statusDiv.textContent = "Eliminando producto..."
+
+  try {
+    const { error } = await window.supabaseClient.from("products").delete().eq("id", productId)
+
+    if (error) {
+      console.error("[DELETE-PRODUCT] Error:", error)
+      throw error
+    }
+
+    statusDiv.className = "p-4 rounded-xl text-sm font-medium bg-green-50 border border-green-500 text-green-700"
+    statusDiv.textContent = "✅ Producto eliminado exitosamente"
+
+    setTimeout(() => {
+      document.getElementById("delete-product-modal").classList.add("hidden")
+      loadProducts()
+    }, 1500)
+  } catch (error) {
+    console.error("[DELETE-PRODUCT] Error inesperado:", error)
+    statusDiv.className = "p-4 rounded-xl text-sm font-medium bg-red-50 border border-red-500 text-red-700"
+    statusDiv.textContent = `Error: ${error.message || "No se pudo eliminar el producto"}`
+  }
+}
+
+// ============================================
+// EVENT LISTENERS PARA NUEVOS BOTONES
+// ============================================
+
+// Agregar evento al botón de agregar producto
+document.addEventListener("DOMContentLoaded", () => {
+  const addProductBtn = document.getElementById("add-product-button")
+  const addProductModal = document.getElementById("add-product-modal")
+  const closeAddProductModal = document.getElementById("close-add-product-modal")
+  const addProductForm = document.getElementById("add-product-form")
+  const deleteProductBtn = document.getElementById("delete-product-button")
+  const deleteProductModal = document.getElementById("delete-product-modal")
+  const closeDeleteProductModal = document.getElementById("close-delete-product-modal")
+  const deleteProductSearch = document.getElementById("delete-product-search")
+
+  if (addProductBtn) {
+    addProductBtn.addEventListener("click", () => {
+      loadDepartmentsForProduct()
+      addProductModal.classList.remove("hidden")
+    })
+  }
+
+  if (closeAddProductModal) {
+    closeAddProductModal.addEventListener("click", () => {
+      addProductModal.classList.add("hidden")
+    })
+  }
+
+  if (addProductForm) {
+    addProductForm.addEventListener("submit", handleAddProduct)
+  }
+
+  if (deleteProductBtn) {
+    deleteProductBtn.addEventListener("click", () => {
+      deleteProductSearch.value = ""
+      document.getElementById("delete-product-list").innerHTML =
+        '<p class="text-gray-500 text-center py-8">Empieza a escribir para buscar productos...</p>'
+      document.getElementById("delete-product-status").classList.add("hidden")
+      deleteProductModal.classList.remove("hidden")
+    })
+  }
+
+  if (closeDeleteProductModal) {
+    closeDeleteProductModal.addEventListener("click", () => {
+      deleteProductModal.classList.add("hidden")
+    })
+  }
+
+  if (deleteProductSearch) {
+    deleteProductSearch.addEventListener("input", searchProductsToDelete)
+  }
+})
