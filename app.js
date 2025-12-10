@@ -78,41 +78,6 @@ function saveNewProducts(productIds) {
   }
 }
 
-async function fetchAllProducts() {
-  try {
-    const { data, error } = await window.supabaseClient.from("products").select("*")
-
-    if (error) {
-      console.error("[PRODUCTS-DB] Error obteniendo productos:", error)
-      return []
-    }
-
-    return data || []
-  } catch (error) {
-    console.error("[PRODUCTS-DB] Error inesperado:", error)
-    return []
-  }
-}
-
-async function addIndividualProduct(productData) {
-  try {
-    console.log("[INDIVIDUAL-PRODUCT] Insertando producto:", productData)
-
-    const { data, error } = await window.supabaseClient.from("products").insert([productData]).select()
-
-    if (error) {
-      console.error("[INDIVIDUAL-PRODUCT] Error insertando producto:", error)
-      throw error
-    }
-
-    console.log("[INDIVIDUAL-PRODUCT] ✅ Producto insertado exitosamente:", data[0])
-    return { success: true, data: data[0] }
-  } catch (error) {
-    console.error("[INDIVIDUAL-PRODUCT] ❌ Error:", error.message)
-    return { success: false, error: error.message }
-  }
-}
-
 async function saveCSVSnapshot(products) {
   try {
     const snapshot = products.map((p) => ({
@@ -125,7 +90,7 @@ async function saveCSVSnapshot(products) {
     }))
 
     // Guardar en Supabase
-    const { error } = await window.supabaseClient
+    const { data, error } = await window.supabaseClient
       .from("csv_snapshot")
       .insert({
         snapshot_data: snapshot,
@@ -286,7 +251,7 @@ async function getBestSellingProducts(limit = 20) {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
     const { data: salesData, error: salesError } = await window.supabaseClient
-      .from("best_selling_products") // Asumiendo que esta tabla existe y se actualiza
+      .from("best_selling_products")
       .select("*")
       .order("total_sold", { ascending: false })
       .limit(limit)
@@ -310,6 +275,23 @@ async function getBestSellingProducts(limit = 20) {
   }
 }
 
+// Function to fetch all products
+async function fetchAllProducts() {
+  try {
+    const { data, error } = await window.supabaseClient.from("products").select("*")
+
+    if (error) {
+      console.error("[PRODUCTS-DB] Error obteniendo productos:", error)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error("[PRODUCTS-DB] Error inesperado:", error)
+    return []
+  }
+}
+
 function cleanupSalesData() {
   try {
     localStorage.removeItem(PRODUCT_SALES_KEY)
@@ -328,7 +310,7 @@ function loadImageLoadState() {
   try {
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
+      const parsed = JSON.JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
       imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
       imageLoadState.failedImages = new Map(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
@@ -1261,9 +1243,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initImageObserver()
 
-  // Inicializar formulario de agregar producto
-  initializeAddProductForm()
-
   const {
     data: { session },
   } = await window.supabaseClient.auth.getSession()
@@ -1799,7 +1778,7 @@ async function loadProducts() {
       }
     }
 
-    // Los productos ya הם vienen con is_new desde Supabase
+    // Los productos ya vienen con is_new desde Supabase
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
 
@@ -3269,160 +3248,4 @@ function trackProductSale(productId) {
   // para una posterior sincronización si es necesario.
   // Por ahora, solo registramos en consola.
   // Si se necesita una implementación más robusta, se podría usar recordSaleToDatabase aquí.
-}
-
-function initializeAddProductForm() {
-  const addProductBtn = document.getElementById("add-product-button")
-  const addProductModal = document.getElementById("add-product-modal")
-  const closeModalBtn = document.getElementById("close-add-product-modal")
-  const addProductForm = document.getElementById("add-product-form")
-  const productUrlInput = document.getElementById("product-url")
-  const productPreview = document.getElementById("product-preview-image")
-  const productPreviewImg = document.getElementById("product-preview-img")
-
-  if (addProductBtn) {
-    addProductBtn.addEventListener("click", () => {
-      addProductModal.classList.remove("hidden")
-      loadDepartmentsForProductForm()
-    })
-  }
-
-  if (closeModalBtn) {
-    closeModalBtn.addEventListener("click", () => {
-      addProductModal.classList.add("hidden")
-      addProductForm.reset()
-      productPreview.classList.add("hidden")
-      clearMessages()
-    })
-  }
-
-  // Vista previa de imagen
-  if (productUrlInput) {
-    productUrlInput.addEventListener("change", () => {
-      const url = productUrlInput.value.trim()
-      if (url) {
-        productPreviewImg.src = url
-        productPreviewImg.onload = () => {
-          productPreview.classList.remove("hidden")
-        }
-        productPreviewImg.onerror = () => {
-          productPreview.classList.add("hidden")
-          showProductMessage("URL de imagen inválida", "error")
-        }
-      } else {
-        productPreview.classList.add("hidden")
-      }
-    })
-  }
-
-  // Envío del formulario
-  if (addProductForm) {
-    addProductForm.addEventListener("submit", async (e) => {
-      e.preventDefault()
-      await handleAddProduct()
-    })
-  }
-}
-
-function loadDepartmentsForProductForm() {
-  const select = document.getElementById("product-departamento")
-  const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
-
-  select.innerHTML = '<option value="">Selecciona departamento...</option>'
-  departments.forEach((dept) => {
-    const option = document.createElement("option")
-    option.value = dept
-    option.textContent = dept
-    select.appendChild(option)
-  })
-
-  if (departments.length === 0) {
-    const option = document.createElement("option")
-    option.value = "Sin categoría"
-    option.textContent = "Sin categoría"
-    select.appendChild(option)
-  }
-}
-
-async function handleAddProduct() {
-  const codigo = document.getElementById("product-codigo").value.trim()
-  const nombre = document.getElementById("product-nombre").value.trim()
-  const descripcion = document.getElementById("product-descripcion").value.trim()
-  const departamento = document.getElementById("product-departamento").value.trim()
-  const stock = Number.parseInt(document.getElementById("product-stock").value) || 0
-  const detal = Number.parseFloat(document.getElementById("product-detal").value) || 0
-  const mayor = Number.parseFloat(document.getElementById("product-mayor").value) || 0
-  const gmayor = Number.parseFloat(document.getElementById("product-gmayor").value) || 0
-  const url = document.getElementById("product-url").value.trim()
-
-  // Validación
-  if (!nombre) {
-    showProductMessage("El nombre del producto es obligatorio", "error")
-    return
-  }
-
-  if (!departamento) {
-    showProductMessage("Selecciona un departamento", "error")
-    return
-  }
-
-  if (detal <= 0 || mayor <= 0 || gmayor <= 0) {
-    showProductMessage("Los precios deben ser mayores a 0", "error")
-    return
-  }
-
-  const submitBtn = document.getElementById("submit-add-product")
-  submitBtn.disabled = true
-  submitBtn.textContent = "Cargando..."
-
-  const productData = {
-    codigo: codigo || "",
-    nombre: nombre,
-    descripcion: descripcion,
-    departamento: departamento,
-    stock: stock,
-    precio_cliente: detal,
-    precio_mayor: mayor,
-    precio_gmayor: gmayor,
-    imagen_url: url || null,
-    is_new: true, // Marcar como nuevo al agregar
-  }
-
-  const result = await addIndividualProduct(productData)
-
-  if (result.success) {
-    showProductMessage("✅ Producto agregado exitosamente", "success")
-    setTimeout(() => {
-      document.getElementById("add-product-modal").classList.add("hidden")
-      document.getElementById("add-product-form").reset()
-      document.getElementById("product-preview-image").classList.add("hidden")
-      clearMessages()
-      loadProducts() // Recargar lista de productos
-    }, 1500)
-  } else {
-    showProductMessage(`Error: ${result.error}`, "error")
-    submitBtn.disabled = false
-    submitBtn.textContent = "Agregar Producto"
-  }
-}
-
-function showProductMessage(message, type) {
-  const errorDiv = document.getElementById("add-product-error")
-  const successDiv = document.getElementById("add-product-success")
-
-  errorDiv.classList.add("hidden")
-  successDiv.classList.add("hidden")
-
-  if (type === "error") {
-    errorDiv.textContent = message
-    errorDiv.classList.remove("hidden")
-  } else if (type === "success") {
-    successDiv.textContent = message
-    successDiv.classList.remove("hidden")
-  }
-}
-
-function clearMessages() {
-  document.getElementById("add-product-error").classList.add("hidden")
-  document.getElementById("add-product-success").classList.add("hidden")
 }
