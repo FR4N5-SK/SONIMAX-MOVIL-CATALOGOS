@@ -12,7 +12,15 @@
 
 let currentUser = null
 let currentUserRole = null
+// VARIABLE GLOBAL - Accesible desde app-features.js
+window.currentUserRole = null
 let allProducts = []
+// EXPORTAR allProducts AL WINDOW para que app-features.js pueda acceder
+Object.defineProperty(window, 'allProducts', {
+  get() { return allProducts; },
+  set(value) { allProducts = value; },
+  configurable: true
+});
 let filteredProducts = []
 let cart = []
 let currentDepartment = "all"
@@ -1443,12 +1451,13 @@ async function loadUserData(userId) {
     }
 
     currentUser = data
-    currentUserRole = data.role
+    window.currentUserRole = data.role
 
     console.log("✅ Datos de usuario cargados:", {
       username: data.username,
       name: data.name,
       role: data.role,
+      globalRole: window.currentUserRole
     })
 
     updateUIForRole()
@@ -1473,13 +1482,13 @@ function updateUIForRole() {
     roleBadge.classList.remove("hidden")
   }
 
-  if (currentUserRole === "admin") {
+  if (window.currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     gestorSection?.classList.remove("hidden")
     manageBannersBtn?.classList.remove("hidden")
-  } else if (currentUserRole === "gestor") {
-    adminSection?.classList.add("hidden")
+  } else if (window.currentUserRole === "gestor") {
     gestorSection?.classList.remove("hidden")
+    adminSection?.classList.add("hidden")
     manageBannersBtn?.classList.add("hidden")
   } else {
     adminSection?.classList.add("hidden")
@@ -1491,7 +1500,7 @@ function updateUIForRole() {
 document.getElementById("logout-button")?.addEventListener("click", async () => {
   await window.supabaseClient.auth.signOut()
   currentUser = null
-  currentUserRole = null
+  window.currentUserRole = null
   cart = []
   showLogin()
 })
@@ -1499,7 +1508,7 @@ document.getElementById("logout-button")?.addEventListener("click", async () => 
 function logoutFromSidebar() {
   window.supabaseClient.auth.signOut().then(() => {
     currentUser = null
-    currentUserRole = null
+    window.currentUserRole = null
     cart = []
     closeSidebar()
     showLogin()
@@ -1643,13 +1652,13 @@ function setupEventListeners() {
 
     roleSelect.innerHTML = ""
 
-    if (currentUserRole === "gestor") {
+    if (window.currentUserRole === "gestor") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
         <option value="distribuidor">Distribuidor</option>
         <option value="gestor">Gestor</option>
       `
-    } else if (currentUserRole === "admin") {
+    } else if (window.currentUserRole === "admin") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
         <option value="distribuidor">Distribuidor</option>
@@ -1688,7 +1697,7 @@ function setupEventListeners() {
   document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
 
   document.getElementById("send-whatsapp")?.addEventListener("click", () => {
-    if (currentUserRole === "admin") {
+    if (window.currentUserRole === "admin") {
       showOrderDetailsModal()
     } else {
       sendWhatsAppOrder()
@@ -1802,6 +1811,9 @@ async function loadProducts() {
     document.getElementById("products-loading").classList.add("hidden")
   }
 }
+
+// EXPORTAR loadProducts AL WINDOW para que app-features.js pueda acceder
+window.loadProducts = loadProducts;
 
 function renderDepartments() {
   const navContainer = document.getElementById("departments-nav")
@@ -1970,6 +1982,9 @@ function renderProducts() {
 
   console.log("Productos renderizados:", productsToRender.length)
 }
+
+// EXPORTAR renderProducts AL WINDOW para que app-features.js pueda acceder
+window.renderProducts = renderProducts;
 
 function updateLoadMoreButton() {
   const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE)
@@ -2406,7 +2421,7 @@ function renderCart() {
 
   let totalHTML = ""
 
-  if (currentUserRole === "gestor") {
+  if (window.currentUserRole === "gestor") {
     totalHTML = `
       <div class="space-y-2">
         <div class="flex justify-between items-center">
@@ -2424,10 +2439,10 @@ function renderCart() {
       </div>
     `
     cartTotal.innerHTML = totalHTML
-  } else if (currentUserRole === "distribuidor") {
+  } else if (window.currentUserRole === "distribuidor") {
     totalHTML = `$${totalMayor.toFixed(2)}`
     cartTotal.textContent = totalHTML
-  } else if (currentUserRole === "admin") {
+  } else if (window.currentUserRole === "admin") {
     totalHTML = `$${totalGmayor.toFixed(2)}`
     cartTotal.textContent = totalHTML
   } else {
@@ -2747,11 +2762,11 @@ function sendWhatsAppOrder() {
 
   message += `\n\n*TOTALES:*\n`
 
-  if (currentUserRole === "gestor") {
+  if (window.currentUserRole === "gestor") {
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
     message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
-  } else if (currentUserRole === "distribuidor") {
+  } else if (window.currentUserRole === "distribuidor") {
     message += `Total Mayor: $${totalMayor.toFixed(2)}`
   } else {
     message += `Total Detal: $${totalDetal.toFixed(2)}`
@@ -2918,7 +2933,7 @@ async function handleCSVUpload() {
     return
   }
 
-  if (currentUserRole !== "admin") {
+  if (window.currentUserRole !== "admin") {
     showCSVStatus("Solo los administradores pueden subir productos", "error")
     return
   }
@@ -2980,6 +2995,7 @@ async function handleCSVUpload() {
         if (!descripcion) continue
 
         const product = {
+          codigo: codigo || "",
           nombre: descripcion,
           descripcion: codigo || "",
           precio_cliente: Number.parseFloat(detal) || 0,
@@ -2988,6 +3004,7 @@ async function handleCSVUpload() {
           departamento: departamento,
           imagen_url: url,
           is_new: false, // Inicialmente todos son false
+          stock: 0
         }
 
         products.push(product)
@@ -3180,40 +3197,45 @@ async function generatePDF() {
     return
   }
 
-  if (currentUserRole !== "admin") {
+  if (window.currentUserRole !== "admin") {
     showPDFStatus("Solo los administradores pueden exportar PDF", "error")
     return
   }
 
   try {
-    showPDFStatus("Generando PDF...", "info")
+  showPDFStatus("Generando PDF...", "info")
+  
+  const { jsPDF } = window.jspdf
+  const doc = new jsPDF()
+  
+  const productsInDept = allProducts.filter((p) => p.departamento === department)
+  
+  // Encabezado del documento
+  doc.setTextColor(0, 0, 0)
+  doc.setFontSize(16)
+  doc.setFont(undefined, 'bold')
+  doc.text(`SONIMAX MÓVIL - ${department}`, 14, 20)
+  
+  doc.setFontSize(10)
+  doc.setFont(undefined, 'normal')
+  doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28)
+  doc.text(`Total de productos: ${productsInDept.length}`, 14, 34)
 
-    const { jsPDF } = window.jspdf
-    const doc = new jsPDF()
+  const tableData = productsInDept.map((p) => [
+  p.codigo || "N/A",
+  p.nombre,
+  `$${p.precio_cliente.toFixed(2)}`,
+  `$${p.precio_mayor.toFixed(2)}`,
+  `$${p.precio_gmayor.toFixed(2)}`,
+  ])
 
-    const productsInDept = allProducts.filter((p) => p.departamento === department)
-
-    doc.setFontSize(18)
-    doc.text(`SONIMAX MÓVIL - ${department}`, 14, 20)
-
-    doc.setFontSize(10)
-    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28)
-    doc.text(`Total de productos: ${productsInDept.length}`, 14, 34)
-
-    const tableData = productsInDept.map((p) => [
-      p.nombre,
-      `$${p.precio_cliente.toFixed(2)}`,
-      `$${p.precio_mayor.toFixed(2)}`,
-      `$${p.precio_gmayor.toFixed(2)}`,
-    ])
-
-    doc.autoTable({
-      startY: 40,
-      head: [["Producto", "Detal", "Mayor", "G. Mayor"]],
-      body: tableData,
-      theme: "grid",
-      headStyles: { fillColor: [220, 38, 38] },
-    })
+  doc.autoTable({
+  startY: 40,
+  head: [["Código", "Descripción", "Detal", "Mayor", "G. Mayor"]],
+  body: tableData,
+  theme: "grid",
+  headStyles: { fillColor: [220, 38, 38] },
+  })
 
     doc.save(`SONIMAX_${department}_${new Date().toISOString().split("T")[0]}.pdf`)
 
@@ -3293,7 +3315,7 @@ function showAddProductStatus(message, type = "info") {
 async function handleAddProduct(e) {
   e.preventDefault()
 
-  if (currentUserRole !== "admin") {
+  if (window.currentUserRole !== "admin") {
     showAddProductStatus("Solo los administradores pueden agregar productos", "error")
     return
   }
@@ -3434,6 +3456,171 @@ async function deleteProductById(productId) {
 }
 
 // ============================================
+// LIMPIAR PRODUCTOS DUPLICADOS
+// ============================================
+
+async function cleanDuplicateProducts() {
+  const currentUserRole = window.currentUserRole
+  
+  if (currentUserRole !== 'admin') {
+    alert('Solo administradores pueden limpiar duplicados')
+    return
+  }
+
+  const confirmClean = confirm('¿Estás seguro de que deseas eliminar todos los productos duplicados? Esta acción no se puede deshacer.')
+  if (!confirmClean) return
+
+  try {
+    console.log('[CLEAN-DUPLICATES] Iniciando limpieza de duplicados...')
+
+    // Obtener TODOS los productos con paginación (igual que loadProducts)
+    let allProducts = []
+    let start = 0
+    const batchSize = 500
+    let hasMore = true
+
+    console.log('[CLEAN-DUPLICATES] Obteniendo productos de BD en lotes de 500...')
+    
+    while (hasMore) {
+      console.log(`[CLEAN-DUPLICATES] Cargando productos desde ${start} a ${start + batchSize - 1}...`)
+      
+      const { data, error } = await window.supabaseClient
+        .from('products')
+        .select('*')
+        .range(start, start + batchSize - 1)
+
+      if (error) {
+        console.error('[CLEAN-DUPLICATES] Error en fetch:', error)
+        throw error
+      }
+
+      if (data && data.length > 0) {
+        allProducts = [...allProducts, ...data]
+        console.log(`[CLEAN-DUPLICATES] Cargados ${allProducts.length} productos hasta ahora...`)
+
+        if (data.length < batchSize) {
+          hasMore = false
+        } else {
+          start += batchSize
+        }
+      } else {
+        hasMore = false
+      }
+    }
+
+    if (!allProducts || allProducts.length === 0) {
+      alert('No hay productos en la base de datos')
+      console.log('[CLEAN-DUPLICATES] BD vacía')
+      return
+    }
+
+    console.log(`[CLEAN-DUPLICATES] Total de productos en BD: ${allProducts.length}`)
+    console.log('[CLEAN-DUPLICATES] Primer producto:', JSON.stringify(allProducts[0]))
+
+    // Agrupar por código (clave principal de duplicación)
+    const codigoMap = new Map()
+    const toDelete = []
+    let processedCount = 0
+
+    allProducts.forEach((product) => {
+      const codeKey = String(product.codigo || '').trim()
+      
+      if (!codeKey) {
+        console.log(`[CLEAN-DUPLICATES] Producto ID ${product.id} ignorado: sin código`)
+        return
+      }
+
+      processedCount++
+      
+      if (!codigoMap.has(codeKey)) {
+        codigoMap.set(codeKey, [])
+      }
+      codigoMap.get(codeKey).push(product)
+    })
+
+    console.log(`[CLEAN-DUPLICATES] Productos procesados: ${processedCount}`)
+    console.log(`[CLEAN-DUPLICATES] Códigos únicos encontrados: ${codigoMap.size}`)
+
+    // Encontrar duplicados (dejar el primero, marcar el resto para eliminar)
+    codigoMap.forEach((products, codigo) => {
+      if (products.length > 1) {
+        console.log(`[CLEAN-DUPLICATES] DUPLICADO encontrado - Código "${codigo}": ${products.length} productos`)
+        const [first, ...rest] = products
+        console.log(`  Manteniendo: ID ${first.id} - ${first.nombre}`)
+        rest.forEach(p => {
+          console.log(`  Eliminando: ID ${p.id} - ${p.nombre}`)
+          toDelete.push(p.id)
+        })
+      }
+    })
+
+    console.log(`[CLEAN-DUPLICATES] Total productos para eliminar: ${toDelete.length}`)
+
+    if (toDelete.length === 0) {
+      alert('No se encontraron productos duplicados')
+      console.log('[CLEAN-DUPLICATES] No hay duplicados')
+      return
+    }
+
+    // Mostrar progreso
+    let deleted = 0
+    const total = toDelete.length
+    const deleteStatus = document.createElement('div')
+    deleteStatus.className = 'fixed bottom-4 right-4 bg-blue-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-xs'
+    deleteStatus.innerHTML = `
+      <p class="font-bold mb-2">Eliminando duplicados...</p>
+      <div class="w-full bg-white/30 rounded-full h-2">
+        <div id="delete-progress" class="bg-white h-2 rounded-full transition-all" style="width: 0%"></div>
+      </div>
+      <p class="text-sm mt-2"><span id="delete-count">0</span>/${total}</p>
+    `
+    document.body.appendChild(deleteStatus)
+
+    // Eliminar en lotes de 50 para no sobrecargar
+    for (let i = 0; i < toDelete.length; i += 50) {
+      const batch = toDelete.slice(i, i + 50)
+      console.log(`[CLEAN-DUPLICATES] Eliminando lote de ${batch.length} IDs: ${batch.join(', ')}`)
+      
+      const { error: deleteError } = await window.supabaseClient
+        .from('products')
+        .delete()
+        .in('id', batch)
+
+      if (deleteError) {
+        console.error('[CLEAN-DUPLICATES] Error en eliminación:', deleteError)
+        throw deleteError
+      }
+
+      deleted += batch.length
+      const progress = (deleted / total) * 100
+      if (document.getElementById('delete-progress')) {
+        document.getElementById('delete-progress').style.width = progress + '%'
+        document.getElementById('delete-count').textContent = deleted
+      }
+      console.log(`[CLEAN-DUPLICATES] Progreso: ${deleted}/${total}`)
+    }
+
+    deleteStatus.innerHTML = `
+      <p class="font-bold text-green-300">Limpieza completada</p>
+      <p class="text-sm mt-2">${deleted} productos duplicados eliminados</p>
+    `
+    deleteStatus.className = 'fixed bottom-4 right-4 bg-green-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-xs'
+
+    console.log(`[CLEAN-DUPLICATES] ${deleted} productos duplicados eliminados exitosamente`)
+
+    setTimeout(() => {
+      deleteStatus.remove()
+      alert(`Limpieza completada: ${deleted} productos duplicados eliminados`)
+      loadProducts()
+    }, 2000)
+
+  } catch (error) {
+    console.error('[CLEAN-DUPLICATES] Error:', error)
+    alert(`Error al limpiar duplicados: ${error.message}`)
+  }
+}
+
+// ============================================
 // EVENT LISTENERS PARA NUEVOS BOTONES
 // ============================================
 
@@ -3483,5 +3670,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (deleteProductSearch) {
     deleteProductSearch.addEventListener("input", searchProductsToDelete)
+  }
+
+  // Agregar evento al botón de limpiar duplicados
+  const cleanDuplicatesBtn = document.getElementById("clean-duplicates-button")
+  if (cleanDuplicatesBtn) {
+    cleanDuplicatesBtn.addEventListener("click", cleanDuplicateProducts)
   }
 })
