@@ -1451,12 +1451,14 @@ async function loadUserData(userId) {
     }
 
     currentUser = data
-    window.currentUserRole = data.role
+    currentUserRole = data.role || 'cliente'
+    window.currentUserRole = data.role || 'cliente'
 
     console.log("✅ Datos de usuario cargados:", {
       username: data.username,
       name: data.name,
       role: data.role,
+      localRole: currentUserRole,
       globalRole: window.currentUserRole
     })
 
@@ -2114,38 +2116,45 @@ function createProductCard(product) {
 }
 
 function getPriceForRole(product) {
-  switch (currentUserRole) {
-    case "admin":
-      return {
-        display: "single",
-        price: product.precio_gmayor || 0,
-        label: "Gran Mayor",
-      }
-    case "gestor":
-      return {
-        display: "triple",
-        priceCliente: product.precio_cliente || 0,
-        priceMayor: product.precio_mayor || 0,
-        priceGmayor: product.precio_gmayor || 0,
-        labelCliente: "Detal",
-        labelMayor: "Mayor",
-        labelGmayor: "G.Mayor",
-      }
-    case "distribuidor":
-      return {
-        display: "single",
-        price: product.precio_mayor || 0,
-        label: "Mayor",
-      }
-    case "cliente":
-    default:
-      return {
-        display: "single",
-        price: product.precio_cliente || 0,
-        label: "Detal",
-      }
+  const userRole = currentUserRole || window.currentUserRole || 'cliente'
+  console.log(`[PRICE-ROLE] Mostrando precios para rol: ${userRole}, producto: ${product.nombre}`)
+  
+  switch (userRole) {
+  case "admin":
+  return {
+  display: "triple",
+  priceCliente: product.precio_cliente || 0,
+  priceMayor: product.precio_mayor || 0,
+  priceGmayor: product.precio_gmayor || 0,
+  labelCliente: "Detal",
+  labelMayor: "Mayor",
+  labelGmayor: "G.Mayor",
   }
-}
+  case "gestor":
+  return {
+  display: "triple",
+  priceCliente: product.precio_cliente || 0,
+  priceMayor: product.precio_mayor || 0,
+  priceGmayor: product.precio_gmayor || 0,
+  labelCliente: "Detal",
+  labelMayor: "Mayor",
+  labelGmayor: "G.Mayor",
+  }
+  case "distribuidor":
+  return {
+  display: "single",
+  price: product.precio_mayor || 0,
+  label: "Mayor",
+  }
+  case "cliente":
+  default:
+  return {
+  display: "single",
+  price: product.precio_cliente || 0,
+  label: "Detal",
+  }
+  }
+  }
 
 function saveCartToStorage() {
   if (!currentUser) return
