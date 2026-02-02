@@ -282,6 +282,8 @@
     }
 
     try {
+      console.log('[MERCHANDISE] Guardando URL para producto:', codigo);
+      
       const { error } = await supabaseClient
         .from('products')
         .update({ imagen_url: url, departamento: department })
@@ -289,10 +291,60 @@
 
       if (error) throw error;
 
-      alert(`✅ Mercancía guardada:\n${codigo} - ${nombre}`);
-      document.querySelector('.fixed')?.remove();
-      await window.loadProducts();
-      window.renderProducts();
+      console.log('[MERCHANDISE] ✅ URL guardada exitosamente');
+      
+      // Mostrar mensaje de éxito
+      const successMsg = document.createElement('div');
+      successMsg.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+      successMsg.innerHTML = `
+        <div class="bg-white rounded-2xl p-8 text-center shadow-2xl">
+          <p class="text-3xl mb-4">✅</p>
+          <h3 class="text-xl font-bold text-gray-800 mb-2">Mercancía guardada</h3>
+          <p class="text-gray-600">${codigo} - ${nombre}</p>
+          <p class="text-sm text-gray-500 mt-4">Removiendo de lista de sin foto...</p>
+        </div>
+      `;
+      document.body.appendChild(successMsg);
+
+      // Cerrar modal actual
+      const modals = document.querySelectorAll('.fixed');
+      modals.forEach(modal => {
+        if (modal !== successMsg) modal.remove();
+      });
+
+      // Actualizar el DOM sin recargar - remover el producto de la lista visual
+      setTimeout(() => {
+        console.log('[MERCHANDISE] Actualizando lista visual...');
+        
+        // Remover producto de la lista de sin foto si el modal está abierto
+        const productItems = document.querySelectorAll('.no-photo-item');
+        productItems.forEach(item => {
+          if (item.dataset.id === productId) {
+            item.remove();
+            console.log('[MERCHANDISE] Producto removido de la lista visual');
+          }
+        });
+        
+        // Cerrar mensaje de éxito
+        successMsg.remove();
+
+        // Actualizar el carrusel/galería principal si está visible
+        console.log('[MERCHANDISE] Refrescando galería principal...');
+        if (window.renderProducts) {
+          window.renderProducts();
+        }
+        
+        // Actualizar la variable global de productos
+        if (window.allProducts) {
+          const productIndex = window.allProducts.findIndex(p => p.id === productId);
+          if (productIndex !== -1) {
+            window.allProducts[productIndex].imagen_url = url;
+            window.allProducts[productIndex].departamento = department;
+            console.log('[MERCHANDISE] Producto actualizado en allProducts');
+          }
+        }
+      }, 1500);
+
     } catch (error) {
       console.error('[MERCHANDISE] Error:', error);
       alert('Error al guardar: ' + error.message);
@@ -723,6 +775,101 @@
           }
         }
 
+        // ===== APLICAR LÍMITE DE 100 PRODUCTOS NUEVOS =====
+        console.log('[EXCEL] 🔄 Aplicando límite de 100 productos nuevos...');
+        try {
+          const { data: allProductsWithNew } = await supabaseClient
+            .from('products')
+            .select('id, is_new, created_at')
+            .order('created_at', { ascending: false });
+
+          if (allProductsWithNew && allProductsWithNew.length > 0) {
+            const newProductsList = allProductsWithNew.filter(p => p.is_new === true);
+            
+            console.log('[EXCEL] Productos nuevos encontrados:', newProductsList.length);
+            
+            if (newProductsList.length > 100) {
+              console.log('[EXCEL] ⚠️ Se excedió el límite de 100 productos nuevos');
+              const productsToRemoveNewTag = newProductsList.slice(100);
+              
+              console.log('[EXCEL] 🗑️ Removiendo etiqueta "nuevo" de', productsToRemoveNewTag.length, 'productos');
+              
+              for (const product of productsToRemoveNewTag) {
+                const { error: updateError } = await supabaseClient
+                  .from('products')
+                  .update({ is_new: false })
+                  .eq('id', product.id);
+                
+                if (updateError) {
+                  console.error('[EXCEL] ❌ Error removiendo etiqueta nueva:', updateError);
+                }
+              }
+              
+              console.log('[EXCEL] ✅ Límite de 100 productos nuevos aplicado correctamente');
+            }
+          }
+        } catch (limitError) {
+          console.error('[EXCEL] ❌ Error aplicando límite de nuevos productos:', limitError);
+        }
+
+        // ===== MARCAR PRODUCTOS NO EN EXCEL COMO "EN TRANSITO" =====
+        console.log('[EXCEL] 🚚 Procesando productos en tránsito...');
+        try {
+          const { data: allCurrentProducts } = await supabaseClient
+            .from('products')
+            .select('id, codigo, nombre, descripcion, estado, stock');
+          
+          if (allCurrentProducts) {
+            const codigosEnExcel = new Set(updateBatch.map(p => p.codigo.trim()));
+            newProducts.forEach(p => codigosEnExcel.add(p.codigo.trim()));
+            
+            const productsNotInExcel = allCurrentProducts.filter(p => {
+              const productCode = String(p.codigo || '').trim();
+              return !codigosEnExcel.has(productCode);
+            });
+            
+            console.log('[EXCEL] 🚚 Productos no incluidos en Excel:', productsNotInExcel.length);
+            
+            if (productsNotInExcel.length > 0) {
+              for (const product of productsNotInExcel) {
+                const { error: transitError } = await supabaseClient
+                  .from('products')
+                  .update({ 
+                    estado: 'en transito'
+                  })
+                  .eq('id', product.id);
+                
+                if (transitError) {
+                  console.error('[EXCEL] ❌ Error marcando como en transito:', transitError);
+                }
+              }
+              console.log('[EXCEL] ✅', productsNotInExcel.length, 'productos marcados como "en transito"');
+            }
+          }
+        } catch (transitError) {
+          console.error('[EXCEL] ❌ Error procesando en tránsito:', transitError);
+        }
+
+        // ===== DETECTAR PRODUCTOS CON POCAS UNIDADES (SOLO PARA LOG) =====
+        console.log('[EXCEL] ⚠️ Detectando productos con poco stock...');
+        try {
+          const { data: allProductsForStock } = await supabaseClient
+            .from('products')
+            .select('id, stock, nombre');
+          
+          if (allProductsForStock) {
+            const lowStockProducts = allProductsForStock.filter(p => p.stock < 5 && p.stock > 0);
+            console.log('[EXCEL] ✅ Productos con pocas unidades (< 5):', lowStockProducts.length);
+            if (lowStockProducts.length > 0) {
+              lowStockProducts.slice(0, 5).forEach(p => {
+                console.log(`  - ${p.nombre}: ${p.stock} unidades`);
+              });
+            }
+          }
+        } catch (stockError) {
+          console.error('[EXCEL] ❌ Error detectando bajo stock:', stockError);
+        }
+
         // ===== LIMPIAR DUPLICADOS EN LA BD =====
         console.log('[EXCEL] 🧹 Limpiando duplicados en la BD...');
         let duplicadosLimpiados = 0;
@@ -789,6 +936,15 @@
           console.error('[EXCEL] ❌ Error durante limpieza de duplicados:', dedupErr);
         }
 
+        // ===== CONTAR PRODUCTOS EN TRÁNSITO Y CON POCAS UNIDADES =====
+        const { data: finalProducts } = await supabaseClient
+          .from('products')
+          .select('id, estado, stock');
+        
+        const productsInTransit = (finalProducts || []).filter(p => p.estado === 'en transito').length;
+        const productsLowStock = (finalProducts || []).filter(p => p.stock < 5 && p.stock > 0).length;
+        const productsNewCount = (finalProducts || []).filter(p => p.is_new === true).length;
+
         // ===== RESUMEN FINAL =====
         console.log('[EXCEL] 📊 RESUMEN FINAL:');
         console.log('  ✅ Actualizados:', updated);
@@ -796,6 +952,9 @@
         console.log('  ⚠️ Duplicados en Excel:', duplicados);
         console.log('  ⊘ Filas saltadas (vacías/sin datos):', skipped);
         console.log('  🗑️ Duplicados eliminados de BD:', duplicadosLimpiados);
+        console.log('  🚚 Productos en tránsito:', productsInTransit);
+        console.log('  ⚠️ Productos con pocas unidades:', productsLowStock);
+        console.log('  ✨ Productos nuevos (máx 100):', productsNewCount);
 
         let message = '✅ Excel procesado correctamente:\n\n';
         if (updated > 0) message += `✅ ${updated} productos actualizados\n`;
@@ -803,7 +962,13 @@
         if (duplicados > 0) message += `⚠️ ${duplicados} duplicados en Excel (ignorados)\n`;
         if (skipped > 0) message += `⊘ ${skipped} filas saltadas\n`;
         if (duplicadosLimpiados > 0) message += `🗑️ ${duplicadosLimpiados} duplicados eliminados de BD\n`;
-        if (updated === 0 && inserted === 0 && duplicados === 0 && skipped === 0 && duplicadosLimpiados === 0) message += 'ℹ️ No se realizaron cambios';
+        
+        message += '\n📊 ESTADO ACTUAL DEL INVENTARIO:\n';
+        message += `🚚 ${productsInTransit} productos en tránsito\n`;
+        message += `⚠️ ${productsLowStock} productos con pocas unidades (< 5)\n`;
+        message += `✨ ${productsNewCount}/100 productos nuevos\n`;
+        
+        if (updated === 0 && inserted === 0 && duplicados === 0 && skipped === 0 && duplicadosLimpiados === 0) message += '\nℹ️ No se realizaron cambios';
         
         alert(message);
         
