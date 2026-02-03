@@ -241,19 +241,26 @@
           progressText.textContent = `Procesando producto ${i + 1}/${data.length}...`;
 
           try {
-            const codigo = row['CODIGO'] ? String(row['CODIGO']).trim().toUpperCase() : '';
-            const descripcion = row['DESCRIPCION'] ? String(row['DESCRIPCION']).trim() : '';
-            const precioDetal = parseFloat(row['PRECIO DETAL']) || 0;
-            const precioMayor = parseFloat(row['PRECIO MAYOR']) || 0;
-            const precioGmayor = parseFloat(row['PRECIO GMAYOR']) || 0;
-            const existencia = parseInt(row['EXISTENCIA ACTUAL']) || 0;
-            const departamento = row['DEPARTAMENTO'] ? String(row['DEPARTAMENTO']).trim() : '';
+          const codigo = row['CODIGO'] ? String(row['CODIGO']).trim().toUpperCase() : '';
+          const descripcion = row['DESCRIPCION'] ? String(row['DESCRIPCION']).trim() : '';
+          const precioDetal = parseFloat(row['PRECIO DETAL']) || 0;
+          const precioMayor = parseFloat(row['PRECIO MAYOR']) || 0;
+          const precioGmayor = parseFloat(row['PRECIO GMAYOR']) || 0;
+          const existencia = parseInt(row['EXISTENCIA ACTUAL']) || 0;
+          const departamento = row['DEPARTAMENTO'] ? String(row['DEPARTAMENTO']).trim() : '';
+          
+          if (!codigo || !descripcion) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: Código o Descripción vacíos`);
+            continue;
+          }
 
-            if (!codigo || !descripcion) {
-              errorCount++;
-              errors.push(`Fila ${i + 1}: Código o Descripción vacíos`);
-              continue;
-            }
+          // Validar que al menos un precio no sea 0
+          if (precioDetal === 0 && precioMayor === 0 && precioGmayor === 0) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: Todos los precios están en 0`);
+            continue;
+          }
 
             const existingProductId = existingCodesMap.get(codigo);
 
