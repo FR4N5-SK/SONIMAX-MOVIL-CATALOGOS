@@ -2066,6 +2066,14 @@ function createProductCard(product) {
   const optimizedUrl = optimizeImageUrl(imageUrl)
   const placeholderUrl = createImagePlaceholder(imageUrl)
 
+  // Determinar el estado del stock
+  let stockBadge = ''
+  if (product.stock === 0) {
+    stockBadge = '<span class="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">❌ AGOTADO</span>'
+  } else if (product.stock <= 5) {
+    stockBadge = `<span class="absolute bottom-3 right-3 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-lg">⚠️ ${product.stock} unid.</span>`
+  }
+
   card.innerHTML = `
     <div class="product-image-container">
       <img src="${placeholderUrl}"
@@ -2083,8 +2091,9 @@ function createProductCard(product) {
       </div>
       ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
       ${product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : ""}
-      <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
-        Agregar al Carrito
+      ${stockBadge}
+      <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg ${product.stock === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
+        ${product.stock === 0 ? 'Sin Stock' : 'Agregar al Carrito'}
       </button>
     </div>
   `
@@ -2109,6 +2118,10 @@ function createProductCard(product) {
   })
 
   card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
+    if (product.stock === 0) {
+      alert("Lo sentimos, este producto está agotado.")
+      return
+    }
     openQuantityModal(product)
   })
 
@@ -2270,6 +2283,16 @@ function confirmQuantity() {
 
   if (quantity < 1) {
     alert("La cantidad debe ser al menos 1")
+    return
+  }
+
+  if (selectedProductForQuantity.stock === 0) {
+    alert("Lo sentimos, este producto está agotado.")
+    return
+  }
+
+  if (quantity > selectedProductForQuantity.stock) {
+    alert(`Cantidad no disponible. Stock máximo: ${selectedProductForQuantity.stock}`)
     return
   }
 
@@ -3685,5 +3708,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const cleanDuplicatesBtn = document.getElementById("clean-duplicates-button")
   if (cleanDuplicatesBtn) {
     cleanDuplicatesBtn.addEventListener("click", cleanDuplicateProducts)
+  }
+
+  // Agregar evento al botón de actualizar inventario
+  const updateProductsBtn = document.getElementById("update-products-button")
+  if (updateProductsBtn) {
+    updateProductsBtn.addEventListener("click", window.showUpdateProductsModal)
   }
 })
