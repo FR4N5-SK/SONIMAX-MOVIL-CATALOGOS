@@ -246,8 +246,32 @@
           const precioDetal = parseFloat(row['PRECIO DETAL']) || 0;
           const precioMayor = parseFloat(row['PRECIO MAYOR']) || 0;
           const precioGmayor = parseFloat(row['PRECIO GMAYOR']) || 0;
-          const existencia = parseInt(row['EXISTENCIA ACTUAL']) || 0;
+          
+          // Buscar existencia con múltiples opciones de nombres de columna
+          const existenciaRaw = row['EXISTENCIA ACTUAL'] || 
+            row['Existencia Actual'] || 
+            row['existencia actual'] || 
+            row['Existencia'] || 
+            row['existencia'] || 
+            row['STOCK'] || 
+            row['Stock'] || 
+            row['stock'] || 
+            row['CANTIDAD'] || 
+            row['Cantidad'] || 
+            row['cantidad'] || 
+            row['QTY'] || 
+            row['Qty'] || 
+            row['qty'];
+          
+          // Limpiar y convertir a número
+          const existencia = existenciaRaw 
+            ? parseInt(String(existenciaRaw).trim().replace(/[^0-9.-]/g, '')) || 0 
+            : 0;
+          
           const departamento = row['DEPARTAMENTO'] ? String(row['DEPARTAMENTO']).trim() : '';
+          
+          // DEBUG: Ver qué cantidad se está leyendo
+          console.log(`[UPDATE-PROCESS] Stock para ${codigo} (${descripcion}): ${existencia} | Valor raw: "${existenciaRaw}" | Limpio: "${String(existenciaRaw || '').trim()}"`);
           
           if (!codigo || !descripcion) {
             errorCount++;
