@@ -677,6 +677,13 @@
           const precioMayor = parseFloat(row['Precio Mayor'] || row['Precio mayor'] || row['precio_mayor'] || row['Mayor'] || row['mayor'] || 0) || 0;
           const precioGmayor = parseFloat(row['Precio Gmayor'] || row['Precio gmayor'] || row['precio_gmayor'] || row['Gmayor'] || row['gmayor'] || 0) || 0;
 
+          // ===== VALIDAR QUE AL MENOS UN PRECIO NO SEA 0 =====
+          if (precioCliente === 0 && precioMayor === 0 && precioGmayor === 0) {
+            console.log('[EXCEL] ⚠️ Fila sin precios válidos, ignorada:', codigoRaw);
+            skipped++;
+            continue;
+          }
+
           // ===== NORMALIZAR Y VALIDAR =====
           const codigoKey = normalizeKey(codigoRaw);
           
