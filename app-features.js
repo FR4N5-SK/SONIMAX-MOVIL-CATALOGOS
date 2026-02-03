@@ -657,8 +657,7 @@
           }
           
           // ===== BUSCAR CANTIDAD =====
-          const cantidad = parseInt(
-            row['Existencia Actual'] || 
+          const cantidadRaw = row['Existencia Actual'] || 
             row['existencia actual'] || 
             row['Existencia'] || 
             row['existencia'] || 
@@ -668,9 +667,15 @@
             row['cantidad'] || 
             row['CANTIDAD'] || 
             row['Qty'] || 
-            row['qty'] || 
-            0
-          ) || 0;
+            row['qty'];
+          
+          // Limpiar y convertir a número, removiendo espacios y caracteres especiales
+          const cantidad = cantidadRaw 
+            ? parseInt(String(cantidadRaw).trim().replace(/[^0-9.-]/g, '')) || 0 
+            : 0;
+          
+          // DEBUG: Ver qué cantidad se está leyendo
+          console.log('[EXCEL] Stock para', codigoRaw, '(', descripcionRaw + '):', cantidad, '| Raw:', cantidadRaw, '| Limpio:', String(cantidadRaw || '').trim());
           
           // ===== BUSCAR PRECIOS =====
           const precioCliente = parseFloat(row['Precio Detal'] || row['Precio detal'] || row['precio_detal'] || row['Precio Cliente'] || row['precio_cliente'] || row['Maximo'] || row['maximo'] || 0) || 0;
