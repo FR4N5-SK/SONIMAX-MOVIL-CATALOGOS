@@ -1,8 +1,5 @@
---- START OF FILE text/javascript ---
-
 // ============================================
 // ACTUALIZAR PRODUCTOS DESDE EXCEL - SONIMAX MÓVIL
-// VERSIÓN CORREGIDA: NO DUPLICADOS, ACTUALIZACIÓN INTELIGENTE
 // ============================================
 
 (function() {
@@ -16,108 +13,99 @@
 
   const XLSX = window.XLSX;
 
-  // Función para normalizar textos (elimina espacios extra, acentos y pone mayúsculas)
-  // Ayuda a comparar "PROD 01" con "PROD01" o "Teléfono" con "telefono"
-  const normalizeKey = (str) => {
-    if (!str) return '';
-    return String(str)
-      .toUpperCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quitar acentos
-      .trim()
-      .replace(/\s+/g, '') // Quitar espacios internos
-      .replace(/[^\w]/g, ''); // Quitar caracteres especiales
-  };
-
-  const normalizeText = (str) => {
-    if (!str) return '';
-    return String(str).trim();
-  };
+  // ============================================
+  // MOSTRAR MODAL DE ACTUALIZAR PRODUCTOS
+  // ============================================
 
   window.showUpdateProductsModal = async function() {
     const { currentUserRole, supabaseClient } = getGlobalState();
 
+    console.log('[UPDATE-PRODUCTS] currentUserRole:', currentUserRole);
+
     if (currentUserRole !== 'admin') {
-      alert('Solo administradores pueden actualizar productos.');
+      alert('Solo administradores pueden actualizar productos. Tu rol: ' + (currentUserRole || 'desconocido'));
       return;
     }
 
     const modalDiv = document.createElement('div');
-    modalDiv.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto';
+    modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
     modalDiv.innerHTML = `
-      <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8 transform transition-all scale-100">
-        <div class="bg-gradient-to-r from-teal-600 to-teal-700 p-6 text-white flex items-center justify-between rounded-t-2xl">
+      <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
+        <div class="bg-gradient-to-r from-green-600 to-green-700 p-6 text-white flex items-center justify-between sticky top-0 z-10">
           <div>
-            <h2 class="text-2xl font-black">Actualizar Inventario</h2>
-            <p class="text-teal-100 mt-1 text-sm">Sube tu Excel para sincronizar precios y stock</p>
+            <h2 class="text-2xl font-bold">Actualizar Productos</h2>
+            <p class="text-green-100 mt-1">Sube un archivo Excel para actualizar el inventario</p>
           </div>
-          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-teal-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
+          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-green-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
         </div>
 
         <div class="p-6 space-y-6">
-          <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-xl shadow-sm">
-            <h3 class="font-bold text-blue-900 mb-2 flex items-center gap-2">
-              ℹ️ Lógica de Actualización:
-            </h3>
-            <ul class="text-sm text-blue-800 space-y-1 ml-1">
-              <li>• Se busca producto por <strong>CÓDIGO</strong> o <strong>DESCRIPCIÓN</strong>.</li>
-              <li>• Si existe ⮕ Actualiza precios, stock y descripción.</li>
-              <li>• Si NO existe ⮕ Crea el producto nuevo.</li>
-              <li>• Stock 0 ⮕ Se marca como <strong>AGOTADO</strong>.</li>
-              <li>• Stock 1 a 5 ⮕ Se marca como <strong>POCAS UNIDADES</strong>.</li>
-              <li>• <strong>No se eliminan</strong> productos existentes.</li>
+          <!-- Instrucciones -->
+          <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+            <h3 class="font-semibold text-blue-900 mb-2">📋 Columnas Requeridas del Excel:</h3>
+            <ul class="text-sm text-blue-800 space-y-1">
+              <li>• <strong>CODIGO</strong> - Código del producto</li>
+              <li>• <strong>DESCRIPCION</strong> - Nombre/Descripción del producto</li>
+              <li>• <strong>PRECIO DETAL</strong> - Precio cliente (precio_cliente)</li>
+              <li>• <strong>PRECIO MAYOR</strong> - Precio mayor (precio_mayor)</li>
+              <li>• <strong>PRECIO GMAYOR</strong> - Precio gran mayor (precio_gmayor)</li>
+              <li>• <strong>EXISTENCIA ACTUAL</strong> - Cantidad en stock</li>
+              <li>• <strong>DEPARTAMENTO</strong> - Departamento del producto</li>
             </ul>
           </div>
 
-          <!-- Zona de Carga -->
-          <div class="border-3 border-dashed border-teal-200 rounded-2xl p-10 text-center hover:border-teal-500 hover:bg-teal-50 transition-all cursor-pointer group" id="drop-zone">
-            <div class="w-16 h-16 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-              </svg>
-            </div>
-            <p class="text-gray-700 font-bold text-lg mb-1">Haz clic o arrastra tu Excel aquí</p>
-            <p class="text-sm text-gray-400">Soporta .xlsx, .xls, .csv</p>
+          <!-- Selector de Archivo -->
+          <div class="border-2 border-dashed border-green-300 rounded-xl p-8 text-center hover:border-green-500 transition-all cursor-pointer" id="drop-zone">
+            <svg class="w-12 h-12 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-2a2 2 0 00-2 2v6m-6-6V5a2 2 0 012-2h2a2 2 0 012 2v6m0 0V5a2 2 0 012-2h2a2 2 0 012 2v6"></path>
+            </svg>
+            <p class="text-gray-600 font-semibold mb-2">Arrastra tu Excel aquí o haz clic</p>
+            <p class="text-sm text-gray-500">Formatos soportados: .xlsx, .xls, .csv</p>
             <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" class="hidden" />
           </div>
 
-          <!-- Estado -->
-          <div id="file-status" class="hidden animate-fade-in">
-            <div class="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
-              <div>
-                <p class="text-sm font-bold text-green-800" id="file-name">Archivo.xlsx</p>
-                <p class="text-xs text-green-600 mt-1">Filas encontradas: <strong id="file-count">0</strong></p>
-              </div>
-              <span class="text-2xl">📄</span>
+          <!-- Estado del Archivo -->
+          <div id="file-status" class="hidden">
+            <div class="bg-green-50 border border-green-300 rounded-lg p-4">
+              <p class="text-sm text-green-800"><strong id="file-name">Archivo</strong> cargado correctamente</p>
+              <p class="text-xs text-green-700 mt-1">Productos a procesar: <strong id="file-count">0</strong></p>
             </div>
           </div>
 
-          <!-- Botones -->
-          <div class="flex gap-3 pt-2">
-            <button id="process-btn" class="flex-1 px-6 py-4 bg-gradient-to-r from-teal-600 to-teal-700 text-white rounded-xl font-bold hover:from-teal-700 hover:to-teal-800 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95" disabled>
-              🚀 Procesar Actualización
+          <!-- Botones de Acción -->
+          <div class="flex gap-3 pt-4">
+            <button id="process-btn" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed" 
+              disabled>
+              Procesar Actualización
+            </button>
+            <button class="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all" 
+              onclick="this.closest('.fixed').remove()">
+              Cancelar
             </button>
           </div>
 
-          <!-- Progreso -->
-          <div id="progress-container" class="hidden space-y-2 animate-fade-in">
-            <div class="flex justify-between text-xs font-bold text-gray-600 uppercase tracking-wide">
-              <span id="progress-text">Iniciando...</span>
-              <span id="progress-percent">0%</span>
-            </div>
-            <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-              <div id="progress-bar" class="bg-gradient-to-r from-teal-500 to-green-500 h-3 rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(20,184,166,0.5)]" style="width: 0%"></div>
+          <!-- Indicador de Progreso -->
+          <div id="progress-container" class="hidden">
+            <div class="space-y-2">
+              <div class="flex justify-between text-sm">
+                <span id="progress-text" class="font-semibold text-gray-700">Procesando...</span>
+                <span id="progress-percent">0%</span>
+              </div>
+              <div class="w-full bg-gray-200 rounded-full h-2">
+                <div id="progress-bar" class="bg-green-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+              </div>
             </div>
           </div>
 
-          <!-- Resultados -->
-          <div id="result-container" class="hidden animate-fade-in">
-            <div class="bg-gray-50 rounded-xl border border-gray-200 p-5 space-y-3">
-              <h3 class="font-bold text-gray-800 border-b pb-2">📊 Resumen Final</h3>
-              <div class="grid grid-cols-2 gap-4 text-sm">
-                <div class="flex items-center text-green-700"><span class="mr-2">✨</span> Creados: <strong class="ml-auto" id="result-created-count">0</strong></div>
-                <div class="flex items-center text-blue-700"><span class="mr-2">🔄</span> Actualizados: <strong class="ml-auto" id="result-updated-count">0</strong></div>
-                <div class="flex items-center text-red-700"><span class="mr-2">❌</span> Errores: <strong class="ml-auto" id="result-errors-count">0</strong></div>
-              </div>
+          <!-- Resultado -->
+          <div id="result-container" class="hidden">
+            <div class="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h3 class="font-bold text-gray-800">Resumen de Actualización:</h3>
+              <ul class="text-sm text-gray-700 space-y-2">
+                <li id="result-created">✅ Productos creados: <strong id="result-created-count">0</strong></li>
+                <li id="result-updated">✅ Productos actualizados: <strong id="result-updated-count">0</strong></li>
+                <li id="result-errors" class="text-red-700">❌ Errores: <strong id="result-errors-count">0</strong></li>
+              </ul>
             </div>
           </div>
         </div>
@@ -127,32 +115,43 @@
     document.body.appendChild(modalDiv);
 
     let excelData = null;
+
+    // Configurar drag and drop
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('excel-file-input');
     const processBtn = document.getElementById('process-btn');
     const fileStatus = document.getElementById('file-status');
 
-    // Event Listeners para Drag & Drop
     dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('border-teal-500', 'bg-teal-50');
-    });
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('border-teal-500', 'bg-teal-50');
-    });
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('border-teal-500', 'bg-teal-50');
-      const file = e.dataTransfer.files[0];
-      if (file) handleExcelFile(file);
-    });
+
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (file) handleExcelFile(file);
+      if (file) {
+        handleExcelFile(file);
+      }
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('border-green-500', 'bg-green-50');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('border-green-500', 'bg-green-50');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-green-500', 'bg-green-50');
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        handleExcelFile(file);
+      }
     });
 
     function handleExcelFile(file) {
+      console.log('[UPDATE-EXCEL] Archivo seleccionado:', file.name);
+
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
@@ -162,8 +161,16 @@
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-          if (jsonData.length === 0) {
-            alert('El archivo Excel está vacío.');
+          console.log('[UPDATE-EXCEL] Datos parseados:', jsonData.length, 'filas');
+          console.log('[UPDATE-EXCEL] Primera fila:', jsonData[0]);
+
+          // Validar que tenga las columnas requeridas
+          const requiredColumns = ['CODIGO', 'DESCRIPCION', 'PRECIO DETAL', 'PRECIO MAYOR', 'PRECIO GMAYOR', 'EXISTENCIA ACTUAL', 'DEPARTAMENTO'];
+          const headers = Object.keys(jsonData[0] || {});
+
+          const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+          if (missingColumns.length > 0) {
+            alert('❌ Columnas faltantes:\n' + missingColumns.join(', ') + '\n\nAsegúrate que los nombres sean exactos (mayúsculas y minúsculas)');
             return;
           }
 
@@ -172,22 +179,28 @@
           document.getElementById('file-name').textContent = file.name;
           document.getElementById('file-count').textContent = jsonData.length;
           processBtn.disabled = false;
+
+          console.log('[UPDATE-EXCEL] Archivo validado correctamente');
         } catch (error) {
-          alert('Error al leer el archivo: ' + error.message);
+          console.error('[UPDATE-EXCEL] Error parseando Excel:', error);
+          alert('Error al leer el archivo Excel: ' + error.message);
         }
       };
       reader.readAsArrayBuffer(file);
     }
 
     processBtn.addEventListener('click', async () => {
-      if (!excelData) return;
+      if (!excelData || excelData.length === 0) {
+        alert('No hay datos para procesar');
+        return;
+      }
+
       await processExcelData(excelData, supabaseClient);
     });
 
-    // ---------------------------------------------------------
-    // LÓGICA DE PROCESAMIENTO ROBUSTA
-    // ---------------------------------------------------------
     async function processExcelData(data, supabaseClient) {
+      console.log('[UPDATE-PROCESS] Iniciando procesamiento de', data.length, 'productos');
+
       const progressContainer = document.getElementById('progress-container');
       const resultContainer = document.getElementById('result-container');
       const progressBar = document.getElementById('progress-bar');
@@ -195,145 +208,177 @@
       const progressPercent = document.getElementById('progress-percent');
 
       processBtn.disabled = true;
+      fileStatus.classList.add('hidden');
       progressContainer.classList.remove('hidden');
-      resultContainer.classList.add('hidden');
 
       let createdCount = 0;
       let updatedCount = 0;
       let errorCount = 0;
+      const errors = [];
 
       try {
-        // 1. OBTENER TODOS LOS PRODUCTOS DE SUPABASE PARA COMPARAR
-        // Traemos ID, CODIGO y NOMBRE para chequear duplicados por ambos campos
-        const { data: dbProducts, error: fetchError } = await supabaseClient
+        // Obtener productos existentes
+        const { data: existingProducts, error: fetchError } = await supabaseClient
           .from('products')
-          .select('id, codigo, nombre');
+          .select('id, codigo');
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+          throw new Error('Error obteniendo productos: ' + fetchError.message);
+        }
 
-        // 2. CREAR MAPAS DE BÚSQUEDA RÁPIDA (Normalizados)
-        const dbMapByCode = new Map();
-        const dbMapByName = new Map();
+        const existingCodesMap = new Map(
+          (existingProducts || []).map(p => [p.codigo ? p.codigo.toUpperCase() : '', p.id])
+        );
 
-        dbProducts.forEach(p => {
-          if (p.codigo) dbMapByCode.set(normalizeKey(p.codigo), p.id);
-          if (p.nombre) dbMapByName.set(normalizeKey(p.nombre), p.id);
-        });
+        console.log('[UPDATE-PROCESS] Productos existentes en BD:', existingCodesMap.size);
 
-        // 3. PROCESAR FILA POR FILA
+        // Procesar cada fila
         for (let i = 0; i < data.length; i++) {
           const row = data[i];
+          const progress = ((i + 1) / data.length) * 100;
+          progressBar.style.width = progress + '%';
+          progressPercent.textContent = Math.round(progress) + '%';
+          progressText.textContent = `Procesando producto ${i + 1}/${data.length}...`;
+
+          try {
+          const codigo = row['CODIGO'] ? String(row['CODIGO']).trim().toUpperCase() : '';
+          const descripcion = row['DESCRIPCION'] ? String(row['DESCRIPCION']).trim() : '';
+          const precioDetal = parseFloat(row['PRECIO DETAL']) || 0;
+          const precioMayor = parseFloat(row['PRECIO MAYOR']) || 0;
+          const precioGmayor = parseFloat(row['PRECIO GMAYOR']) || 0;
           
-          // Actualizar barra de progreso
-          if (i % 5 === 0) {
-            const percent = Math.round(((i + 1) / data.length) * 100);
-            progressBar.style.width = `${percent}%`;
-            progressPercent.textContent = `${percent}%`;
-            progressText.textContent = `Procesando ${i + 1} de ${data.length}`;
-            await new Promise(r => setTimeout(r, 0)); // Dejar renderizar la UI
-          }
-
-          // Detección flexible de columnas
-          const codigo = normalizeText(row['CODIGO'] || row['codigo'] || row['Codigo'] || '');
-          const descripcion = normalizeText(row['DESCRIPCION'] || row['descripcion'] || row['NOMBRE'] || row['nombre'] || '');
-          const precioDetal = parseFloat(row['PRECIO DETAL'] || row['precio detal'] || row['DETAL'] || row['detal'] || 0);
-          const precioMayor = parseFloat(row['PRECIO MAYOR'] || row['precio mayor'] || row['MAYOR'] || row['mayor'] || 0);
-          const precioGmayor = parseFloat(row['PRECIO GMAYOR'] || row['precio gmayor'] || row['GMAYOR'] || row['gmayor'] || 0);
-          const existencia = parseInt(row['EXISTENCIA ACTUAL'] || row['existencia'] || row['STOCK'] || row['stock'] || row['CANTIDAD'] || 0);
-          const departamento = normalizeText(row['DEPARTAMENTO'] || row['departamento'] || 'GENERAL');
-
-          // Validaciones básicas
-          if (!descripcion) {
-            console.warn(`Fila ${i+1} ignorada: Sin descripción.`);
-            continue; 
-          }
-
-          // Identificar si existe (por código O por nombre)
-          const normalizedCode = normalizeKey(codigo);
-          const normalizedName = normalizeKey(descripcion);
+          // Buscar existencia con múltiples opciones de nombres de columna
+          const existenciaRaw = row['EXISTENCIA ACTUAL'] || 
+            row['Existencia Actual'] || 
+            row['existencia actual'] || 
+            row['Existencia'] || 
+            row['existencia'] || 
+            row['STOCK'] || 
+            row['Stock'] || 
+            row['stock'] || 
+            row['CANTIDAD'] || 
+            row['Cantidad'] || 
+            row['cantidad'] || 
+            row['QTY'] || 
+            row['Qty'] || 
+            row['qty'];
           
-          let existingId = null;
-          if (normalizedCode && dbMapByCode.has(normalizedCode)) {
-            existingId = dbMapByCode.get(normalizedCode);
-          } else if (normalizedName && dbMapByName.has(normalizedName)) {
-            existingId = dbMapByName.get(normalizedName);
+          // Limpiar y convertir a número
+          const existencia = existenciaRaw 
+            ? parseInt(String(existenciaRaw).trim().replace(/[^0-9.-]/g, '')) || 0 
+            : 0;
+          
+          const departamento = row['DEPARTAMENTO'] ? String(row['DEPARTAMENTO']).trim() : '';
+          
+          // DEBUG: Ver qué cantidad se está leyendo
+          console.log(`[UPDATE-PROCESS] Stock para ${codigo} (${descripcion}): ${existencia} | Valor raw: "${existenciaRaw}" | Limpio: "${String(existenciaRaw || '').trim()}"`);
+          
+          if (!codigo || !descripcion) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: Código o Descripción vacíos`);
+            continue;
           }
 
-          // Datos a guardar
-          const productData = {
-            codigo: codigo, // Guardar tal cual viene en el Excel
-            nombre: descripcion,
-            descripcion: codigo, // Guardamos el código en el campo descripción para compatibilidad visual
-            precio_cliente: precioDetal,
-            precio_mayor: precioMayor,
-            precio_gmayor: precioGmayor,
-            stock: existencia,
-            departamento: departamento
-          };
+          // Validar que al menos un precio no sea 0
+          if (precioDetal === 0 && precioMayor === 0 && precioGmayor === 0) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: Todos los precios están en 0`);
+            continue;
+          }
 
-          if (existingId) {
-            // --- ACTUALIZAR ---
-            const { error: updateError } = await supabaseClient
-              .from('products')
-              .update(productData)
-              .eq('id', existingId);
+            const existingProductId = existingCodesMap.get(codigo);
 
-            if (updateError) {
-              console.error(`Error actualizando ID ${existingId}:`, updateError);
-              errorCount++;
-            } else {
+            if (existingProductId) {
+              // ACTUALIZAR producto existente
+              const { error: updateError } = await supabaseClient
+                .from('products')
+                .update({
+                  nombre: descripcion,
+                  descripcion: descripcion,
+                  precio_cliente: precioDetal,
+                  precio_mayor: precioMayor,
+                  precio_gmayor: precioGmayor,
+                  stock: existencia,
+                  departamento: departamento,
+                })
+                .eq('id', existingProductId);
+
+              if (updateError) {
+                throw updateError;
+              }
+
               updatedCount++;
-            }
-
-          } else {
-            // --- CREAR NUEVO ---
-            // Solo si es nuevo agregamos is_new: true
-            const newProductData = {
-              ...productData,
-              is_new: true,
-              imagen_url: '' // Sin imagen por defecto
-            };
-
-            const { error: insertError } = await supabaseClient
-              .from('products')
-              .insert(newProductData);
-
-            if (insertError) {
-              console.error(`Error insertando ${descripcion}:`, insertError);
-              errorCount++;
+              console.log(`[UPDATE-PROCESS] ✏️ Actualizado: ${codigo} - Stock: ${existencia}`);
             } else {
+              // CREAR nuevo producto
+              const { error: insertError } = await supabaseClient
+                .from('products')
+                .insert({
+                  codigo: codigo,
+                  nombre: descripcion,
+                  descripcion: descripcion,
+                  precio_cliente: precioDetal,
+                  precio_mayor: precioMayor,
+                  precio_gmayor: precioGmayor,
+                  stock: existencia,
+                  departamento: departamento,
+                  imagen_url: '', // Sin imagen inicialmente
+                });
+
+              if (insertError) {
+                throw insertError;
+              }
+
               createdCount++;
+              console.log(`[UPDATE-PROCESS] ✨ Creado: ${codigo} - Stock: ${existencia}`);
             }
+          } catch (error) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: ${error.message}`);
+            console.error(`[UPDATE-PROCESS] Error en fila ${i + 1}:`, error);
+          }
+
+          // Pequeña pausa para no saturar la BD
+          if (i % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
 
-        // Finalizar
-        progressBar.style.width = '100%';
-        progressPercent.textContent = '100%';
-        progressText.textContent = 'Completado';
-        
+        progressContainer.classList.add('hidden');
         resultContainer.classList.remove('hidden');
+
         document.getElementById('result-created-count').textContent = createdCount;
         document.getElementById('result-updated-count').textContent = updatedCount;
         document.getElementById('result-errors-count').textContent = errorCount;
 
-        // Recargar la app para ver cambios
-        if (window.loadProducts) {
-          window.loadProducts();
+        if (errors.length > 0) {
+          console.warn('[UPDATE-PROCESS] Errores encontrados:', errors);
         }
 
+        console.log('[UPDATE-PROCESS] ✅ Completado! Creados:', createdCount, 'Actualizados:', updatedCount, 'Errores:', errorCount);
+
+        // Recargar productos en la aplicación
+        if (window.allProducts) {
+          console.log('[UPDATE-PROCESS] Recargando productos en la aplicación...');
+          const { data: updatedProducts } = await supabaseClient.from('products').select('*');
+          if (updatedProducts) {
+            window.allProducts = updatedProducts;
+            if (window.renderProducts) {
+              window.renderProducts();
+            }
+          }
+        }
+
+        // Cerrar modal automáticamente después de 3 segundos
         setTimeout(() => {
           modalDiv.remove();
-          alert('¡Inventario actualizado correctamente!');
-        }, 2000);
-
+        }, 3000);
       } catch (error) {
-        console.error('Error crítico en proceso:', error);
-        alert('Ocurrió un error: ' + error.message);
+        console.error('[UPDATE-PROCESS] Error general:', error);
+        alert('Error durante la actualización: ' + error.message);
         processBtn.disabled = false;
         progressContainer.classList.add('hidden');
       }
     }
   };
 })();
---- START OF FILE text/javascript ---
