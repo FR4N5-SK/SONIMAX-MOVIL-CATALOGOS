@@ -2991,6 +2991,7 @@ async function handleCSVUpload() {
         gmayor: headers.indexOf("GMAYOR"),
         url: headers.indexOf("URL"),
         departamento: headers.indexOf("DEPARTAMENTO"),
+        stock: headers.indexOf("STOCK"),
       }
 
       if (
@@ -3023,12 +3024,14 @@ async function handleCSVUpload() {
         const url = colIndexes.url !== -1 ? values[colIndexes.url]?.trim() || null : null
         const departamento =
           colIndexes.departamento !== -1 ? values[colIndexes.departamento]?.trim() || "Sin categoría" : "Sin categoría"
+        const stock = colIndexes.stock !== -1 ? values[colIndexes.stock]?.trim() || "0" : "0"
 
         if (!descripcion) continue
 
         const precioCliente = Number.parseFloat(detal) || 0
         const precioMayor = Number.parseFloat(mayor) || 0
         const precioGmayor = Number.parseFloat(gmayor) || 0
+        const stockValue = Number.parseInt(stock) || 0
 
         // Validar que al menos un precio no sea 0
         if (precioCliente === 0 && precioMayor === 0 && precioGmayor === 0) {
