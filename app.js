@@ -3026,13 +3026,23 @@ async function handleCSVUpload() {
 
         if (!descripcion) continue
 
+        const precioCliente = Number.parseFloat(detal) || 0
+        const precioMayor = Number.parseFloat(mayor) || 0
+        const precioGmayor = Number.parseFloat(gmayor) || 0
+
+        // Validar que al menos un precio no sea 0
+        if (precioCliente === 0 && precioMayor === 0 && precioGmayor === 0) {
+          console.log(`[CSV] ⚠️ Fila ignorada - todos los precios son 0: ${descripcion}`)
+          continue
+        }
+
         const product = {
           codigo: codigo || "",
           nombre: descripcion,
           descripcion: codigo || "",
-          precio_cliente: Number.parseFloat(detal) || 0,
-          precio_mayor: Number.parseFloat(mayor) || 0,
-          precio_gmayor: Number.parseFloat(gmayor) || 0,
+          precio_cliente: precioCliente,
+          precio_mayor: precioMayor,
+          precio_gmayor: precioGmayor,
           departamento: departamento,
           imagen_url: url,
           is_new: false, // Inicialmente todos son false
