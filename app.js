@@ -2069,9 +2069,9 @@ function createProductCard(product) {
   // Determinar el estado del stock
   let stockBadge = ''
   if (product.stock === 0) {
-    stockBadge = '<span class="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">❌ AGOTADO</span>'
+    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">❌ AGOTADO</span>'
   } else if (product.stock <= 5) {
-    stockBadge = `<span class="absolute bottom-3 right-3 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-lg">⚠️ ${product.stock} unid.</span>`
+    stockBadge = `<span class="absolute bottom-3 right-3 z-20 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-lg">⚠️ ${product.stock} unid.</span>`
   }
 
   card.innerHTML = `
@@ -2085,6 +2085,7 @@ function createProductCard(product) {
     </div>
     <div class="p-5">
       <h3 class="font-bold text-lg text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
+      ${product.codigo ? `<p class="text-xs text-gray-500 mb-1 font-semibold">Código: ${product.codigo}</p>` : ""}
       ${product.descripcion ? `<p class="text-gray-600 text-sm mb-3 line-clamp-2">${product.descripcion}</p>` : ""}
       <div class="mb-4">
         ${priceHTML}
@@ -2092,8 +2093,8 @@ function createProductCard(product) {
       ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
       ${product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : ""}
       ${stockBadge}
-      <button class="add-to-cart-btn w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg ${product.stock === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
-        ${product.stock === 0 ? 'Sin Stock' : 'Agregar al Carrito'}
+      <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
+        Agregar al Carrito
       </button>
     </div>
   `
@@ -2117,11 +2118,14 @@ function createProductCard(product) {
     showImageModal(imageUrl, product.nombre)
   })
 
+  // DEBUG: confirmar que los productos que se renderizan traen 'codigo' y 'descripcion'
+  try {
+    console.debug(`[RENDER] product id=${product.id} codigo=${product.codigo || ''} nombre=${product.nombre || ''} descripcion=${product.descripcion || ''}`)
+  } catch (err) {
+    /* noop */
+  }
+
   card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
-    if (product.stock === 0) {
-      alert("Lo sentimos, este producto está agotado.")
-      return
-    }
     openQuantityModal(product)
   })
 
@@ -2286,12 +2290,7 @@ function confirmQuantity() {
     return
   }
 
-  if (selectedProductForQuantity.stock === 0) {
-    alert("Lo sentimos, este producto está agotado.")
-    return
-  }
-
-  if (quantity > selectedProductForQuantity.stock) {
+  if (selectedProductForQuantity.stock !== 0 && quantity > selectedProductForQuantity.stock) {
     alert(`Cantidad no disponible. Stock máximo: ${selectedProductForQuantity.stock}`)
     return
   }
