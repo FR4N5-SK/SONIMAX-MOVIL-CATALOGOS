@@ -715,190 +715,144 @@
 
       const pageHeight = doc.internal.pageSize.getHeight();
       const pageWidth = doc.internal.pageSize.getWidth();
-      const productsPerRow = 4;
-      const productWidth = (pageWidth - 20) / productsPerRow;
-      const productHeight = 65; // Aumentado para acomodar más contenido
 
       // ==================== CREAR PORTADA ====================
-      // Fondo gradual rojo y negro
-      doc.setFillColor(220, 38, 38); // Rojo
+      // Fondo rojo sólido (Color corporativo Sonimax)
+      doc.setFillColor(220, 38, 38); // #DC2626
       doc.rect(0, 0, pageWidth, pageHeight, 'F');
       
-      // Formas geométricas de fondo (rectángulos negros diagonales)
-      doc.setFillColor(30, 30, 30);
-      // Rectángulo en esquina superior izquierda
-      doc.rect(0, 0, pageWidth * 0.35, pageHeight * 0.45, 'F');
-      
-      // Rectángulo en esquina inferior derecha
-      doc.rect(pageWidth * 0.65, pageHeight * 0.55, pageWidth * 0.35, pageHeight * 0.45, 'F');
+      // Elemento decorativo (Círculo sutil para dar profundidad)
+      doc.setFillColor(185, 28, 28); // #B91C1C (Rojo más oscuro)
+      doc.circle(pageWidth, 0, 120, 'F');
+      doc.circle(0, pageHeight, 100, 'F');
 
       // Logo/Título SONIMAX MÓVIL
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(32);
-      doc.setFont(undefined, 'bold');
-      doc.text('SONIMAX MÓVIL', pageWidth / 2, pageHeight * 0.25, { align: 'center' });
+      doc.setFontSize(42);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SONIMAX MÓVIL', pageWidth / 2, pageHeight * 0.35, { align: 'center' });
       
       // Línea decorativa roja
       doc.setDrawColor(255, 255, 255);
-      doc.setLineWidth(2);
-      doc.line(pageWidth * 0.25, pageHeight * 0.32, pageWidth * 0.75, pageHeight * 0.32);
+      doc.setLineWidth(1);
+      doc.line(pageWidth * 0.2, pageHeight * 0.37, pageWidth * 0.8, pageHeight * 0.37);
 
       // Departamento en grande
-      doc.setFillColor(220, 38, 38);
-      doc.rect(pageWidth * 0.15, pageHeight * 0.38, pageWidth * 0.7, 8, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(20);
-      doc.setFont(undefined, 'bold');
-      doc.text(selectedDept !== 'all' ? selectedDept : 'CATÁLOGO COMPLETO', pageWidth / 2, pageHeight * 0.415, { align: 'center' });
+      doc.setFontSize(24);
+      doc.setFont('helvetica', 'normal');
+      const deptTitle = selectedDept === 'all' ? 'CATÁLOGO GENERAL' : selectedDept.toUpperCase();
+      doc.text(deptTitle, pageWidth / 2, pageHeight * 0.45, { align: 'center' });
 
       // Fecha
-      doc.setFillColor(0, 0, 0);
-      doc.rect(pageWidth * 0.15, pageHeight * 0.49, pageWidth * 0.7, 8, 'F');
-      doc.setTextColor(255, 255, 255);
       doc.setFontSize(16);
-      doc.setFont(undefined, 'bold');
+      doc.setFont('helvetica', 'italic');
       const today = new Date();
-      const dateStr = today.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      doc.text(dateStr, pageWidth / 2, pageHeight * 0.515, { align: 'center' });
+      const dateStr = today.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+      doc.text(dateStr, pageWidth / 2, pageHeight * 0.50, { align: 'center' });
 
       // Información de contacto al pie
-      doc.setFillColor(220, 38, 38);
-      doc.rect(0, pageHeight - 15, pageWidth, 15, 'F');
-      
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.text('Av 20 entre calles 27 y 28 - Barquisimeto, Edo. Lara', pageWidth / 2, pageHeight - 9, { align: 'center' });
-      doc.text('Tel: 0424-9316999 | Contamos con envíos nacionales', pageWidth / 2, pageHeight - 5, { align: 'center' });
-
-      // ==================== CREAR PÁGINA DE PRODUCTOS ====================
-      doc.addPage();
-      
-      let yPosition = 15;
-
-      // Encabezado en página de productos
-      doc.setFillColor(220, 38, 38);
-      doc.rect(0, 0, pageWidth, 18, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.setFont(undefined, 'bold');
-      doc.text('SONIMAX MÓVIL', 10, 8);
-      
-      doc.setFillColor(0, 0, 0);
-      doc.rect(0, 10, pageWidth, 4, 'F');
-      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Tecnología al alcance de tus manos', pageWidth / 2, pageHeight - 30, { align: 'center' });
       doc.setFontSize(10);
-      doc.text(selectedDept !== 'all' ? selectedDept : 'TODOS', pageWidth / 2, 13, { align: 'center' });
+      doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 20, { align: 'center' });
 
-      // Fecha en página de productos
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(8);
-      doc.text(`Fecha: ${dateStr}`, pageWidth - 10, 27, { align: 'right' });
+      // ==================== TABLA DE PRODUCTOS ====================
+      doc.addPage();
 
-      yPosition = 32;
+      // Definir columnas
+      const columns = [
+        { header: 'Imagen', dataKey: 'image' },
+        { header: 'Código', dataKey: 'codigo' },
+        { header: 'Descripción', dataKey: 'nombre' },
+        { header: 'Precio Detal', dataKey: 'precio_cliente' },
+        { header: 'Precio Mayor', dataKey: 'precio_mayor' }
+      ];
 
-      // Función para dibujar tarjeta de producto mejorada
-      const drawProductCard = (product, x, y) => {
-        const cardWidth = productWidth - 2;
-        
-        // Fondo blanco con borde rojo
-        doc.setDrawColor(220, 38, 38);
-        doc.setLineWidth(0.8);
-        doc.setFillColor(255, 255, 255);
-        doc.rect(x, y, cardWidth, productHeight, 'FD');
+      // Preparar datos
+      const body = filtered.map(p => ({
+        id: p.id,
+        image: '', // Placeholder para el hook
+        codigo: p.codigo || 'S/C',
+        nombre: p.nombre || 'Sin descripción',
+        precio_cliente: `$${parseFloat(p.precio_cliente || 0).toLocaleString('es-CO')}`,
+        precio_mayor: `$${parseFloat(p.precio_mayor || 0).toLocaleString('es-CO')}`
+      }));
 
-        // Encabezado rojo solo con CÓDIGO
-        doc.setFillColor(220, 38, 38);
-        doc.rect(x, y, cardWidth, 5, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'bold');
-        doc.text(product.codigo || 'S/C', x + 1, y + 3.5, { align: 'left', maxWidth: cardWidth - 2 });
-
-        // Descripción debajo del código (NUEVA LÍNEA)
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(5.5);
-        doc.setFont(undefined, 'normal');
-        const desc = (product.descripcion || product.nombre || 'Sin nombre').substring(0, 35);
-        doc.text(desc, x + 1, y + 8, { align: 'left', maxWidth: cardWidth - 2 });
-
-        // Área para foto MÁS GRANDE
-        doc.setFillColor(235, 235, 235);
-        doc.rect(x + 0.5, y + 9, cardWidth - 1, 28, 'F');
-        
-        const imgKey = product.id || product.codigo;
-        const base64Image = imageCache[imgKey];
-        
-        if (base64Image) {
-          try {
-            doc.addImage(base64Image, 'JPEG', x + 0.5, y + 9, cardWidth - 1, 28);
-          } catch (e) {
-            console.warn('[PDF] Error imagen:', e);
-            doc.setTextColor(150, 150, 150);
-            doc.setFontSize(6);
-            doc.text('Sin foto', x + cardWidth / 2 - 0.5, y + 22, { align: 'center' });
+      // Generar tabla con autoTable
+      doc.autoTable({
+        columns: columns,
+        body: body,
+        startY: 20,
+        theme: 'striped',
+        styles: {
+          fontSize: 10,
+          cellPadding: 4, // Aumentado para que no esté pegado
+          valign: 'middle',
+          overflow: 'linebreak',
+          lineColor: [220, 220, 220],
+          lineWidth: 0.1
+        },
+        headStyles: {
+          fillColor: [220, 38, 38], // Rojo corporativo
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 11,
+          halign: 'center'
+        },
+        columnStyles: {
+          image: { cellWidth: 25, minCellHeight: 25 },
+          codigo: { cellWidth: 25, fontStyle: 'bold', halign: 'center' },
+          nombre: { cellWidth: 'auto' },
+          precio_cliente: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] }, // Rojo para Detal
+          precio_mayor: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] } // Verde para Mayor (contraste)
+        },
+        alternateRowStyles: {
+          fillColor: [254, 242, 242] // Rojo muy tenue para filas alternas
+        },
+        didDrawCell: (data) => {
+          // Dibujar imagen en la celda correspondiente
+          if (data.column.dataKey === 'image' && data.cell.section === 'body') {
+            const productId = data.row.raw.id;
+            const imgData = imageCache[productId];
+            
+            if (imgData) {
+              const cell = data.cell;
+              const padding = 2;
+              const dim = Math.min(cell.width, cell.height) - (padding * 2);
+              const x = cell.x + (cell.width - dim) / 2;
+              const y = cell.y + (cell.height - dim) / 2;
+              
+              try {
+                doc.addImage(imgData, 'JPEG', x, y, dim, dim);
+                // Borde sutil
+                doc.setDrawColor(200, 200, 200);
+                doc.setLineWidth(0.1);
+                doc.rect(x, y, dim, dim);
+              } catch (e) {
+                // Fallo silencioso
+              }
+            } else {
+              // Marcador de posición estético
+              doc.setFontSize(6);
+              doc.setTextColor(150);
+              doc.text('Sin Foto', data.cell.x + data.cell.width/2, data.cell.y + data.cell.height/2, { align: 'center', baseline: 'middle' });
+            }
           }
-        } else {
-          doc.setTextColor(150, 150, 150);
-          doc.setFontSize(6);
-          doc.text('Sin foto', x + cardWidth / 2 - 0.5, y + 22, { align: 'center' });
-        }
-
-        // Precios en pie MÁS GRANDES (fondo negro)
-        doc.setFillColor(0, 0, 0);
-        doc.rect(x, y + productHeight - 12, cardWidth, 12, 'F');
-
-        // Precio Detal LADO IZQUIERDO
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(6);
-        doc.setFont(undefined, 'normal');
-        doc.text('Detal:', x + 1, y + productHeight - 8);
-        doc.setTextColor(255, 215, 0);
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'bold');
-        doc.text(`$${parseFloat(product.precio_cliente || 0).toLocaleString('es-CO')}`, x + 1, y + productHeight - 3);
-
-        // Precio Mayor LADO DERECHO
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(6);
-        doc.setFont(undefined, 'normal');
-        doc.text('Mayor:', x + cardWidth / 2, y + productHeight - 8);
-        doc.setTextColor(255, 215, 0);
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'bold');
-        doc.text(`$${parseFloat(product.precio_mayor || 0).toLocaleString('es-CO')}`, x + cardWidth / 2, y + productHeight - 3);
-      };
-
-      // Dibujar productos en grid de 4 columnas
-      let productIndex = 0;
-      while (productIndex < filtered.length) {
-        if (yPosition + productHeight > pageHeight - 10) {
-          doc.addPage();
-          yPosition = 10;
+        },
+        didDrawPage: (data) => {
+          // Encabezado de página
+          doc.setFontSize(10);
+          doc.setTextColor(100);
+          doc.text('SONIMAX MÓVIL - Catálogo', data.settings.margin.left, 10);
           
-          // Mini encabezado en nueva página
-          doc.setFillColor(220, 38, 38);
-          doc.rect(0, 0, pageWidth, 4, 'F');
-          doc.setTextColor(255, 255, 255);
+          // Pie de página con numeración
+          const pageCount = doc.internal.getNumberOfPages();
           doc.setFontSize(8);
-          doc.setFont(undefined, 'bold');
-          doc.text('SONIMAX MÓVIL', 10, 3);
-          yPosition = 8;
+          doc.text(`Página ${pageCount}`, pageWidth - 20, pageHeight - 10, { align: 'right' });
+          doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 10, { align: 'center' });
         }
-
-        for (let col = 0; col < productsPerRow && productIndex < filtered.length; col++) {
-          const xPosition = 10 + col * productWidth;
-          drawProductCard(filtered[productIndex], xPosition, yPosition);
-          productIndex++;
-        }
-
-        yPosition += productHeight + 2;
-      }
-
-      // Pie de página final
-      doc.setTextColor(150, 150, 150);
-      doc.setFontSize(7);
-      doc.text('Av 20 entre calles 27 y 28 - Barquisimeto, Edo. Lara - Tel: 0424-9316999', pageWidth / 2, pageHeight - 3, { align: 'center' });
+      });
 
       updateProgress(100, 100, 'Completado! Descargando...');
       doc.save(`Catalogo_${selectedDept}_${new Date().toISOString().split('T')[0]}.pdf`);
