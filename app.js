@@ -296,7 +296,6 @@ async function fetchAllProducts() {
       const { data, error } = await window.supabaseClient
         .from("products")
         .select("*")
-        .order("id", { ascending: true }) // FIX: Orden estable para evitar saltos en paginación
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -1809,7 +1808,6 @@ async function loadProducts() {
         .from("products")
         .select("*")
         .order("nombre", { ascending: true })
-        .order("id", { ascending: true }) // FIX: Orden secundario estable para evitar inconsistencias en la cantidad
         .range(start, start + batchSize - 1)
 
       if (error) throw error
@@ -3043,26 +3041,6 @@ async function handleCSVUpload() {
       const previousSnapshot = await getPreviousCSVSnapshot()
       console.log(`[CSV-COMPARISON] Productos en snapshot anterior: ${previousSnapshot.length}`)
 
-      // FIX: RESPALDAR URLs DE FOTOS ANTES DE BORRAR EL INVENTARIO
-      // Esto evita que se pierdan las fotos si el Excel nuevo no trae la columna URL
-      showCSVStatus("Respaldando fotos existentes...", "info")
-      const { data: existingUrls } = await window.supabaseClient
-        .from("products")
-        .select("codigo, nombre, imagen_url")
-        .not("imagen_url", "is", null)
-      
-      const urlBackupMap = new Map()
-      if (existingUrls) {
-        existingUrls.forEach(p => {
-          if (p.imagen_url && p.imagen_url.length > 10 && !p.imagen_url.includes('null')) {
-            if (p.codigo) urlBackupMap.set(p.codigo.trim().toUpperCase(), p.imagen_url)
-            // También guardar por nombre como respaldo secundario
-            if (p.nombre) urlBackupMap.set(p.nombre.trim().toUpperCase(), p.imagen_url)
-          }
-        })
-        console.log(`[CSV] 📸 ${urlBackupMap.size} URLs de fotos respaldadas para restaurar`)
-      }
-
       const products = []
 
       for (let i = 1; i < lines.length; i++) {
@@ -3096,19 +3074,6 @@ async function handleCSVUpload() {
           continue
         }
 
-        // FIX: RECUPERAR URL DEL RESPALDO SI NO VIENE EN EL CSV
-        let finalUrl = url
-        if (!finalUrl || finalUrl === 'null' || finalUrl === 'undefined') {
-          const codeKey = (codigo || "").trim().toUpperCase()
-          const nameKey = (descripcion || "").trim().toUpperCase()
-          
-          if (codeKey && urlBackupMap.has(codeKey)) {
-            finalUrl = urlBackupMap.get(codeKey)
-          } else if (nameKey && urlBackupMap.has(nameKey)) {
-            finalUrl = urlBackupMap.get(nameKey)
-          }
-        }
-
         const product = {
           codigo: codigo || "",
           nombre: descripcion,
@@ -3117,7 +3082,7 @@ async function handleCSVUpload() {
           precio_mayor: precioMayor,
           precio_gmayor: precioGmayor,
           departamento: departamento,
-          imagen_url: finalUrl, // Usar la URL recuperada o la del CSV
+          imagen_url: url,
           is_new: false, // Inicialmente todos son false
           stock: 0
         }
@@ -3131,40 +3096,22 @@ async function handleCSVUpload() {
 
       showCSVStatus(`Procesando ${products.length} productos...`, "info")
 
-      // MODIFICADO: NO ELIMINAR PRODUCTOS, SOLO ACTUALIZAR (UPSERT)
-      // 1. Obtener productos existentes para mapear IDs
-      const existingProducts = await fetchAllProducts()
-      const productMap = new Map()
-      existingProducts.forEach(p => {
-        if (p.codigo) productMap.set(p.codigo.trim().toUpperCase(), p.id)
-        else if (p.nombre) productMap.set(p.nombre.trim().toUpperCase(), p.id)
-      })
+      // LIMPIAR PRODUCTOS EXISTENTES
+      const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
 
-      // 2. Asignar IDs a los productos del CSV si ya existen (para que el upsert actualice)
-      products.forEach(p => {
-        const codeKey = p.codigo ? p.codigo.trim().toUpperCase() : null
-        const nameKey = p.nombre ? p.nombre.trim().toUpperCase() : null
-        
-        if (codeKey && productMap.has(codeKey)) {
-          p.id = productMap.get(codeKey)
-        } else if (nameKey && productMap.has(nameKey)) {
-          p.id = productMap.get(nameKey)
-        }
-      })
-
-      // 3. Ejecutar UPSERT en lotes
-      const batchSize = 100
-      let insertedProducts = []
-      
-      for (let i = 0; i < products.length; i += batchSize) {
-        const batch = products.slice(i, i + batchSize)
-        const { data, error } = await window.supabaseClient.from("products").upsert(batch).select()
-        
-        if (error) throw error
-        if (data) insertedProducts = [...insertedProducts, ...data]
+      if (deleteError) {
+        console.error("Error al limpiar productos existentes:", deleteError)
+        throw new Error("Error al limpiar productos existentes")
       }
 
-      console.log(`[CSV] ✅ ${insertedProducts.length} productos procesados (actualizados/insertados)`)
+      console.log("[CSV] ✅ Productos anteriores eliminados")
+
+      // INSERTAR NUEVOS PRODUCTOS
+      const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
+
+      if (error) throw error
+
+      console.log(`[CSV] ✅ ${insertedProducts.length} productos insertados`)
 
       let comparisonResult = { newProductIds: [], modifiedProductIds: [], deletedCount: 0, deletedProducts: [] }
 
@@ -3677,16 +3624,6 @@ async function cleanDuplicateProducts() {
     // Encontrar duplicados (dejar el primero, marcar el resto para eliminar)
     codigoMap.forEach((products, codigo) => {
       if (products.length > 1) {
-        // FIX: Ordenar para conservar SIEMPRE el producto que tiene FOTO
-        products.sort((a, b) => {
-          const aHasPhoto = a.imagen_url && a.imagen_url.length > 10 && !a.imagen_url.includes('null');
-          const bHasPhoto = b.imagen_url && b.imagen_url.length > 10 && !b.imagen_url.includes('null');
-          
-          if (aHasPhoto && !bHasPhoto) return -1; // a tiene foto, b no -> a va primero (se conserva)
-          if (!aHasPhoto && bHasPhoto) return 1;  // b tiene foto, a no -> b va primero
-          return 0;
-        });
-
         console.log(`[CLEAN-DUPLICATES] DUPLICADO encontrado - Código "${codigo}": ${products.length} productos`)
         const [first, ...rest] = products
         console.log(`  Manteniendo: ID ${first.id} - ${first.nombre}`)
