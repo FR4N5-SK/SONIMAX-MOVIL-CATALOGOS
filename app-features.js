@@ -1,874 +1,853 @@
 // ============================================
-// EXTENSIONES DE CARACTERÍSTICAS - SONIMAX MÓVIL
+// ACTUALIZAR PRODUCTOS DESDE EXCEL - SONIMAX MÓVIL
 // ============================================
-// Usa variables GLOBALES del archivo principal (current-user.js)
-// NO declara propias, accede a las del window
 
 (function() {
   'use strict';
 
-  // Acceder a variables GLOBALES (definidas en app.js)
   const getGlobalState = () => ({
     currentUserRole: window.currentUserRole || null,
     allProducts: window.allProducts || [],
     supabaseClient: window.supabaseClient,
   });
 
-  // Importación de XLSX
   const XLSX = window.XLSX;
 
   // ============================================
-  // PRODUCTOS SIN FOTO - CORREGIDO
+  // MOSTRAR MODAL DE ACTUALIZAR PRODUCTOS
   // ============================================
 
-  window.showProductsWithoutPhoto = async function() {
-    try {
-      const { allProducts } = getGlobalState();
-      
-      console.log('[NO-PHOTO] Buscando productos sin foto en memoria...');
-      
-      if (!allProducts || allProducts.length === 0) {
-        alert('Cargando productos... Por favor espera unos segundos.');
-        return;
-      }
+  window.showUpdateProductsModal = async function() {
+    const { currentUserRole, supabaseClient } = getGlobalState();
 
-      // Filtrar productos sin imagen URL desde la memoria local
-      const productsWithoutPhoto = allProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
+    console.log('[UPDATE-PRODUCTS] currentUserRole:', currentUserRole);
 
-      console.log('[NO-PHOTO] Encontrados:', productsWithoutPhoto.length, 'productos sin foto');
-
-      const modalDiv = document.createElement('div');
-      modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
-      modalDiv.innerHTML = `
-        <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
-          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between">
-            <div>
-              <h2 class="text-2xl font-bold">Productos sin Foto</h2>
-              <p class="text-amber-100 mt-1">Total encontrados: ${productsWithoutPhoto.length}</p>
-            </div>
-            <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
-          </div>
-          
-          <div class="p-6 space-y-4">
-            <input type="text" id="no-photo-search" placeholder="Busca por código o nombre..." 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent transition-all">
-            
-            <div id="no-photo-results" class="space-y-3 max-h-96 overflow-y-auto">
-              ${productsWithoutPhoto.length === 0 ? '<p class="text-gray-500 text-center py-8">¡Todos los productos tienen foto!</p>' : 
-                productsWithoutPhoto.map(p => `
-                <div class="p-4 bg-gray-50 rounded-lg border-l-4 border-amber-500 hover:bg-gray-100 transition cursor-pointer no-photo-item" 
-                  data-codigo="${p.codigo || ''}" data-nombre="${p.nombre || ''}" data-id="${p.id}">
-                  <p class="font-semibold text-gray-800">${p.codigo || 'SIN CODE'}</p>
-                  <p class="text-sm text-gray-600 mt-1">${p.nombre || 'Sin nombre'}</p>
-                  <p class="text-xs text-gray-500 mt-2">${p.descripcion || 'Sin descripción'}</p>
-                  <p class="text-xs text-amber-600 mt-2">Stock: ${p.stock || 0}</p>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-          
-          <div class="p-6 border-t flex gap-3">
-            <button class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition" 
-              onclick="window.showAddMerchandiseModal()">
-              Agregar Fotos
-            </button>
-            <button class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition" 
-              onclick="this.closest('.fixed').remove()">
-              Cerrar
-            </button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modalDiv);
-
-      // Agregar funcionalidad de búsqueda
-      const searchInput = document.getElementById('no-photo-search');
-      const resultsDiv = document.getElementById('no-photo-results');
-      const items = modalDiv.querySelectorAll('.no-photo-item');
-
-      searchInput.addEventListener('input', () => {
-        const searchTerm = searchInput.value.toLowerCase().trim();
-        let visibleCount = 0;
-
-        items.forEach(item => {
-          const codigo = item.dataset.codigo.toLowerCase();
-          const nombre = item.dataset.nombre.toLowerCase();
-          
-          if (codigo.includes(searchTerm) || nombre.includes(searchTerm)) {
-            item.style.display = 'block';
-            visibleCount++;
-          } else {
-            item.style.display = 'none';
-          }
-        });
-
-        if (visibleCount === 0 && searchTerm.length > 0) {
-          resultsDiv.innerHTML = '<p class="text-gray-500 text-center py-8">No se encontraron productos</p>';
-        }
-      });
-
-      searchInput.focus();
-    } catch (error) {
-      console.error('[NO-PHOTO] Error inesperado:', error);
-      alert('Error: ' + error.message);
-    }
-  };
-
-  // ============================================
-  // AGREGAR MERCANCÍA - BÚSQUEDA Y FORM
-  // ============================================
-
-  window.showAddMerchandiseModal = async function() {
-    const { currentUserRole, allProducts } = getGlobalState();
-    
-    console.log('[ADMIN-CHECK] showAddMerchandiseModal - currentUserRole:', currentUserRole, 'Type:', typeof currentUserRole);
-    
     if (currentUserRole !== 'admin') {
-      console.error('[ADMIN-CHECK] DENEGADO - Rol no es admin:', currentUserRole);
-      alert('Solo administradores pueden agregar mercancía. Tu rol actual: ' + (currentUserRole || 'desconocido'));
+      alert('Solo administradores pueden actualizar productos. Tu rol: ' + (currentUserRole || 'desconocido'));
       return;
     }
-    console.log('[ADMIN-CHECK] ✅ Acceso permitido a mercancía');
-
-    // Usar productos ya cargados en memoria
-    if (!allProducts || allProducts.length === 0) {
-      alert('Cargando productos... Intenta de nuevo en unos segundos.');
-      return;
-    }
-    
-    console.log('[MERCHANDISE] Usando inventario en memoria:', allProducts.length);
 
     const modalDiv = document.createElement('div');
-    modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+    modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
     modalDiv.innerHTML = `
-      <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl">
-        <div class="bg-gradient-to-r from-cyan-600 to-cyan-700 p-6 text-white flex items-center justify-between">
+      <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
+        <div class="bg-gradient-to-r from-green-600 to-green-700 p-6 text-white flex items-center justify-between sticky top-0 z-10">
           <div>
-            <h2 class="text-2xl font-bold">Agregar Mercancía</h2>
-            <p class="text-cyan-100 mt-1">Busca un producto y agrega la foto</p>
+            <h2 class="text-2xl font-bold">Actualizar Productos</h2>
+            <p class="text-green-100 mt-1">Sube un archivo Excel para actualizar el inventario</p>
           </div>
-          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-cyan-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
+          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-green-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
         </div>
-        
-        <div class="p-6 space-y-4">
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-2">Buscar por Código o Nombre:</label>
-            <input type="text" id="merchandise-search" placeholder="Ingresa código, nombre o descripción..." 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-transparent transition-all">
-            <div id="merchandise-results" class="mt-4 space-y-2 max-h-48 overflow-y-auto"></div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(modalDiv);
 
-    const searchInput = document.getElementById('merchandise-search');
-    const resultsDiv = document.getElementById('merchandise-results');
-
-    searchInput.addEventListener('input', () => {
-      const searchTerm = searchInput.value.toLowerCase().trim();
-      resultsDiv.innerHTML = '';
-
-      if (searchTerm.length < 1) {
-        resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">Ingresa al menos 1 carácter</p>';
-        return;
-      }
-
-      console.log('[MERCHANDISE-SEARCH] Buscando:', searchTerm, 'en', allProducts.length, 'productos');
-
-      const filtered = allProducts.filter(p => 
-        (p.codigo && p.codigo.toLowerCase().includes(searchTerm)) ||
-        (p.nombre && p.nombre.toLowerCase().includes(searchTerm)) ||
-        (p.descripcion && p.descripcion.toLowerCase().includes(searchTerm))
-      ).slice(0, 15);
-
-      console.log('[MERCHANDISE-SEARCH] Encontrados:', filtered.length);
-
-      if (filtered.length === 0) {
-        resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">No se encontraron productos</p>';
-        return;
-      }
-
-      filtered.forEach(product => {
-        const resultDiv = document.createElement('div');
-        resultDiv.className = 'p-3 bg-gray-50 rounded-lg border-2 border-transparent hover:border-cyan-500 cursor-pointer transition-all';
-        resultDiv.innerHTML = `
-          <p class="font-semibold text-gray-800">${product.codigo || 'N/A'} - ${product.nombre}</p>
-          <p class="text-sm text-gray-600">${product.descripcion || 'Sin descripción'}</p>
-          <p class="text-xs text-cyan-600 mt-1">Dept: ${product.departamento || 'N/A'} | Stock: ${product.stock || 0}</p>
-        `;
-        resultDiv.addEventListener('click', () => showPhotoForm(product, modalDiv));
-        resultsDiv.appendChild(resultDiv);
-      });
-    });
-
-    searchInput.focus();
-  };
-
-  function showPhotoForm(product, parentModal) {
-    parentModal.remove();
-    
-    const formDiv = document.createElement('div');
-    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-    formDiv.innerHTML = `
-      <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl">
-        <div class="bg-gradient-to-r from-cyan-600 to-cyan-700 p-6 text-white flex items-center justify-between">
-          <div>
-            <h2 class="text-2xl font-bold">Agregar Foto</h2>
-            <p class="text-cyan-100 mt-1">${product.codigo || 'N/A'} - ${product.nombre}</p>
-          </div>
-          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-cyan-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
-        </div>
-        
-        <div class="p-6 space-y-4">
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-2">Departamento:</label>
-            <input type="text" id="form-department" value="${product.departamento || ''}" 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-600" 
-              placeholder="Ej: ACCESORIOS_MOTO">
+        <div class="p-6 space-y-6">
+          <!-- Instrucciones -->
+          <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+            <h3 class="font-semibold text-blue-900 mb-2">📋 Columnas Requeridas del Excel:</h3>
+            <ul class="text-sm text-blue-800 space-y-1">
+              <li>• <strong>CODIGO</strong> - Código del producto</li>
+              <li>• <strong>DESCRIPCION</strong> - Nombre/Descripción del producto</li>
+              <li>• <strong>PRECIO DETAL</strong> - Precio cliente (precio_cliente)</li>
+              <li>• <strong>PRECIO MAYOR</strong> - Precio mayor (precio_mayor)</li>
+              <li>• <strong>PRECIO GMAYOR</strong> - Precio gran mayor (precio_gmayor)</li>
+              <li>• <strong>EXISTENCIA ACTUAL</strong> - Cantidad en stock</li>
+              <li>• <strong>DEPARTAMENTO</strong> - Departamento del producto</li>
+            </ul>
           </div>
 
-          <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-2">URL de la Foto:</label>
-            <input type="url" id="form-url" placeholder="https://i.ibb.co/..." 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-600">
-            <p class="text-xs text-gray-500 mt-2">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
+          <!-- Selector de Archivo -->
+          <div class="border-2 border-dashed border-green-300 rounded-xl p-8 text-center hover:border-green-500 transition-all cursor-pointer" id="drop-zone">
+            <svg class="w-12 h-12 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-2a2 2 0 00-2 2v6m-6-6V5a2 2 0 012-2h2a2 2 0 012 2v6m0 0V5a2 2 0 012-2h2a2 2 0 012 2v6"></path>
+            </svg>
+            <p class="text-gray-600 font-semibold mb-2">Arrastra tu Excel aquí o haz clic</p>
+            <p class="text-sm text-gray-500">Formatos soportados: .xlsx, .xls, .csv</p>
+            <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" class="hidden" />
           </div>
 
+          <!-- Estado del Archivo -->
+          <div id="file-status" class="hidden">
+            <div class="bg-green-50 border border-green-300 rounded-lg p-4">
+              <p class="text-sm text-green-800"><strong id="file-name">Archivo</strong> cargado correctamente</p>
+              <p class="text-xs text-green-700 mt-1">Productos a procesar: <strong id="file-count">0</strong></p>
+              <div id="file-stats" class="hidden mt-2 text-sm text-gray-700"></div>
+              <div class="flex items-center gap-2 mt-3">
+                <input type="checkbox" id="force-update-desc" checked />
+                <label for="force-update-desc" class="text-sm font-bold text-gray-800">Forzar actualización de descripciones (Recomendado para corregir nombres)</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Botones de Acción -->
           <div class="flex gap-3 pt-4">
-            <button class="flex-1 px-4 py-3 bg-cyan-600 text-white rounded-xl font-semibold hover:bg-cyan-700 transition-all" 
-              onclick="window.saveMerchandise('${product.id}', '${product.codigo}', '${product.nombre}')">
-              Guardar
+            <button id="process-btn" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed" 
+              disabled>
+              Procesar Actualización
             </button>
             <button class="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all" 
               onclick="this.closest('.fixed').remove()">
               Cancelar
             </button>
           </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(formDiv);
-    document.getElementById('form-url').focus();
-  }
 
-  window.saveMerchandise = async function(productId, codigo, nombre) {
-    const { supabaseClient } = getGlobalState();
-    
-    const url = document.getElementById('form-url').value.trim();
-    const department = document.getElementById('form-department').value.trim();
-
-    if (!url || !department) {
-      alert('Por favor completa todos los campos');
-      return;
-    }
-
-    try {
-      console.log('[MERCHANDISE] Guardando URL para producto:', codigo);
-      
-      const { error } = await supabaseClient
-        .from('products')
-        .update({ imagen_url: url, departamento: department })
-        .eq('id', productId);
-
-      if (error) throw error;
-
-      console.log('[MERCHANDISE] ✅ URL guardada exitosamente');
-      
-      // Mostrar mensaje de éxito
-      const successMsg = document.createElement('div');
-      successMsg.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
-      successMsg.innerHTML = `
-        <div class="bg-white rounded-2xl p-8 text-center shadow-2xl">
-          <p class="text-3xl mb-4">✅</p>
-          <h3 class="text-xl font-bold text-gray-800 mb-2">Mercancía guardada</h3>
-          <p class="text-gray-600">${codigo} - ${nombre}</p>
-          <p class="text-sm text-gray-500 mt-4">Removiendo de lista de sin foto...</p>
-        </div>
-      `;
-      document.body.appendChild(successMsg);
-
-      // Cerrar modal actual
-      const modals = document.querySelectorAll('.fixed');
-      modals.forEach(modal => {
-        if (modal !== successMsg) modal.remove();
-      });
-
-      // Actualizar el DOM sin recargar - remover el producto de la lista visual
-      setTimeout(() => {
-        console.log('[MERCHANDISE] Actualizando lista visual...');
-        
-        // Remover producto de la lista de sin foto si el modal está abierto
-        const productItems = document.querySelectorAll('.no-photo-item');
-        productItems.forEach(item => {
-          if (item.dataset.id === productId) {
-            item.remove();
-            console.log('[MERCHANDISE] Producto removido de la lista visual');
-          }
-        });
-        
-        // Cerrar mensaje de éxito
-        successMsg.remove();
-
-        // Actualizar el carrusel/galería principal si está visible
-        console.log('[MERCHANDISE] Refrescando galería principal...');
-        if (window.renderProducts) {
-          window.renderProducts();
-        }
-        
-        // Actualizar la variable global de productos
-        if (window.allProducts) {
-          const productIndex = window.allProducts.findIndex(p => p.id === productId);
-          if (productIndex !== -1) {
-            window.allProducts[productIndex].imagen_url = url;
-            window.allProducts[productIndex].departamento = department;
-            console.log('[MERCHANDISE] Producto actualizado en allProducts');
-          }
-        }
-      }, 1500);
-
-    } catch (error) {
-      console.error('[MERCHANDISE] Error:', error);
-      alert('Error al guardar: ' + error.message);
-    }
-  };
-
-  // ============================================
-  // MODIFICAR PRODUCTO
-  // ============================================
-
-  window.showModifyProductModal = async function() {
-    const { currentUserRole, allProducts } = getGlobalState();
-    
-    console.log('[ADMIN-CHECK] showModifyProductModal - currentUserRole:', currentUserRole, 'Type:', typeof currentUserRole);
-    
-    if (currentUserRole !== 'admin') {
-      console.error('[ADMIN-CHECK] DENEGADO - Rol no es admin:', currentUserRole);
-      alert('Solo administradores pueden modificar productos. Tu rol actual: ' + (currentUserRole || 'desconocido'));
-      return;
-    }
-    console.log('[ADMIN-CHECK] ✅ Acceso permitido a modificación');
-
-    // Usar productos ya cargados en memoria
-    if (!allProducts || allProducts.length === 0) {
-      alert('Cargando productos... Intenta de nuevo en unos segundos.');
-      return;
-    }
-    
-    console.log('[MODIFY] Usando inventario en memoria:', allProducts.length);
-
-    const modalDiv = document.createElement('div');
-    modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-    modalDiv.innerHTML = `
-      <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl">
-        <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white flex items-center justify-between">
-          <div>
-            <h2 class="text-2xl font-bold">Modificar Producto</h2>
-            <p class="text-indigo-100 mt-1">Busca el producto a editar</p>
+          <!-- Indicador de Progreso -->
+          <div id="progress-container" class="hidden">
+            <div class="space-y-2">
+              <div class="flex justify-between text-sm">
+                <span id="progress-text" class="font-semibold text-gray-700">Procesando...</span>
+                <span id="progress-percent">0%</span>
+              </div>
+              <div class="w-full bg-gray-200 rounded-full h-2">
+                <div id="progress-bar" class="bg-green-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+              </div>
+            </div>
           </div>
-          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-indigo-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
-        </div>
-        
-        <div class="p-6 space-y-4">
-          <input type="text" id="modify-search" placeholder="Busca por código, nombre o descripción..." 
-            class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all">
-          <div id="modify-results" class="space-y-2 max-h-48 overflow-y-auto"></div>
+
+          <!-- Resultado -->
+          <div id="result-container" class="hidden">
+            <div class="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h3 class="font-bold text-gray-800">Resumen de Actualización:</h3>
+              <ul class="text-sm text-gray-700 space-y-2">
+                <li id="result-created">✅ Productos creados: <strong id="result-created-count">0</strong></li>
+                <li id="result-updated">✅ Productos actualizados: <strong id="result-updated-count">0</strong></li>
+                <li id="result-errors" class="text-red-700">❌ Errores: <strong id="result-errors-count">0</strong></li>
+              </ul>
+
+              <!-- Listado de productos creados durante esta operación -->
+              <div id="result-created-list" class="hidden mt-4 p-3 bg-white border rounded max-h-56 overflow-auto text-sm"></div>
+              <div class="mt-3 space-y-2">
+                <a id="download-created-csv" class="hidden inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-all" href="#">Descargar CSV de creados</a>
+                <a id="download-skipped-csv" class="hidden inline-block bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-all" href="#">Descargar CSV de omitidos</a>
+                <div id="result-skipped-list" class="hidden mt-2 text-sm text-yellow-700"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     `;
+
     document.body.appendChild(modalDiv);
 
-    const searchInput = document.getElementById('modify-search');
-    const resultsDiv = document.getElementById('modify-results');
+    let excelData = null;
 
-    searchInput.addEventListener('input', () => {
-      const searchTerm = searchInput.value.toLowerCase().trim();
-      resultsDiv.innerHTML = '';
+    // Configurar drag and drop
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('excel-file-input');
+    const processBtn = document.getElementById('process-btn');
+    const fileStatus = document.getElementById('file-status');
 
-      if (searchTerm.length < 1) {
-        resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">Ingresa al menos 1 carácter</p>';
-        return;
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        handleExcelFile(file);
       }
-
-      console.log('[MODIFY-SEARCH] Buscando:', searchTerm, 'en', allProducts.length, 'productos');
-
-      const filtered = allProducts.filter(p => 
-        (p.codigo && p.codigo.toLowerCase().includes(searchTerm)) ||
-        (p.nombre && p.nombre.toLowerCase().includes(searchTerm)) ||
-        (p.descripcion && p.descripcion.toLowerCase().includes(searchTerm))
-      ).slice(0, 10);
-
-      console.log('[MODIFY-SEARCH] Encontrados:', filtered.length);
-
-      if (filtered.length === 0) {
-        resultsDiv.innerHTML = '<p class="text-gray-500 text-sm">No encontrado</p>';
-        return;
-      }
-
-      filtered.forEach(product => {
-        const resultDiv = document.createElement('div');
-        resultDiv.className = 'p-3 bg-gray-50 rounded-lg border-2 border-transparent hover:border-indigo-500 cursor-pointer transition-all';
-        resultDiv.innerHTML = `
-          <p class="font-semibold text-gray-800">${product.codigo || 'N/A'} - ${product.nombre}</p>
-          <p class="text-xs text-gray-600">Precio Mayor: ${product.precio_mayor || 0}</p>
-        `;
-        resultDiv.addEventListener('click', () => showEditForm(product, modalDiv));
-        resultsDiv.appendChild(resultDiv);
-      });
     });
 
-    searchInput.focus();
-  };
-
-  function showEditForm(product, parentModal) {
-    parentModal.remove();
-    
-    const formDiv = document.createElement('div');
-    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
-    formDiv.innerHTML = `
-      <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl my-8">
-        <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white flex items-center justify-between">
-          <h2 class="text-2xl font-bold">Editar Producto</h2>
-          <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-indigo-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
-        </div>
-        
-        <div class="p-6 space-y-3 max-h-96 overflow-y-auto">
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Código:</label>
-            <input type="text" id="edit-codigo" value="${product.codigo || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Nombre:</label>
-            <input type="text" id="edit-nombre" value="${product.nombre || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Descripción:</label>
-            <textarea id="edit-descripcion" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" rows="2">${product.descripcion || ''}</textarea>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Departamento:</label>
-            <input type="text" id="edit-departamento" value="${product.departamento || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Precio Cliente:</label>
-            <input type="number" id="edit-precio-cliente" value="${product.precio_cliente || 0}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" step="0.01">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Precio Mayor:</label>
-            <input type="number" id="edit-precio-mayor" value="${product.precio_mayor || 0}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" step="0.01">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Precio Gmayor:</label>
-            <input type="number" id="edit-precio-gmayor" value="${product.precio_gmayor || 0}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" step="0.01">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Stock:</label>
-            <input type="number" id="edit-stock" value="${product.stock || 0}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">URL Foto:</label>
-            <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
-          </div>
-
-          <div class="flex gap-2 pt-4">
-            <button class="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-lg font-semibold text-sm hover:bg-indigo-700 transition" 
-              onclick="window.saveProductEdit('${product.id}')">
-              Guardar
-            </button>
-            <button class="flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition" 
-              onclick="this.closest('.fixed').remove()">
-              Cancelar
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(formDiv);
-  }
-
-  window.saveProductEdit = async function(productId) {
-    const { supabaseClient } = getGlobalState();
-    
-    const updates = {
-      codigo: document.getElementById('edit-codigo').value,
-      nombre: document.getElementById('edit-nombre').value,
-      descripcion: document.getElementById('edit-descripcion').value,
-      departamento: document.getElementById('edit-departamento').value,
-      precio_cliente: parseFloat(document.getElementById('edit-precio-cliente').value) || 0,
-      precio_mayor: parseFloat(document.getElementById('edit-precio-mayor').value) || 0,
-      precio_gmayor: parseFloat(document.getElementById('edit-precio-gmayor').value) || 0,
-      stock: parseInt(document.getElementById('edit-stock').value) || 0,
-      imagen_url: document.getElementById('edit-url').value
-    };
-
-    try {
-      const { error } = await supabaseClient
-        .from('products')
-        .update(updates)
-        .eq('id', productId);
-
-      if (error) throw error;
-
-      alert('✅ Producto actualizado correctamente');
-      document.querySelector('.fixed')?.remove();
-      await window.loadProducts();
-      window.renderProducts();
-    } catch (error) {
-      console.error('[EDIT] Error:', error);
-      alert('Error: ' + error.message);
-    }
-  };
-
-  // ============================================
-  // CARGAR EXCEL DE PRECIOS - REDIRIGIDO
-  // ============================================
-
-  // Esta función fue consolidada en el modal de "Actualizar Productos".
-  // Para compatibilidad de código antiguo, redirigimos a la nueva función.
-  window.showUploadExcelModal = function() {
-    console.warn('[DEPRECATION] showUploadExcelModal redirigida a showUpdateProductsModal');
-    if (window.showUpdateProductsModal) {
-      window.showUpdateProductsModal();
-    } else {
-      alert('Función no disponible');
-    }
-  };
-
-  // ============================================
-  // EXPORTAR PDF CON TABLA
-  // ============================================
-
-  window.showPdfExportModal = async function() {
-    const { allProducts } = getGlobalState();
-    
-    try {
-      const departments = [...new Set(allProducts
-        .map(p => p.departamento)
-        .filter(d => d && d.trim())
-      )].sort();
-
-      if (departments.length === 0) {
-        alert('No hay productos con departamentos');
-        return;
-      }
-
-      const modalDiv = document.createElement('div');
-      modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-      modalDiv.innerHTML = `
-        <div class="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
-          <div class="bg-gradient-to-r from-orange-600 to-orange-700 p-6 text-white">
-            <h2 class="text-2xl font-bold">Exportar PDF</h2>
-            <p class="text-orange-100 mt-1">Selecciona un departamento</p>
-          </div>
-          
-          <div class="p-6 space-y-3">
-            <select id="pdf-department" class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-600">
-              <option value="">-- Selecciona departamento --</option>
-              <option value="all">Todos los departamentos</option>
-              ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
-            </select>
-
-            <div class="flex gap-3">
-              <button class="flex-1 px-4 py-3 bg-orange-600 text-white rounded-xl font-semibold hover:bg-orange-700 transition" 
-                onclick="window.generatePdf()">
-                Descargar PDF
-              </button>
-              <button class="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition" 
-                onclick="this.closest('.fixed').remove()">
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modalDiv);
-      document.getElementById('pdf-department').focus();
-    } catch (error) {
-      console.error('[PDF] Error:', error);
-      alert('Error: ' + error.message);
-    }
-  };
-
-  // Función auxiliar para convertir URL de imagen a base64 usando canvas
-  const imageUrlToBase64 = (url) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/jpeg'));
-      };
-      img.onerror = () => {
-        console.warn('[PDF] No se pudo cargar imagen:', url);
-        resolve(null); // Retornar null si falla
-      };
-      img.src = url;
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('border-green-500', 'bg-green-50');
     });
-  };
 
-  window.generatePdf = async function() {
-    const { allProducts } = getGlobalState();
-    
-    const selectedDept = document.getElementById('pdf-department').value;
-    if (!selectedDept) {
-      alert('Selecciona un departamento');
-      return;
-    }
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('border-green-500', 'bg-green-50');
+    });
 
-    try {
-      // Crear modal de progreso
-      const progressModal = document.createElement('div');
-      progressModal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-      progressModal.innerHTML = `
-        <div class="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-          <div class="text-center">
-            <h2 class="text-2xl font-bold text-red-600 mb-6">Generando Catálogo PDF</h2>
-            
-            <div class="mb-6">
-              <div class="w-full h-2 bg-gray-300 rounded-full overflow-hidden">
-                <div id="pdf-progress-bar" class="h-full bg-gradient-to-r from-red-600 to-red-800 w-0 transition-all duration-300"></div>
-              </div>
-              <div class="mt-3 text-sm text-gray-700">
-                <span id="pdf-progress-text" class="font-semibold">Iniciando...</span>
-              </div>
-            </div>
-            
-            <p class="text-xs text-gray-500">Por favor espera, esto puede tomar unos momentos...</p>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(progressModal);
-      
-      const progressBar = document.getElementById('pdf-progress-bar');
-      const progressText = document.getElementById('pdf-progress-text');
-      
-      const updateProgress = (current, total, message) => {
-        const percentage = Math.round((current / total) * 100);
-        progressBar.style.width = percentage + '%';
-        progressText.textContent = message || `${current} de ${total} (${percentage}%)`;
-      };
-
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-      let filtered = allProducts;
-      if (selectedDept !== 'all') {
-        filtered = allProducts.filter(p => p.departamento === selectedDept);
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-green-500', 'bg-green-50');
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        handleExcelFile(file);
       }
+    });
 
-      if (filtered.length === 0) {
-        progressModal.remove();
-        alert('No hay productos para este departamento');
-        return;
-      }
+    function handleExcelFile(file) {
+      console.log('[UPDATE-EXCEL] Archivo seleccionado:', file.name);
 
-      console.log('[PDF] Procesando', filtered.length, 'productos...');
-      updateProgress(0, filtered.length, 'Descargando imágenes...');
-      
-      // Pre-cargar todas las imágenes como base64 con progreso
-      const imageCache = {};
-      let imagesProcessed = 0;
-      const totalImages = filtered.filter(p => p.imagen_url && p.imagen_url.trim() !== '').length;
-      let imagesLoaded = 0;
-      
-      for (const product of filtered) {
-        if (product.imagen_url && product.imagen_url.trim() !== '') {
-          console.log('[PDF] Cargando imagen de:', product.codigo);
-          imageCache[product.id || product.codigo] = await imageUrlToBase64(product.imagen_url);
-          imagesLoaded++;
-          updateProgress(imagesLoaded, totalImages, `Descargando imagen ${imagesLoaded} de ${totalImages}...`);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          console.log('[UPDATE-EXCEL] Datos parseados:', jsonData.length, 'filas');
+          console.log('[UPDATE-EXCEL] Primera fila:', jsonData[0]);
+
+          // Validar que tenga las columnas requeridas
+          const requiredColumns = ['CODIGO', 'DESCRIPCION', 'PRECIO DETAL', 'PRECIO MAYOR', 'PRECIO GMAYOR', 'EXISTENCIA ACTUAL', 'DEPARTAMENTO'];
+          const headers = Object.keys(jsonData[0] || {});
+
+          const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+          if (missingColumns.length > 0) {
+            alert('❌ Columnas faltantes:\n' + missingColumns.join(', ') + '\n\nAsegúrate que los nombres sean exactos (mayúsculas y minúsculas)');
+            return;
+          }
+
+          excelData = jsonData;
+          fileStatus.classList.remove('hidden');
+          document.getElementById('file-name').textContent = file.name;
+          document.getElementById('file-count').textContent = jsonData.length;
+          processBtn.disabled = false;
+
+          // Estadísticas rápidas: filas con descripcion vacía o igual al codigo
+          const normalizeCode = (c) => (String(c || '')).trim().toUpperCase();
+          const normalizeDesc = (d) => (String(d || '')).trim().toUpperCase();
+          let emptyDesc = 0;
+          let descEqualsCode = 0;
+          for (let i = 0; i < jsonData.length; i++) {
+            const r = jsonData[i];
+            const codigoRaw = r['CODIGO'] || r['Código'] || r['codigo'] || '';
+            const descripcionRaw = r['DESCRIPCION'] || r['Descripción'] || r['DESCRIPCION '] || '';
+            const c = normalizeCode(codigoRaw);
+            const d = normalizeDesc(descripcionRaw);
+            if (!d) emptyDesc++;
+            if (c && d && c === d) descEqualsCode++;
+          }
+
+          const fileStats = document.getElementById('file-stats');
+          fileStats.textContent = `Filas con DESCRIPCION vacía: ${emptyDesc} — Filas con DESCRIPCION igual al CODIGO: ${descEqualsCode}.`;
+          fileStats.classList.remove('hidden');
+
+          console.log('[UPDATE-EXCEL] Archivo validado correctamente');
+        } catch (error) {
+          console.error('[UPDATE-EXCEL] Error parseando Excel:', error);
+          alert('Error al leer el archivo Excel: ' + error.message);
         }
-        imagesProcessed++;
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    processBtn.addEventListener('click', async () => {
+      if (!excelData || excelData.length === 0) {
+        alert('No hay datos para procesar');
+        return;
       }
-      console.log('[PDF] Imágenes cargadas:', Object.keys(imageCache).length);
-      updateProgress(totalImages, totalImages, 'Generando documento PDF...');
 
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const pageWidth = doc.internal.pageSize.getWidth();
+      const forceUpdateDesc = document.getElementById('force-update-desc')?.checked || false;
 
-      // ==================== CREAR PORTADA ====================
-      // Fondo rojo sólido (Color corporativo Sonimax)
-      doc.setFillColor(220, 38, 38); // #DC2626
-      doc.rect(0, 0, pageWidth, pageHeight, 'F');
-      
-      // Elemento decorativo (Círculo sutil para dar profundidad)
-      doc.setFillColor(185, 28, 28); // #B91C1C (Rojo más oscuro)
-      doc.circle(pageWidth, 0, 120, 'F');
-      doc.circle(0, pageHeight, 100, 'F');
+      await processExcelData(excelData, supabaseClient, { forceUpdateDesc });
+    });
 
-      // Logo/Título SONIMAX MÓVIL
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(42);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SONIMAX MÓVIL', pageWidth / 2, pageHeight * 0.35, { align: 'center' });
-      
-      // Línea decorativa roja
-      doc.setDrawColor(255, 255, 255);
-      doc.setLineWidth(1);
-      doc.line(pageWidth * 0.2, pageHeight * 0.37, pageWidth * 0.8, pageHeight * 0.37);
+    async function processExcelData(data, supabaseClient) {
+      console.log('[UPDATE-PROCESS] Iniciando procesamiento de', data.length, 'productos (modo batch)');
 
-      // Departamento en grande
-      doc.setFontSize(24);
-      doc.setFont('helvetica', 'normal');
-      const deptTitle = selectedDept === 'all' ? 'CATÁLOGO GENERAL' : selectedDept.toUpperCase();
-      doc.text(deptTitle, pageWidth / 2, pageHeight * 0.45, { align: 'center' });
+      const progressContainer = document.getElementById('progress-container');
+      const resultContainer = document.getElementById('result-container');
+      const progressBar = document.getElementById('progress-bar');
+      const progressText = document.getElementById('progress-text');
+      const progressPercent = document.getElementById('progress-percent');
 
-      // Fecha
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'italic');
-      const today = new Date();
-      const dateStr = today.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
-      doc.text(dateStr, pageWidth / 2, pageHeight * 0.50, { align: 'center' });
+      processBtn.disabled = true;
+      fileStatus.classList.add('hidden');
+      progressContainer.classList.remove('hidden');
 
-      // Información de contacto al pie
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Tecnología al alcance de tus manos', pageWidth / 2, pageHeight - 30, { align: 'center' });
-      doc.setFontSize(10);
-      doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 20, { align: 'center' });
+      let createdCount = 0;
+      let updatedCount = 0;
+      let errorCount = 0;
+      const errors = [];
 
-      // ==================== TABLA DE PRODUCTOS ====================
-      doc.addPage();
+      const CHUNK_SIZE = 100; // Reducido para mayor estabilidad con 10k productos
 
-      // Definir columnas
-      const columns = [
-        { header: 'Imagen', dataKey: 'image' },
-        { header: 'Código', dataKey: 'codigo' },
-        { header: 'Descripción', dataKey: 'nombre' },
-        { header: 'Precio Detal', dataKey: 'precio_cliente' },
-        { header: 'Precio Mayor', dataKey: 'precio_mayor' }
-      ];
+      // Marca temporal para poder verificar qué productos fueron creados por esta operación
+      const opStartISO = new Date().toISOString();
+      const createdCodes = [];
+      const createdProducts = [];
+      // Para reportar sincronizaciones omitidas
+      const skippedSyncCodes = [];
+      let skippedSyncCount = 0;
+      const forceUpdateDesc = (typeof arguments[2] === 'object' && arguments[2].forceUpdateDesc) || false;
 
-      // Preparar datos
-      const body = filtered.map(p => ({
-        id: p.id,
-        image: '', // Placeholder para el hook
-        codigo: p.codigo || 'S/C',
-        nombre: p.nombre || 'Sin descripción',
-        precio_cliente: `$${parseFloat(p.precio_cliente || 0).toLocaleString('es-CO')}`,
-        precio_mayor: `$${parseFloat(p.precio_mayor || 0).toLocaleString('es-CO')}`
-      }));
+      // Helpers
+      const normalizeCode = (c) => (String(c || '')).trim().toUpperCase();
+      const normalizeDescKey = (d) => (String(d || '')).trim().toUpperCase();
 
-      // Generar tabla con autoTable
-      doc.autoTable({
-        columns: columns,
-        body: body,
-        startY: 20,
-        theme: 'striped',
-        styles: {
-          fontSize: 10,
-          cellPadding: 4, // Aumentado para que no esté pegado
-          valign: 'middle',
-          overflow: 'linebreak',
-          lineColor: [220, 220, 220],
-          lineWidth: 0.1
-        },
-        headStyles: {
-          fillColor: [220, 38, 38], // Rojo corporativo
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 11,
-          halign: 'center'
-        },
-        columnStyles: {
-          image: { cellWidth: 25, minCellHeight: 25 },
-          codigo: { cellWidth: 25, fontStyle: 'bold', halign: 'center' },
-          nombre: { cellWidth: 'auto' },
-          precio_cliente: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] }, // Rojo para Detal
-          precio_mayor: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] } // Verde para Mayor (contraste)
-        },
-        alternateRowStyles: {
-          fillColor: [254, 242, 242] // Rojo muy tenue para filas alternas
-        },
-        didDrawCell: (data) => {
-          // Dibujar imagen en la celda correspondiente
-          if (data.column.dataKey === 'image' && data.cell.section === 'body') {
-            const productId = data.row.raw.id;
-            const imgData = imageCache[productId];
-            
-            if (imgData) {
-              const cell = data.cell;
-              const padding = 2;
-              const dim = Math.min(cell.width, cell.height) - (padding * 2);
-              const x = cell.x + (cell.width - dim) / 2;
-              const y = cell.y + (cell.height - dim) / 2;
-              
-              try {
-                doc.addImage(imgData, 'JPEG', x, y, dim, dim);
-                // Borde sutil
-                doc.setDrawColor(200, 200, 200);
-                doc.setLineWidth(0.1);
-                doc.rect(x, y, dim, dim);
-              } catch (e) {
-                // Fallo silencioso
+      const parseNumber = (raw) => {
+        if (raw == null) return 0;
+        let s = String(raw).trim();
+        s = s.replace(/[^0-9.,-]/g, '');
+        if (s.indexOf('.') !== -1 && s.indexOf(',') !== -1) {
+          s = s.replace(/\./g, '');
+          s = s.replace(/,/g, '.');
+        } else {
+          s = s.replace(/,/g, '.');
+        }
+        const n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+      };
+
+      const parseStock = (raw) => Math.round(parseNumber(raw));
+
+      const chunkArray = (arr, size) => {
+        const res = [];
+        for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+        return res;
+      };
+
+      // Helper para reintentar operaciones (útil para inestabilidad de red con muchos datos)
+      const retryOperation = async (operation, maxRetries = 3) => {
+        for (let i = 0; i < maxRetries; i++) {
+          const result = await operation();
+          if (!result.error) return result;
+          if (i === maxRetries - 1) return result;
+          // Esperar un poco antes de reintentar (backoff)
+          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+      };
+
+      try {
+        // Cargar productos existentes (PAGINADO para soportar >1000 productos)
+        let existingProducts = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        
+        progressText.textContent = "Cargando inventario actual...";
+        
+        while (hasMore) {
+          const { data, error: fetchError } = await supabaseClient
+            .from('products')
+            .select('id, codigo, nombre, descripcion')
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+
+          if (fetchError) throw new Error('Error obteniendo productos: ' + fetchError.message);
+          
+          if (data && data.length > 0) {
+            existingProducts = existingProducts.concat(data);
+            progressText.textContent = `Cargando inventario actual (${existingProducts.length})...`;
+            if (data.length < pageSize) hasMore = false;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        }
+        
+        console.log(`[UPDATE-PROCESS] Inventario cargado: ${existingProducts.length} productos existentes.`);
+
+        const codesMap = new Map(); // codigo -> id
+        const descMap = new Map(); // descripcion -> id
+        (existingProducts || []).forEach(p => {
+          const codeKey = normalizeCode(p.codigo);
+          if (codeKey) codesMap.set(codeKey, p.id);
+          const descKey = normalizeDescKey(p.nombre || p.descripcion || '');
+          if (descKey && !descMap.has(descKey)) descMap.set(descKey, p.id);
+        });
+
+        // Mapas locales para agrupar filas del Excel (evitar duplicados en el mismo archivo)
+        const codeRowsMap = new Map(); // codigoKey -> record
+        const idUpdateMap = new Map(); // existingId -> record (matched by descripcion)
+        const insertRowsMap = new Map(); // descKey -> record (no codigo)
+
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+
+          const codigoRaw = row['CODIGO'] || row['Código'] || row['codigo'] || '';
+          const codigoKey = normalizeCode(codigoRaw);
+          const descripcion = row['DESCRIPCION'] || row['Descripción'] || row['DESCRIPCION '] || '';
+          const descKey = normalizeDescKey(descripcion);
+
+          const precioDetal = parseNumber(row['PRECIO DETAL']);
+          const precioMayor = parseNumber(row['PRECIO MAYOR']);
+          const precioGmayor = parseNumber(row['PRECIO GMAYOR']);
+
+          const existenciaRaw = row['EXISTENCIA ACTUAL'] || row['Existencia Actual'] || row['Existencia'] || row['Stock'] || row['stock'] || row['CANTIDAD'] || row['Cantidad'] || row['cantidad'] || row['QTY'] || row['Qty'] || row['qty'];
+          const stock = parseStock(existenciaRaw);
+
+          const departamento = row['DEPARTAMENTO'] || row['Departamento'] || row['departamento'] || '';
+
+          // Validaciones básicas
+          if (!codigoKey && !descKey) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: sin código ni descripción`);
+            continue;
+          }
+
+          if (precioDetal === 0 && precioMayor === 0 && precioGmayor === 0) {
+            errorCount++;
+            errors.push(`Fila ${i + 1}: precios inválidos`);
+            continue;
+          }
+
+          const estado = stock === 0 ? 'agotado' : (stock < 5 ? 'pocas unidades' : 'disponible');
+
+          // Si falta departamento, usar fallback 'GENERAL' para evitar fallos por NOT NULL en la BD
+          if (!departamento || (String(departamento).trim() === '')) {
+            console.warn(`[UPDATE-PROCESS] Fila ${i + 1}: departamento vacío. Usando 'GENERAL' como valor por defecto.`);
+          }
+
+          const record = {
+            codigo: codigoKey || null,
+            nombre: descripcion || (codigoRaw ? codigoRaw : null),
+            descripcion: descripcion || (codigoRaw ? codigoRaw : null),
+            precio_cliente: precioDetal,
+            precio_mayor: precioMayor,
+            precio_gmayor: precioGmayor,
+            stock: stock,
+            departamento: (departamento && String(departamento).trim() !== '') ? departamento : 'GENERAL',
+            estado: estado
+          };
+
+          // Si hay código, agrupar por código (último valor gana)
+          if (codigoKey) {
+            codeRowsMap.set(codigoKey, record);
+            continue;
+          }
+
+          // Si no hay código pero descripción coincide con producto existente -> actualizar por id
+          if (descKey && descMap.has(descKey)) {
+            const existingId = descMap.get(descKey);
+            idUpdateMap.set(existingId, record);
+            continue;
+          }
+
+          // No hay código y no existe en BD, agrupar para insertar sin codigo (por descripción única)
+          if (descKey) {
+            insertRowsMap.set(descKey, record);
+          }
+        }
+
+        // Preparar arrays
+        const upsertByCode = Array.from(codeRowsMap.values());
+        const updatesById = Array.from(idUpdateMap.entries()).map(([id, rec]) => ({ id, ...rec }));
+        const insertsNoCode = Array.from(insertRowsMap.values());
+
+        const totalOps = upsertByCode.length + updatesById.length + insertsNoCode.length;
+        let completedOps = 0;
+
+        const updateProgressUI = () => {
+          const pct = totalOps === 0 ? 100 : Math.round((completedOps / totalOps) * 100);
+          progressBar.style.width = pct + '%';
+          progressPercent.textContent = pct + '%';
+          progressText.textContent = `Procesando: ${completedOps}/${totalOps}`;
+        };
+
+        // ===== 1) Upsert por código (bulk, en chunks) =====
+        if (upsertByCode.length > 0) {
+          const chunks = chunkArray(upsertByCode, CHUNK_SIZE);
+          for (const chunk of chunks) {
+            // Intentamos upsert en bloque por 'codigo'. Si la BD no tiene UNIQUE sobre 'codigo' (error 42P10),
+            // caemos a un flujo de fallback que hace updates/inserts por registro para no abortar todo el proceso.
+
+            // Precomputar existencia para conteo correcto después de la operación
+            const existsBefore = chunk.map(r => codesMap.has((r.codigo || '').toString().toUpperCase()));
+
+            const { data: upserted, error: upsertError } = await retryOperation(() => supabaseClient
+              .from('products')
+              .upsert(chunk, { onConflict: 'codigo' })
+              .select('id, codigo'));
+
+            if (upsertError) {
+              console.error('[UPDATE-PROCESS] Upsert error:', upsertError);
+
+              // Si el error es por falta de UNIQUE/INDEX para ON CONFLICT -> fallback por registro
+              const msg = (upsertError && (upsertError.code === '42P10' || /ON CONFLICT/i.test(upsertError.message || '')));
+              if (msg) {
+                console.warn('[UPDATE-PROCESS] ON CONFLICT no soportado (falta UNIQUE). Ejecutando fallback por registro...');
+                errors.push('ON CONFLICT no soportado: se ejecutó fallback por registro. Mejora recomendada: crear UNIQUE INDEX en products(codigo) para mejor rendimiento.');
+
+                for (let i = 0; i < chunk.length; i++) {
+                  const item = chunk[i];
+                  const codeKey = (item.codigo || '').toString().toUpperCase();
+
+                  try {
+                    if (codesMap.has(codeKey)) {
+                      // actualizar por código
+                      const { data: updatedRows, error: updateErr } = await retryOperation(() => supabaseClient
+                        .from('products')
+                        .update({
+                          nombre: item.nombre,
+                          descripcion: item.descripcion,
+                          precio_cliente: item.precio_cliente,
+                          precio_mayor: item.precio_mayor,
+                          precio_gmayor: item.precio_gmayor,
+                          stock: item.stock,
+                          departamento: item.departamento,
+                          estado: item.estado
+                        })
+                        .eq('codigo', codeKey)
+                        .select('id, codigo')
+                        .limit(1));
+
+                      if (updateErr) {
+                        errorCount++;
+                        errors.push(`Error actualizando por codigo ${codeKey}: ${updateErr.message}`);
+                        console.error('[UPDATE-PROCESS] Update by code error:', updateErr);
+                      } else if (updatedRows && updatedRows.length > 0) {
+                        updatedCount++;
+                        codesMap.set(codeKey, updatedRows[0].id);
+                      } else {
+                        // No se encontró fila para actualizar (peculiar) -> intentar insertar
+                        const { data: inserted, error: insertErr } = await retryOperation(() => supabaseClient
+                          .from('products')
+                          .insert(item)
+                          .select('id, codigo')
+                          .single());
+
+                        if (insertErr) {
+                          errorCount++;
+                          errors.push(`Error insertando por fallback (codigo ${codeKey}): ${insertErr.message}`);
+                          console.error('[UPDATE-PROCESS] Insert fallback error:', insertErr);
+                        } else {
+                          createdCount++;
+                          const ckey = (inserted.codigo || '').toString().toUpperCase();
+                          createdCodes.push(ckey);
+                          createdProducts.push({ id: inserted.id, codigo: ckey });
+                          codesMap.set(ckey, inserted.id);
+                        }
+                      }
+
+                    } else {
+                      // insertar nuevo
+                      const { data: inserted, error: insertErr } = await retryOperation(() => supabaseClient
+                        .from('products')
+                        .insert(item)
+                        .select('id, codigo')
+                        .single());
+
+                      if (insertErr) {
+                        errorCount++;
+                        errors.push(`Error insertando por fallback (codigo ${codeKey}): ${insertErr.message}`);
+                        console.error('[UPDATE-PROCESS] Insert fallback error:', insertErr);
+                      } else {
+                        createdCount++;
+                        codesMap.set((inserted.codigo || '').toString().toUpperCase(), inserted.id);
+                      }
+                    }
+                  } catch (err) {
+                    errorCount++;
+                    errors.push(`Error procesando registro con codigo ${codeKey}: ${err.message || err}`);
+                    console.error('[UPDATE-PROCESS] Fallback unexpected error:', err);
+                  }
+                }
+
+              } else {
+                // Error distinto: contar todo el chunk como error para visibilidad
+                errorCount += chunk.length;
+                errors.push('Error al upsert por código: ' + upsertError.message);
               }
+
             } else {
-              // Marcador de posición estético
-              doc.setFontSize(6);
-              doc.setTextColor(150);
-              doc.text('Sin Foto', data.cell.x + data.cell.width/2, data.cell.y + data.cell.height/2, { align: 'center', baseline: 'middle' });
+              // Upsert exitoso: actualizar codesMap y conteos según existencia previa
+              upserted?.forEach(p => {
+                const key = (p.codigo || '').toString().toUpperCase();
+                if (codesMap.has(key)) {
+                  updatedCount++;
+                } else {
+                  createdCount++;
+                  createdCodes.push(key);
+                  createdProducts.push({ id: p.id, codigo: key });
+                }
+                codesMap.set(key, p.id);
+              });
+            }
+
+            completedOps += chunk.length;
+            updateProgressUI();
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+
+        // ===== 2) Updates por ID (matched by descripcion) =====
+        if (updatesById.length > 0) {
+          const chunks = chunkArray(updatesById, CHUNK_SIZE);
+          for (const chunk of chunks) {
+            // hacer updates secuenciales para cada id dentro del chunk
+            for (const item of chunk) {
+              const id = item.id;
+              const { error: updateErr } = await retryOperation(() => supabaseClient
+                .from('products')
+                .update({
+                  nombre: item.nombre,
+                  descripcion: item.descripcion,
+                  precio_cliente: item.precio_cliente,
+                  precio_mayor: item.precio_mayor,
+                  precio_gmayor: item.precio_gmayor,
+                  stock: item.stock,
+                  departamento: item.departamento,
+                  estado: item.estado
+                })
+                .eq('id', id));
+
+              if (updateErr) {
+                errorCount++;
+                errors.push(`Error actualizando ID ${id}: ${updateErr.message}`);
+              } else {
+                updatedCount++;
+              }
+
+              completedOps++;
+              updateProgressUI();
+            }
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+
+        // ===== 3) Insertar sin código en batch =====
+        if (insertsNoCode.length > 0) {
+          const chunks = chunkArray(insertsNoCode, CHUNK_SIZE);
+          for (const chunk of chunks) {
+            const { data: insertedData, error: insertError } = await retryOperation(() => supabaseClient
+              .from('products')
+              .insert(chunk)
+              .select('id, codigo, nombre, departamento, created_at'));
+
+            if (insertError) {
+              errorCount += chunk.length;
+              errors.push('Error insertando nuevos productos: ' + insertError.message);
+              console.error('[UPDATE-PROCESS] Insert error:', insertError);
+            } else {
+              const n = insertedData?.length || chunk.length;
+              createdCount += n;
+              (insertedData || []).forEach(r => {
+                createdProducts.push({ id: r.id, codigo: (r.codigo || null), nombre: (r.nombre || null), departamento: (r.departamento || null), created_at: r.created_at || null });
+                if (r.codigo) createdCodes.push((r.codigo || '').toString().toUpperCase());
+              });
+            }
+
+            completedOps += chunk.length;
+            updateProgressUI();
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+
+        // Finalizar UI
+        progressContainer.classList.add('hidden');
+        resultContainer.classList.remove('hidden');
+
+        document.getElementById('result-created-count').textContent = createdCount;
+        document.getElementById('result-updated-count').textContent = updatedCount;
+        document.getElementById('result-errors-count').textContent = errorCount;
+
+        if (errors.length > 0) console.warn('[UPDATE-PROCESS] Errores:', errors);
+
+        console.log('[UPDATE-PROCESS] ✅ Completado! Creados:', createdCount, 'Actualizados:', updatedCount, 'Errores:', errorCount);
+
+        // Recargar productos en la aplicación
+        if (window.allProducts) {
+          console.log('[UPDATE-PROCESS] Recargando productos en la aplicación...');
+          
+          // FIX: Usar paginación para cargar TODOS los productos (evitar límite de 1000 de Supabase)
+          let allUpdatedProducts = [];
+          let p = 0;
+          const pSize = 1000;
+          let more = true;
+
+          try {
+            while (more) {
+              const { data: batch, error: batchErr } = await supabaseClient
+                .from('products')
+                .select('*')
+                .range(p * pSize, (p + 1) * pSize - 1);
+
+              if (batchErr) throw batchErr;
+
+              if (batch && batch.length > 0) {
+                allUpdatedProducts = allUpdatedProducts.concat(batch);
+                if (batch.length < pSize) more = false;
+                p++;
+              } else {
+                more = false;
+              }
+            }
+
+            if (allUpdatedProducts.length > 0) {
+              window.allProducts = allUpdatedProducts;
+              if (window.renderProducts) window.renderProducts();
+              console.log(`[UPDATE-PROCESS] Inventario recargado: ${allUpdatedProducts.length} productos.`);
+            }
+          } catch (err) {
+            console.error('[UPDATE-PROCESS] Error recargando inventario:', err);
+          }
+        }
+
+        // Verificar y mostrar productos creados durante esta operación
+        try {
+          const { data: newRows, error: fetchNewErr } = await supabaseClient
+            .from('products')
+            .select('id, codigo, nombre, departamento, created_at')
+            .gte('created_at', opStartISO)
+            .order('created_at', { ascending: false });
+
+          if (fetchNewErr) {
+            console.warn('[UPDATE-PROCESS] Error obteniendo productos creados:', fetchNewErr);
+          } else if (newRows && newRows.length > 0) {
+            console.log('[UPDATE-PROCESS] Productos creados en esta operación:', newRows);
+
+            // Marcar como is_new en la BD para que aparezcan en 'Mercancía Recién Llegada'
+            try {
+              const newIds = newRows.map(r => r.id).filter(Boolean);
+              if (newIds.length > 0) {
+                const { error: markError } = await supabaseClient
+                  .from('products')
+                  .update({ is_new: true })
+                  .in('id', newIds);
+
+                if (markError) console.warn('[UPDATE-PROCESS] Error marcando is_new:', markError);
+                else {
+                  console.log(`[UPDATE-PROCESS] ✅ ${newIds.length} productos marcados como is_new`);
+
+                  // Guardar lista limitada localmente para compatibilidad con la UI
+                  try {
+                    if (window.saveNewProducts) window.saveNewProducts(newIds.slice(0, 100));
+                  } catch (err) {
+                    console.warn('[UPDATE-PROCESS] Error saveNewProducts:', err);
+                  }
+
+                  // Actualizar cache local y re-renderizar
+                  if (window.allProducts && window.renderProducts) {
+                    window.allProducts = window.allProducts.map(p => (newIds.includes(p.id) ? { ...p, is_new: true } : p));
+                    window.renderProducts();
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('[UPDATE-PROCESS] Error marcando productos nuevos:', err);
+            }
+
+            // ===== Sincronizar nombre y descripcion por codigo (si difieren del Excel) =====
+            try {
+              const codesToCheck = Array.from(codeRowsMap.keys());
+
+              // Procesar en chunks para no saturar
+              const chunksToCheck = chunkArray(codesToCheck, CHUNK_SIZE);
+              for (const codesChunk of chunksToCheck) {
+                // 1) Intentar búsqueda directa por 'codigo' (exact match)
+                let { data: dbRowsDirect, error: fetchErr } = await supabaseClient
+                  .from('products')
+                  .select('id,codigo,nombre,descripcion')
+                  .in('codigo', codesChunk);
+
+                if (fetchErr) {
+                  console.warn('[UPDATE-PROCESS] Error fetching products (direct) for sync:', fetchErr);
+                  dbRowsDirect = [];
+                }
+
+                // Recolectar los códigos encontrados
+                const foundCodes = new Set((dbRowsDirect || []).map(r => (r.codigo || '').toString().toUpperCase()));
+                const missing = codesChunk.filter(c => !foundCodes.has(c));
+
+                // 2) Para los faltantes, intentar búsquedas case-insensitive y por patrón
+                const dbRowsFallback = [];
+                for (const code of missing) {
+                  try {
+                    // exacto case-insensitive
+                    const { data: rowsCI, error: ciErr } = await supabaseClient
+                      .from('products')
+                      .select('id,codigo,nombre,descripcion')
+                      .ilike('codigo', code);
+
+                    if (ciErr) {
+                      console.warn('[UPDATE-PROCESS] Error ilike search for codigo', code, ciErr);
+                    } else if (rowsCI && rowsCI.length > 0) {
+                      dbRowsFallback.push(...rowsCI);
+                      continue;
+                    }
+
+                    // patrón
+                    const { data: rowsPat, error: patErr } = await supabaseClient
+                      .from('products')
+                      .select('id,codigo,nombre,descripcion')
+                      .ilike('codigo', `%${code}%`);
+
+                    if (patErr) {
+                      console.warn('[UPDATE-PROCESS] Error pattern search for codigo', code, patErr);
+                    } else if (rowsPat && rowsPat.length > 0) {
+                      dbRowsFallback.push(...rowsPat);
+                    }
+                  } catch (err) {
+                    console.warn('[UPDATE-PROCESS] Fallback search error for codigo', code, err);
+                  }
+                }
+
+                const dbRows = (dbRowsDirect || []).concat(dbRowsFallback);
+
+                // 3) Actualizar filas encontradas si difieren
+                for (const dbRow of dbRows) {
+                  const normCode = (dbRow.codigo || '').toString().toUpperCase().trim();
+                  const rec = codeRowsMap.get(normCode);
+                  if (!rec) continue; // no tenemos datos del Excel para este codigo
+
+                  const dbNombre = (dbRow.nombre || '').toString();
+                  const dbDesc = (dbRow.descripcion || '').toString();
+                  const newNombre = (rec.nombre || '').toString();
+                  const newDesc = (rec.descripcion || '').toString();
+
+                  // Si la fila en el Excel solo tiene el codigo como descripcion, no sobrescribimos
+                  if (!forceUpdateDesc && ((newNombre === normCode && newDesc === normCode) || (!newNombre && !newDesc))) {
+                    skippedSyncCount++;
+                    if (!skippedSyncCodes.includes(normCode)) skippedSyncCodes.push(normCode);
+                    continue;
+                  }
+
+                  if (dbNombre !== newNombre || dbDesc !== newDesc) {
+                    const { error: updErr } = await supabaseClient
+                      .from('products')
+                      .update({ nombre: newNombre, descripcion: newDesc })
+                      .eq('id', dbRow.id);
+
+                    if (updErr) {
+                      console.warn('[UPDATE-PROCESS] Error actualizando nombre/descripcion para codigo', dbRow.codigo, updErr);
+                    } else {
+                      console.log('[UPDATE-PROCESS] Sincronizado producto codigo', dbRow.codigo);
+                      if (window.allProducts) {
+                        window.allProducts = window.allProducts.map(p => (p.id === dbRow.id ? { ...p, nombre: newNombre, descripcion: newDesc } : p));
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('[UPDATE-PROCESS] Error sincronizando nombres/descripciones:', err);
+            }
+
+            const listDiv = document.getElementById('result-created-list');
+            const downloadLink = document.getElementById('download-created-csv');
+            listDiv.classList.remove('hidden');
+            listDiv.innerHTML = `
+              <h4 class="font-semibold mb-2">Productos agregados durante esta actualización (${newRows.length}):</h4>
+              <ul class="text-sm space-y-1">${newRows.map(r => `<li>${r.codigo || '(sin codigo)'} — ${r.nombre || ''} — ${r.departamento || ''} — ${new Date(r.created_at).toLocaleString()}</li>`).join('')}</ul>
+            `;
+
+            // preparar CSV y enlace de descarga
+            const csvRows = ['id,codigo,nombre,departamento,created_at', ...newRows.map(r => `${r.id},${JSON.stringify(r.codigo||'')},${JSON.stringify(r.nombre||'')},${JSON.stringify(r.departamento||'')},${r.created_at || ''}`)];
+            const csv = csvRows.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            downloadLink.href = url;
+            downloadLink.classList.remove('hidden');
+            downloadLink.download = `created_products_${Date.now()}.csv`;
+
+            // Informar si hubo sincronizaciones omitidas
+            if (skippedSyncCount > 0) {
+              const skippedLink = document.getElementById('download-skipped-csv');
+              const skippedDiv = document.getElementById('result-skipped-list');
+              skippedDiv.classList.remove('hidden');
+              skippedDiv.textContent = `Se omitieron ${skippedSyncCount} sincronizaciones (DESCRIPCION = CODIGO). Marca 'Forzar actualizar' si quieres forzar y vuelve a ejecutar.`;
+
+              const skippedCsvRows = ['codigo', ...skippedSyncCodes.map(c => `${c}`)];
+              const skippedCsv = skippedCsvRows.join('\n');
+              const skippedBlob = new Blob([skippedCsv], { type: 'text/csv' });
+              const skippedUrl = URL.createObjectURL(skippedBlob);
+              skippedLink.href = skippedUrl;
+              skippedLink.classList.remove('hidden');
+              skippedLink.download = `skipped_sync_codes_${Date.now()}.csv`;
             }
           }
-        },
-        didDrawPage: (data) => {
-          // Encabezado de página
-          doc.setFontSize(10);
-          doc.setTextColor(100);
-          doc.text('SONIMAX MÓVIL - Catálogo', data.settings.margin.left, 10);
-          
-          // Pie de página con numeración
-          const pageCount = doc.internal.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.text(`Página ${pageCount}`, pageWidth - 20, pageHeight - 10, { align: 'right' });
-          doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 10, { align: 'center' });
+        } catch (err) {
+          console.error('[UPDATE-PROCESS] Error verificando productos creados:', err);
         }
-      });
 
-      updateProgress(100, 100, 'Completado! Descargando...');
-      doc.save(`Catalogo_${selectedDept}_${new Date().toISOString().split('T')[0]}.pdf`);
-      
-      // Cerrar modal después de 1 segundo
-      setTimeout(() => {
-        progressModal.remove();
-      }, 1000);
-      
-    } catch (error) {
-      console.error('[PDF] Error:', error);
-      alert('Error generando PDF: ' + error.message);
+        // Cerrar modal automáticamente después de 3 segundos
+        setTimeout(() => modalDiv.remove(), 3000);
+      } catch (error) {
+        console.error('[UPDATE-PROCESS] Error general:', error);
+        alert('Error durante la actualización: ' + error.message);
+        processBtn.disabled = false;
+        progressContainer.classList.add('hidden');
+      }
     }
   };
-
-  // ============================================
-  // INICIALIZAR
-  // ============================================
-
-  function initializeListeners() {
-    const buttons = {
-      'update-products-button': window.showUpdateProductsModal,
-      'add-merchandise-button': window.showAddMerchandiseModal,
-      'no-photo-button': window.showProductsWithoutPhoto,
-      'modify-product-button': window.showModifyProductModal,
-      'export-pdf-button': window.showPdfExportModal
-    };
-
-    Object.entries(buttons).forEach(([id, fn]) => {
-      const btn = document.getElementById(id);
-      if (btn) btn.addEventListener('click', fn);
-    });
-
-    console.log('[FEATURES] ✅ Listeners inicializados');
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeListeners);
-  } else {
-    initializeListeners();
-  }
-
-  setTimeout(initializeListeners, 1000);
-
 })();
