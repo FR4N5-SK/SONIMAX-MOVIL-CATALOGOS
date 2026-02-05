@@ -380,9 +380,8 @@
 
           const record = {
             codigo: codigoKey || null,
-            // Asegurar que se use la descripción del Excel para corregir nombres en BD
-            nombre: (descripcion && descripcion.trim().length > 0) ? descripcion : (codigoRaw ? codigoRaw : null),
-            descripcion: (descripcion && descripcion.trim().length > 0) ? descripcion : (codigoRaw ? codigoRaw : null),
+            nombre: descripcion || (codigoRaw ? codigoRaw : null),
+            descripcion: descripcion || (codigoRaw ? codigoRaw : null),
             precio_cliente: precioDetal,
             precio_mayor: precioMayor,
             precio_gmayor: precioGmayor,
@@ -618,14 +617,9 @@
         progressContainer.classList.add('hidden');
         resultContainer.classList.remove('hidden');
 
-        const elCreated = document.getElementById('result-created-count');
-        if (elCreated) elCreated.textContent = createdCount;
-        
-        const elUpdated = document.getElementById('result-updated-count');
-        if (elUpdated) elUpdated.textContent = updatedCount;
-        
-        const elErrors = document.getElementById('result-errors-count');
-        if (elErrors) elErrors.textContent = errorCount;
+        document.getElementById('result-created-count').textContent = createdCount;
+        document.getElementById('result-updated-count').textContent = updatedCount;
+        document.getElementById('result-errors-count').textContent = errorCount;
 
         if (errors.length > 0) console.warn('[UPDATE-PROCESS] Errores:', errors);
 
@@ -634,10 +628,38 @@
         // Recargar productos en la aplicación
         if (window.allProducts) {
           console.log('[UPDATE-PROCESS] Recargando productos en la aplicación...');
-          const { data: updatedProducts } = await supabaseClient.from('products').select('*');
-          if (updatedProducts) {
-            window.allProducts = updatedProducts;
-            if (window.renderProducts) window.renderProducts();
+          
+          // FIX: Usar paginación para cargar TODOS los productos (evitar límite de 1000 de Supabase)
+          let allUpdatedProducts = [];
+          let p = 0;
+          const pSize = 1000;
+          let more = true;
+
+          try {
+            while (more) {
+              const { data: batch, error: batchErr } = await supabaseClient
+                .from('products')
+                .select('*')
+                .range(p * pSize, (p + 1) * pSize - 1);
+
+              if (batchErr) throw batchErr;
+
+              if (batch && batch.length > 0) {
+                allUpdatedProducts = allUpdatedProducts.concat(batch);
+                if (batch.length < pSize) more = false;
+                p++;
+              } else {
+                more = false;
+              }
+            }
+
+            if (allUpdatedProducts.length > 0) {
+              window.allProducts = allUpdatedProducts;
+              if (window.renderProducts) window.renderProducts();
+              console.log(`[UPDATE-PROCESS] Inventario recargado: ${allUpdatedProducts.length} productos.`);
+            }
+          } catch (err) {
+            console.error('[UPDATE-PROCESS] Error recargando inventario:', err);
           }
         }
 
@@ -783,45 +805,35 @@
 
             const listDiv = document.getElementById('result-created-list');
             const downloadLink = document.getElementById('download-created-csv');
-            
-            if (listDiv) {
-              listDiv.classList.remove('hidden');
-              listDiv.innerHTML = `
-                <h4 class="font-semibold mb-2">Productos agregados durante esta actualización (${newRows.length}):</h4>
-                <ul class="text-sm space-y-1">${newRows.map(r => `<li>${r.codigo || '(sin codigo)'} — ${r.nombre || ''} — ${r.departamento || ''} — ${new Date(r.created_at).toLocaleString()}</li>`).join('')}</ul>
-              `;
-            }
+            listDiv.classList.remove('hidden');
+            listDiv.innerHTML = `
+              <h4 class="font-semibold mb-2">Productos agregados durante esta actualización (${newRows.length}):</h4>
+              <ul class="text-sm space-y-1">${newRows.map(r => `<li>${r.codigo || '(sin codigo)'} — ${r.nombre || ''} — ${r.departamento || ''} — ${new Date(r.created_at).toLocaleString()}</li>`).join('')}</ul>
+            `;
 
             // preparar CSV y enlace de descarga
-            if (downloadLink) {
-              const csvRows = ['id,codigo,nombre,departamento,created_at', ...newRows.map(r => `${r.id},${JSON.stringify(r.codigo||'')},${JSON.stringify(r.nombre||'')},${JSON.stringify(r.departamento||'')},${r.created_at || ''}`)];
-              const csv = csvRows.join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              downloadLink.href = url;
-              downloadLink.classList.remove('hidden');
-              downloadLink.download = `created_products_${Date.now()}.csv`;
-            }
+            const csvRows = ['id,codigo,nombre,departamento,created_at', ...newRows.map(r => `${r.id},${JSON.stringify(r.codigo||'')},${JSON.stringify(r.nombre||'')},${JSON.stringify(r.departamento||'')},${r.created_at || ''}`)];
+            const csv = csvRows.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            downloadLink.href = url;
+            downloadLink.classList.remove('hidden');
+            downloadLink.download = `created_products_${Date.now()}.csv`;
 
             // Informar si hubo sincronizaciones omitidas
             if (skippedSyncCount > 0) {
               const skippedLink = document.getElementById('download-skipped-csv');
               const skippedDiv = document.getElementById('result-skipped-list');
-              
-              if (skippedDiv) {
-                skippedDiv.classList.remove('hidden');
-                skippedDiv.textContent = `Se omitieron ${skippedSyncCount} sincronizaciones (DESCRIPCION = CODIGO). Marca 'Forzar actualizar' si quieres forzar y vuelve a ejecutar.`;
-              }
+              skippedDiv.classList.remove('hidden');
+              skippedDiv.textContent = `Se omitieron ${skippedSyncCount} sincronizaciones (DESCRIPCION = CODIGO). Marca 'Forzar actualizar' si quieres forzar y vuelve a ejecutar.`;
 
-              if (skippedLink) {
-                const skippedCsvRows = ['codigo', ...skippedSyncCodes.map(c => `${c}`)];
-                const skippedCsv = skippedCsvRows.join('\n');
-                const skippedBlob = new Blob([skippedCsv], { type: 'text/csv' });
-                const skippedUrl = URL.createObjectURL(skippedBlob);
-                skippedLink.href = skippedUrl;
-                skippedLink.classList.remove('hidden');
-                skippedLink.download = `skipped_sync_codes_${Date.now()}.csv`;
-              }
+              const skippedCsvRows = ['codigo', ...skippedSyncCodes.map(c => `${c}`)];
+              const skippedCsv = skippedCsvRows.join('\n');
+              const skippedBlob = new Blob([skippedCsv], { type: 'text/csv' });
+              const skippedUrl = URL.createObjectURL(skippedBlob);
+              skippedLink.href = skippedUrl;
+              skippedLink.classList.remove('hidden');
+              skippedLink.download = `skipped_sync_codes_${Date.now()}.csv`;
             }
           }
         } catch (err) {
