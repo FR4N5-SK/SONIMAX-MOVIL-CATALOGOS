@@ -71,8 +71,8 @@
               <p class="text-xs text-green-700 mt-1">Productos a procesar: <strong id="file-count">0</strong></p>
               <div id="file-stats" class="hidden mt-2 text-sm text-gray-700"></div>
               <div class="flex items-center gap-2 mt-3">
-                <input type="checkbox" id="force-update-desc" />
-                <label for="force-update-desc" class="text-sm text-gray-700">Forzar actualizar nombre/descripcion incluso si DESCRIPCION = CODIGO</label>
+                <input type="checkbox" id="force-update-desc" checked />
+                <label for="force-update-desc" class="text-sm font-bold text-gray-800">Forzar actualización de descripciones (Recomendado para corregir nombres)</label>
               </div>
             </div>
           </div>
@@ -250,7 +250,7 @@
       let errorCount = 0;
       const errors = [];
 
-      const CHUNK_SIZE = 300; // Ajustable
+      const CHUNK_SIZE = 100; // Reducido para mayor estabilidad con 10k productos
 
       // Marca temporal para poder verificar qué productos fueron creados por esta operación
       const opStartISO = new Date().toISOString();
@@ -287,13 +287,45 @@
         return res;
       };
 
-      try {
-        // Cargar productos existentes
-        const { data: existingProducts, error: fetchError } = await supabaseClient
-          .from('products')
-          .select('id, codigo, nombre, descripcion');
+      // Helper para reintentar operaciones (útil para inestabilidad de red con muchos datos)
+      const retryOperation = async (operation, maxRetries = 3) => {
+        for (let i = 0; i < maxRetries; i++) {
+          const result = await operation();
+          if (!result.error) return result;
+          if (i === maxRetries - 1) return result;
+          // Esperar un poco antes de reintentar (backoff)
+          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+      };
 
-        if (fetchError) throw new Error('Error obteniendo productos: ' + fetchError.message);
+      try {
+        // Cargar productos existentes (PAGINADO para soportar >1000 productos)
+        let existingProducts = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        
+        progressText.textContent = "Cargando inventario actual...";
+        
+        while (hasMore) {
+          const { data, error: fetchError } = await supabaseClient
+            .from('products')
+            .select('id, codigo, nombre, descripcion')
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+
+          if (fetchError) throw new Error('Error obteniendo productos: ' + fetchError.message);
+          
+          if (data && data.length > 0) {
+            existingProducts = existingProducts.concat(data);
+            progressText.textContent = `Cargando inventario actual (${existingProducts.length})...`;
+            if (data.length < pageSize) hasMore = false;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        }
+        
+        console.log(`[UPDATE-PROCESS] Inventario cargado: ${existingProducts.length} productos existentes.`);
 
         const codesMap = new Map(); // codigo -> id
         const descMap = new Map(); // descripcion -> id
@@ -348,8 +380,9 @@
 
           const record = {
             codigo: codigoKey || null,
-            nombre: descripcion || (codigoRaw ? codigoRaw : null),
-            descripcion: descripcion || (codigoRaw ? codigoRaw : null),
+            // Asegurar que se use la descripción del Excel para corregir nombres en BD
+            nombre: (descripcion && descripcion.trim().length > 0) ? descripcion : (codigoRaw ? codigoRaw : null),
+            descripcion: (descripcion && descripcion.trim().length > 0) ? descripcion : (codigoRaw ? codigoRaw : null),
             precio_cliente: precioDetal,
             precio_mayor: precioMayor,
             precio_gmayor: precioGmayor,
@@ -402,10 +435,10 @@
             // Precomputar existencia para conteo correcto después de la operación
             const existsBefore = chunk.map(r => codesMap.has((r.codigo || '').toString().toUpperCase()));
 
-            const { data: upserted, error: upsertError } = await supabaseClient
+            const { data: upserted, error: upsertError } = await retryOperation(() => supabaseClient
               .from('products')
               .upsert(chunk, { onConflict: 'codigo' })
-              .select('id, codigo');
+              .select('id, codigo'));
 
             if (upsertError) {
               console.error('[UPDATE-PROCESS] Upsert error:', upsertError);
@@ -423,7 +456,7 @@
                   try {
                     if (codesMap.has(codeKey)) {
                       // actualizar por código
-                      const { data: updatedRows, error: updateErr } = await supabaseClient
+                      const { data: updatedRows, error: updateErr } = await retryOperation(() => supabaseClient
                         .from('products')
                         .update({
                           nombre: item.nombre,
@@ -437,7 +470,7 @@
                         })
                         .eq('codigo', codeKey)
                         .select('id, codigo')
-                        .limit(1);
+                        .limit(1));
 
                       if (updateErr) {
                         errorCount++;
@@ -448,11 +481,11 @@
                         codesMap.set(codeKey, updatedRows[0].id);
                       } else {
                         // No se encontró fila para actualizar (peculiar) -> intentar insertar
-                        const { data: inserted, error: insertErr } = await supabaseClient
+                        const { data: inserted, error: insertErr } = await retryOperation(() => supabaseClient
                           .from('products')
                           .insert(item)
                           .select('id, codigo')
-                          .single();
+                          .single());
 
                         if (insertErr) {
                           errorCount++;
@@ -469,11 +502,11 @@
 
                     } else {
                       // insertar nuevo
-                      const { data: inserted, error: insertErr } = await supabaseClient
+                      const { data: inserted, error: insertErr } = await retryOperation(() => supabaseClient
                         .from('products')
                         .insert(item)
                         .select('id, codigo')
-                        .single();
+                        .single());
 
                       if (insertErr) {
                         errorCount++;
@@ -525,7 +558,7 @@
             // hacer updates secuenciales para cada id dentro del chunk
             for (const item of chunk) {
               const id = item.id;
-              const { error: updateErr } = await supabaseClient
+              const { error: updateErr } = await retryOperation(() => supabaseClient
                 .from('products')
                 .update({
                   nombre: item.nombre,
@@ -537,7 +570,7 @@
                   departamento: item.departamento,
                   estado: item.estado
                 })
-                .eq('id', id);
+                .eq('id', id));
 
               if (updateErr) {
                 errorCount++;
@@ -557,10 +590,10 @@
         if (insertsNoCode.length > 0) {
           const chunks = chunkArray(insertsNoCode, CHUNK_SIZE);
           for (const chunk of chunks) {
-            const { data: insertedData, error: insertError } = await supabaseClient
+            const { data: insertedData, error: insertError } = await retryOperation(() => supabaseClient
               .from('products')
               .insert(chunk)
-              .select('id, codigo, nombre, departamento, created_at');
+              .select('id, codigo, nombre, departamento, created_at'));
 
             if (insertError) {
               errorCount += chunk.length;
@@ -585,9 +618,14 @@
         progressContainer.classList.add('hidden');
         resultContainer.classList.remove('hidden');
 
-        document.getElementById('result-created-count').textContent = createdCount;
-        document.getElementById('result-updated-count').textContent = updatedCount;
-        document.getElementById('result-errors-count').textContent = errorCount;
+        const elCreated = document.getElementById('result-created-count');
+        if (elCreated) elCreated.textContent = createdCount;
+        
+        const elUpdated = document.getElementById('result-updated-count');
+        if (elUpdated) elUpdated.textContent = updatedCount;
+        
+        const elErrors = document.getElementById('result-errors-count');
+        if (elErrors) elErrors.textContent = errorCount;
 
         if (errors.length > 0) console.warn('[UPDATE-PROCESS] Errores:', errors);
 
@@ -745,35 +783,45 @@
 
             const listDiv = document.getElementById('result-created-list');
             const downloadLink = document.getElementById('download-created-csv');
-            listDiv.classList.remove('hidden');
-            listDiv.innerHTML = `
-              <h4 class="font-semibold mb-2">Productos agregados durante esta actualización (${newRows.length}):</h4>
-              <ul class="text-sm space-y-1">${newRows.map(r => `<li>${r.codigo || '(sin codigo)'} — ${r.nombre || ''} — ${r.departamento || ''} — ${new Date(r.created_at).toLocaleString()}</li>`).join('')}</ul>
-            `;
+            
+            if (listDiv) {
+              listDiv.classList.remove('hidden');
+              listDiv.innerHTML = `
+                <h4 class="font-semibold mb-2">Productos agregados durante esta actualización (${newRows.length}):</h4>
+                <ul class="text-sm space-y-1">${newRows.map(r => `<li>${r.codigo || '(sin codigo)'} — ${r.nombre || ''} — ${r.departamento || ''} — ${new Date(r.created_at).toLocaleString()}</li>`).join('')}</ul>
+              `;
+            }
 
             // preparar CSV y enlace de descarga
-            const csvRows = ['id,codigo,nombre,departamento,created_at', ...newRows.map(r => `${r.id},${JSON.stringify(r.codigo||'')},${JSON.stringify(r.nombre||'')},${JSON.stringify(r.departamento||'')},${r.created_at || ''}`)];
-            const csv = csvRows.join('\n');
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            downloadLink.href = url;
-            downloadLink.classList.remove('hidden');
-            downloadLink.download = `created_products_${Date.now()}.csv`;
+            if (downloadLink) {
+              const csvRows = ['id,codigo,nombre,departamento,created_at', ...newRows.map(r => `${r.id},${JSON.stringify(r.codigo||'')},${JSON.stringify(r.nombre||'')},${JSON.stringify(r.departamento||'')},${r.created_at || ''}`)];
+              const csv = csvRows.join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              downloadLink.href = url;
+              downloadLink.classList.remove('hidden');
+              downloadLink.download = `created_products_${Date.now()}.csv`;
+            }
 
             // Informar si hubo sincronizaciones omitidas
             if (skippedSyncCount > 0) {
               const skippedLink = document.getElementById('download-skipped-csv');
               const skippedDiv = document.getElementById('result-skipped-list');
-              skippedDiv.classList.remove('hidden');
-              skippedDiv.textContent = `Se omitieron ${skippedSyncCount} sincronizaciones (DESCRIPCION = CODIGO). Marca 'Forzar actualizar' si quieres forzar y vuelve a ejecutar.`;
+              
+              if (skippedDiv) {
+                skippedDiv.classList.remove('hidden');
+                skippedDiv.textContent = `Se omitieron ${skippedSyncCount} sincronizaciones (DESCRIPCION = CODIGO). Marca 'Forzar actualizar' si quieres forzar y vuelve a ejecutar.`;
+              }
 
-              const skippedCsvRows = ['codigo', ...skippedSyncCodes.map(c => `${c}`)];
-              const skippedCsv = skippedCsvRows.join('\n');
-              const skippedBlob = new Blob([skippedCsv], { type: 'text/csv' });
-              const skippedUrl = URL.createObjectURL(skippedBlob);
-              skippedLink.href = skippedUrl;
-              skippedLink.classList.remove('hidden');
-              skippedLink.download = `skipped_sync_codes_${Date.now()}.csv`;
+              if (skippedLink) {
+                const skippedCsvRows = ['codigo', ...skippedSyncCodes.map(c => `${c}`)];
+                const skippedCsv = skippedCsvRows.join('\n');
+                const skippedBlob = new Blob([skippedCsv], { type: 'text/csv' });
+                const skippedUrl = URL.createObjectURL(skippedBlob);
+                skippedLink.href = skippedUrl;
+                skippedLink.classList.remove('hidden');
+                skippedLink.download = `skipped_sync_codes_${Date.now()}.csv`;
+              }
             }
           }
         } catch (err) {
