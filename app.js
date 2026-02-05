@@ -1486,11 +1486,26 @@ function updateUIForRole() {
 
   if (window.currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
+    // Asegurar que todos los botones sean visibles
+    const adminButtons = adminSection.querySelectorAll("button")
+    adminButtons.forEach((btn) => btn.classList.remove("hidden"))
+
     gestorSection?.classList.remove("hidden")
     manageBannersBtn?.classList.remove("hidden")
   } else if (window.currentUserRole === "gestor") {
     gestorSection?.classList.remove("hidden")
-    adminSection?.classList.add("hidden")
+    
+    // Mostrar admin-section pero solo el botón de PDF
+    adminSection?.classList.remove("hidden")
+    const adminButtons = adminSection.querySelectorAll("button")
+    adminButtons.forEach((btn) => {
+      if (btn.id === "export-pdf-button") {
+        btn.classList.remove("hidden")
+      } else {
+        btn.classList.add("hidden")
+      }
+    })
+
     manageBannersBtn?.classList.add("hidden")
   } else {
     adminSection?.classList.add("hidden")
@@ -1793,6 +1808,20 @@ async function loadProducts() {
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
 
+    // Ordenar productos: Disponibles primero, Agotados al final
+    allProducts.sort((a, b) => {
+      // 1. Estado de stock (Mayor a 0 primero)
+      const stockA = (a.stock && a.stock > 0) ? 1 : 0;
+      const stockB = (b.stock && b.stock > 0) ? 1 : 0;
+      
+      if (stockA !== stockB) {
+        return stockB - stockA; // 1 (disponible) antes que 0 (agotado)
+      }
+      
+      // 2. Orden alfabético por nombre
+      return (a.nombre || '').localeCompare(b.nombre || '');
+    });
+
     filteredProducts = allProducts
     currentPage = 1
 
@@ -2086,7 +2115,6 @@ function createProductCard(product) {
     <div class="p-5">
       <h3 class="font-bold text-lg text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
       ${product.codigo ? `<p class="text-xs text-gray-500 mb-1 font-semibold">Código: ${product.codigo}</p>` : ""}
-      ${product.descripcion ? `<p class="text-gray-600 text-sm mb-3 line-clamp-2">${product.descripcion}</p>` : ""}
       <div class="mb-4">
         ${priceHTML}
       </div>
@@ -3241,8 +3269,8 @@ async function generatePDF() {
     return
   }
 
-  if (window.currentUserRole !== "admin") {
-    showPDFStatus("Solo los administradores pueden exportar PDF", "error")
+  if (window.currentUserRole !== "admin" && window.currentUserRole !== "gestor") {
+    showPDFStatus("Solo los administradores y gestores pueden exportar PDF", "error")
     return
   }
 
