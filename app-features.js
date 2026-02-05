@@ -27,31 +27,13 @@
       
       console.log('[NO-PHOTO] Buscando productos sin foto en memoria...');
       
-      // Verificar si la carga inicial sigue en progreso
-      const loadingEl = document.getElementById("products-loading");
-      if (loadingEl && !loadingEl.classList.contains("hidden")) {
-        alert('El inventario aún se está cargando. Por favor espera unos segundos para tener la lista exacta.');
-        return;
-      }
-
       if (!allProducts || allProducts.length === 0) {
         alert('Cargando productos... Por favor espera unos segundos.');
         return;
       }
 
-      // Identificar códigos que SÍ tienen foto en otros registros (para detectar duplicados)
-      const codesWithPhoto = new Set();
-      allProducts.forEach(p => {
-        if (p.codigo && p.imagen_url && p.imagen_url.length > 10 && !p.imagen_url.includes('null')) {
-          codesWithPhoto.add(p.codigo.trim().toUpperCase());
-        }
-      });
-
       // Filtrar productos sin imagen URL desde la memoria local
-      // También filtrar si la URL es "null" o "undefined" como texto
-      const productsWithoutPhoto = allProducts.filter(p => 
-        !p.imagen_url || p.imagen_url.trim() === '' || p.imagen_url === 'null' || p.imagen_url === 'undefined'
-      );
+      const productsWithoutPhoto = allProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
 
       console.log('[NO-PHOTO] Encontrados:', productsWithoutPhoto.length, 'productos sin foto');
 
@@ -62,7 +44,7 @@
           <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between">
             <div>
               <h2 class="text-2xl font-bold">Productos sin Foto</h2>
-              <p class="text-amber-100 mt-1">Encontrados: ${productsWithoutPhoto.length} (de ${allProducts.length} totales)</p>
+              <p class="text-amber-100 mt-1">Total encontrados: ${productsWithoutPhoto.length}</p>
             </div>
             <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
           </div>
@@ -73,22 +55,15 @@
             
             <div id="no-photo-results" class="space-y-3 max-h-96 overflow-y-auto">
               ${productsWithoutPhoto.length === 0 ? '<p class="text-gray-500 text-center py-8">¡Todos los productos tienen foto!</p>' : 
-                productsWithoutPhoto.map(p => {
-                  // Verificar si es un posible duplicado
-                  const isDuplicate = p.codigo && codesWithPhoto.has(p.codigo.trim().toUpperCase());
-                  const duplicateBadge = isDuplicate 
-                    ? `<span class="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full font-bold border border-red-200 ml-2">⚠️ Posible Duplicado (Ya existe con foto)</span>` 
-                    : '';
-
-                  return `
+                productsWithoutPhoto.map(p => `
                 <div class="p-4 bg-gray-50 rounded-lg border-l-4 border-amber-500 hover:bg-gray-100 transition cursor-pointer no-photo-item" 
                   data-codigo="${p.codigo || ''}" data-nombre="${p.nombre || ''}" data-id="${p.id}">
-                  <p class="font-semibold text-gray-800">${p.codigo || 'SIN CODE'} ${duplicateBadge}</p>
+                  <p class="font-semibold text-gray-800">${p.codigo || 'SIN CODE'}</p>
                   <p class="text-sm text-gray-600 mt-1">${p.nombre || 'Sin nombre'}</p>
                   <p class="text-xs text-gray-500 mt-2">${p.descripcion || 'Sin descripción'}</p>
                   <p class="text-xs text-amber-600 mt-2">Stock: ${p.stock || 0}</p>
-                </div>`;
-              }).join('')}
+                </div>
+              `).join('')}
             </div>
           </div>
           
