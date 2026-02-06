@@ -2658,7 +2658,7 @@ function generateExcelAndSendOrder(responsables, sitio) {
 
     cart.forEach((item) => {
       const product = allProducts.find((p) => p.id === item.id)
-      const codigo = product ? product.descripcion || "S/C" : "S/C"
+      const codigo = product ? product.codigo || "S/C" : "S/C"
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
 
@@ -2702,7 +2702,7 @@ function generateExcelAndSendOrder(responsables, sitio) {
 
     cart.forEach((item, index) => {
       const product = allProducts.find((p) => p.id === item.id)
-      const codigo = product ? product.descripcion || "S/C" : "S/C"
+    const codigo = product ? product.codigo || "S/C" : "S/C"
       const precioUnitario = product ? product.precio_gmayor || 0 : 0
       const subtotal = precioUnitario * item.quantity
 
@@ -2754,7 +2754,7 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
 
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
-    const codigo = product ? product.descripcion || "S/C" : "S/C"
+    const codigo = product ? product.codigo || "S/C" : "S/C"
     const precioUnitario = product ? product.precio_gmayor || 0 : 0
     const subtotal = precioUnitario * item.quantity
 
@@ -2799,7 +2799,7 @@ function sendWhatsAppOrder() {
 
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
-    const codigo = product ? product.descripcion || "S/C" : "S/C"
+    const codigo = product ? product.codigo || "S/C" : "S/C"
     const subtotal = item.price * item.quantity
 
     message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
