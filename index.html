@@ -851,5 +851,87 @@
         <script src="app.js"></script>
         <script src="app-features.js"></script>
         <script src="app-update-products.js"></script>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+                // Esta función se encargará de ocultar el departamento 'SLD'
+                // según el rol del usuario.
+                const checkAndHideSldDepartment = () => {
+                    const userRole = window.currentUserRole;
+                    // Si el rol del usuario no es 'admin' o 'gestor', procedemos a ocultar los elementos.
+                    if (userRole !== 'admin' && userRole !== 'gestor') {
+                        // Ocultar de la navegación principal de departamentos y de la barra lateral.
+                        // Hacemos la comparación en mayúsculas para ser tolerantes a variaciones (SLD, sld, Sld).
+                        document.querySelectorAll('[data-dept]').forEach(el => {
+                            if (el.dataset.dept.toUpperCase() === 'SLD') {
+                                el.style.display = 'none';
+                            }
+                        });
+                
+                        // Ocultar también de la lista desplegable para exportar a PDF.
+                        const pdfSelect = document.getElementById('pdf-department-select');
+                        if (pdfSelect) {
+                            // Hacemos lo mismo para las opciones del select.
+                            Array.from(pdfSelect.options).forEach(option => {
+                                if (option.value.toUpperCase() === 'SLD') {
+                                    option.remove();
+                                }
+                            });
+                        }
+                    }
+                };
+        
+                // Esta función se llamará para configurar la lógica de observación.
+                const setupDepartmentObserver = () => {
+                    try {
+                        // Hacemos una comprobación inicial
+                        checkAndHideSldDepartment();
+    
+                        // Las listas de departamentos se cargan dinámicamente. Usamos un MutationObserver
+                        // para detectar cuándo se añaden nuevos elementos a los contenedores de departamentos.
+                        const departmentContainers = [
+                            document.getElementById('sidebar-departments'),
+                            document.getElementById('departments-nav'),
+                            document.getElementById('pdf-department-select')
+                        ];
+    
+                        const observer = new MutationObserver(() => {
+                            // Cuando se detecta un cambio, volvemos a ejecutar la comprobación.
+                            checkAndHideSldDepartment();
+                        });
+    
+                        departmentContainers.forEach(container => {
+                            if (container) {
+                                observer.observe(container, {
+                                    childList: true, // Observar si se añaden o quitan hijos
+                                    subtree: true    // Observar también los descendientes
+                                });
+                            }
+                        });
+                    } catch (error) {
+                        console.error('Error al configurar la lógica de visibilidad de departamentos:', error);
+                    }
+                };
+        
+                // La aplicación muestra la pantalla #app-screen después de un inicio de sesión exitoso.
+                // Podemos observar este elemento para saber cuándo ejecutar nuestra lógica.
+                const appScreen = document.getElementById('app-screen');
+                if (appScreen) {
+                    const appObserver = new MutationObserver((mutations) => {
+                        for (const mutation of mutations) {
+                            // Cuando se elimina la clase 'hidden', significa que el usuario ha iniciado sesión y la app está visible.
+                            if (mutation.attributeName === 'class' && !appScreen.classList.contains('hidden')) {
+                                setupDepartmentObserver();
+                                // Una vez que hemos configurado nuestros observadores, ya no necesitamos observar la pantalla de la app.
+                                appObserver.disconnect();
+                                return;
+                            }
+                        }
+                    });
+        
+                    appObserver.observe(appScreen, { attributes: true });
+                }
+            });
+        </script>
     </body>
 </html>
