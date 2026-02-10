@@ -1501,7 +1501,9 @@ function updateUIForRole() {
   const manageBannersBtn = document.getElementById("manage-banners-btn")
 
   if (roleBadge) {
-    roleBadge.textContent = `${currentUser.name} (${currentUserRole})`
+    // Mostrar "MAYORISTA" si el rol es distribuidor
+    const displayRole = currentUserRole === 'distribuidor' ? 'MAYORISTA' : currentUserRole;
+    roleBadge.textContent = `${currentUser.name} (${displayRole})`
     roleBadge.className = `role-badge-${currentUserRole}`
     roleBadge.classList.remove("hidden")
   }
@@ -1694,13 +1696,13 @@ function setupEventListeners() {
     if (window.currentUserRole === "gestor") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
-        <option value="distribuidor">Distribuidor</option>
+        <option value="distribuidor">Mayorista</option>
         <option value="gestor">Gestor</option>
       `
     } else if (window.currentUserRole === "admin") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
-        <option value="distribuidor">Distribuidor</option>
+        <option value="distribuidor">Mayorista</option>
         <option value="gestor">Gestor</option>
         <option value="admin">Administrador</option>
       `
