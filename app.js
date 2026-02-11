@@ -57,6 +57,9 @@ const imageLoadState = {
   currentAbortController: null,
 }
 
+// Variable global para el estado de edición de inventario
+let inventoryEditMode = false;
+
 // ============================================
 // GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
 // ============================================
@@ -1549,6 +1552,11 @@ function updateUIForRole() {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
     manageBannersBtn?.classList.add("hidden")
+  }
+
+  // Si es admin, cargar el estado del botón de bloqueo
+  if (window.currentUserRole === "admin") {
+    fetchInventoryConfig();
   }
 }
 
@@ -3780,6 +3788,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (updateProductsBtn) {
     updateProductsBtn.addEventListener("click", window.showUpdateProductsModal)
   }
+
+  // Evento para el botón de bloqueo de inventario
+  document.getElementById("toggle-inventory-lock-btn")?.addEventListener("click", toggleInventoryConfig);
 })
 
 // ============================================
@@ -3790,6 +3801,7 @@ let currentCountingProducts = []; // Variable para almacenar productos del depó
 
 function initInventoryRole() {
     console.log("📦 Inicializando rol de Inventario");
+    fetchInventoryConfig(); // Cargar configuración de bloqueo al iniciar
     
     // Manejo de Tabs
     const tabs = ['assign', 'count', 'search'];
@@ -3960,6 +3972,9 @@ async function loadInventoryForCounting(deposito) {
     loading.classList.remove('hidden');
     // Limpiar buscador al cambiar de depósito
     if(searchInput) searchInput.value = '';
+    
+    // Asegurar que tenemos la configuración más reciente
+    await fetchInventoryConfig();
 
     try {
         let data = [];
@@ -4102,5 +4117,67 @@ async function exportInventoryExcel() {
             exportBtn.textContent = 'Exportar Excel';
             exportBtn.disabled = false;
         }
+    }
+}
+
+// ============================================
+// FUNCIONES DE CONFIGURACIÓN DE INVENTARIO (ADMIN)
+// ============================================
+
+async function fetchInventoryConfig() {
+    try {
+        // Intentamos obtener la configuración de la tabla 'inventory_config'
+        // Asumimos que el ID 1 es la configuración global
+        const { data, error } = await window.supabaseClient
+            .from('inventory_config')
+            .select('edit_enabled')
+            .eq('id', 1)
+            .single();
+        
+        if (error) {
+            // Si falla (ej. tabla no existe), asumimos bloqueado por seguridad
+            console.warn("No se pudo cargar config de inventario (posiblemente tabla no creada), usando defecto: BLOQUEADO");
+            inventoryEditMode = false;
+        } else {
+            inventoryEditMode = data.edit_enabled;
+        }
+        updateInventoryLockButtonUI();
+    } catch (e) {
+        console.error("Error fetching inventory config:", e);
+    }
+}
+
+async function toggleInventoryConfig() {
+    const newStatus = !inventoryEditMode;
+    try {
+        // Intentar actualizar
+        const { error } = await window.supabaseClient
+            .from('inventory_config')
+            .upsert({ id: 1, edit_enabled: newStatus });
+        
+        if (error) throw error;
+        
+        inventoryEditMode = newStatus;
+        updateInventoryLockButtonUI();
+        alert(`Modo de edición de inventario: ${inventoryEditMode ? 'ACTIVADO (Se pueden modificar cantidades)' : 'DESACTIVADO (Cantidades se bloquean al ingresar)'}`);
+        
+    } catch (e) {
+        console.error(e);
+        alert("Error actualizando configuración. Asegúrate de que la tabla 'inventory_config' exista en Supabase.\n\nError: " + e.message);
+    }
+}
+
+function updateInventoryLockButtonUI() {
+    const btn = document.getElementById('toggle-inventory-lock-btn');
+    if(!btn) return;
+    const span = btn.querySelector('span');
+    if (inventoryEditMode) {
+        btn.classList.remove('from-gray-600', 'to-gray-700');
+        btn.classList.add('from-green-600', 'to-green-700');
+        span.textContent = '🔓 Edición Inventario: ACTIVA';
+    } else {
+        btn.classList.remove('from-green-600', 'to-green-700');
+        btn.classList.add('from-gray-600', 'to-gray-700');
+        span.textContent = '🔒 Edición Inventario: BLOQUEADA';
     }
 }
