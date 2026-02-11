@@ -4024,6 +4024,13 @@ function renderCountingList(data) {
     }
 
     data.forEach(item => {
+        // LÓGICA DE BLOQUEO:
+        // Si el modo edición global está APAGADO (!inventoryEditMode)
+        // Y el producto ya tiene una cantidad asignada (mayor a 0)
+        // ENTONCES: Bloquear el input (isLocked = true)
+        const hasQuantity = item.cantidad_fisica !== null && item.cantidad_fisica > 0;
+        const isLocked = !inventoryEditMode && hasQuantity;
+
         const div = document.createElement('div');
         div.className = "bg-white p-3 rounded-lg border border-gray-200 flex justify-between items-center";
         div.innerHTML = `
@@ -4034,6 +4041,8 @@ function renderCountingList(data) {
             <div class="w-1/3">
                 <input type="number" value="${item.cantidad_fisica || 0}" 
                     class="w-full p-2 border rounded text-center font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none qty-input"
+                    class="w-full p-2 border rounded text-center font-bold outline-none qty-input ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white text-blue-600 focus:ring-2 focus:ring-blue-500'}"
+                    ${isLocked ? 'disabled' : ''}
                     data-id="${item.id}">
             </div>
         `;
@@ -4058,6 +4067,15 @@ function renderCountingList(data) {
                 .eq('id', id);
                 
             setTimeout(() => e.target.classList.remove('bg-green-50', 'border-green-500'), 1000);
+            setTimeout(() => {
+                e.target.classList.remove('bg-green-50', 'border-green-500');
+                // Si no estamos en modo edición, bloquear inmediatamente después de guardar si es > 0
+                if (!inventoryEditMode && val > 0) {
+                    e.target.disabled = true;
+                    e.target.classList.remove('bg-white', 'text-blue-600', 'focus:ring-2', 'focus:ring-blue-500');
+                    e.target.classList.add('bg-gray-100', 'text-gray-500', 'cursor-not-allowed');
+                }
+            }, 1000);
         });
     });
 }
