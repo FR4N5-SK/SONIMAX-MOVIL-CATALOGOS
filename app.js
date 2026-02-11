@@ -3865,10 +3865,11 @@ function initInventoryRole() {
         container.innerHTML = results.map(p => `
             <div class="bg-white p-3 rounded-lg shadow border flex gap-3">
                 <img src="${optimizeImageUrl(p.imagen_url)}" class="w-16 h-16 object-cover rounded" onerror="this.src='/images/ProductImages.jpg'">
-                <div>
+                <div class="flex-1">
                     <p class="font-bold text-sm">${p.nombre}</p>
                     <p class="text-xs text-gray-500">${p.codigo || 'S/C'}</p>
                     <p class="text-xs font-semibold mt-1">${p.departamento}</p>
+                    <p class="text-sm font-bold text-blue-600 mt-1">📦 Stock Sistema: ${p.stock || 0}</p>
                 </div>
             </div>
         `).join('');
