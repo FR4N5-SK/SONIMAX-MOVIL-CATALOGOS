@@ -613,6 +613,45 @@
           }
         }
 
+        // ============================================================
+        // SINCRONIZACIÓN CON TABLA DE INVENTARIO (NUEVO REQUERIMIENTO)
+        // ============================================================
+        try {
+            progressText.textContent = "Sincronizando tabla de inventario...";
+            console.log('[UPDATE-PROCESS] Iniciando sincronización con inventory_products...');
+
+            // Preparamos los datos para inventory_products
+            // Solo enviamos las columnas del sistema. NO enviamos 'deposito' ni 'cantidad_fisica'
+            // para que el upsert las mantenga intactas si ya existen.
+            const inventoryData = upsertByCode.map(p => ({
+                codigo: (p.codigo || '').toString().toUpperCase(),
+                descripcion: p.descripcion,
+                precio_detal: p.precio_cliente,
+                precio_mayor: p.precio_mayor,
+                precio_gmayor: p.precio_gmayor,
+                existencia_actual: p.stock,
+                departamento: p.departamento
+            })).filter(p => p.codigo); // Asegurar que tenga código
+
+            if (inventoryData.length > 0) {
+                const invChunks = chunkArray(inventoryData, CHUNK_SIZE);
+                let invProcessed = 0;
+                
+                for (const chunk of invChunks) {
+                    // Upsert basado en 'codigo'. Actualizará precios/nombres pero dejará deposito/cantidad quietos
+                    const { error: invError } = await supabaseClient
+                        .from('inventory_products')
+                        .upsert(chunk, { onConflict: 'codigo' });
+                        
+                    if(invError) console.error('[UPDATE-PROCESS] Error sync inventory:', invError);
+                    invProcessed += chunk.length;
+                }
+                console.log(`[UPDATE-PROCESS] ✅ ${invProcessed} productos sincronizados con inventario.`);
+            }
+        } catch (invErr) {
+            console.error('[UPDATE-PROCESS] Error crítico sincronizando inventario:', invErr);
+        }
+
         // Finalizar UI
         progressContainer.classList.add('hidden');
         resultContainer.classList.remove('hidden');
