@@ -1499,6 +1499,8 @@ function updateUIForRole() {
   const adminSection = document.getElementById("admin-section")
   const gestorSection = document.getElementById("gestor-section")
   const manageBannersBtn = document.getElementById("manage-banners-btn")
+  const inventorySection = document.getElementById("inventory-section")
+  const mainGrid = document.getElementById("products-grid") // Grid principal de productos
 
   if (roleBadge) {
     // Mostrar "MAYORISTA" si el rol es distribuidor
@@ -1507,6 +1509,10 @@ function updateUIForRole() {
     roleBadge.className = `role-badge-${currentUserRole}`
     roleBadge.classList.remove("hidden")
   }
+
+  // Ocultar todo por defecto
+  if(inventorySection) inventorySection.classList.add("hidden");
+  if(mainGrid) mainGrid.parentElement.classList.remove("hidden"); // Mostrar grid normal por defecto
 
   if (window.currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
@@ -1531,6 +1537,14 @@ function updateUIForRole() {
     })
 
     manageBannersBtn?.classList.add("hidden")
+  } else if (window.currentUserRole === "inventario") {
+    // ROL INVENTARIO
+    adminSection?.classList.add("hidden")
+    gestorSection?.classList.add("hidden")
+    manageBannersBtn?.classList.add("hidden")
+    if(mainGrid) mainGrid.parentElement.classList.add("hidden"); // Ocultar grid normal
+    inventorySection?.classList.remove("hidden");
+    initInventoryRole(); // Inicializar lógica de inventario
   } else {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
@@ -1705,6 +1719,7 @@ function setupEventListeners() {
         <option value="distribuidor">Mayorista</option>
         <option value="gestor">Gestor</option>
         <option value="admin">Administrador</option>
+        <option value="inventario">Inventario</option>
       `
     }
 
@@ -3766,3 +3781,326 @@ document.addEventListener("DOMContentLoaded", () => {
     updateProductsBtn.addEventListener("click", window.showUpdateProductsModal)
   }
 })
+
+// ============================================
+// LÓGICA ROL INVENTARIO
+// ============================================
+
+let currentCountingProducts = []; // Variable para almacenar productos del depósito actual
+
+function initInventoryRole() {
+    console.log("📦 Inicializando rol de Inventario");
+    
+    // Manejo de Tabs
+    const tabs = ['assign', 'count', 'search'];
+    tabs.forEach(t => {
+        document.getElementById(`tab-${t}`).addEventListener('click', () => {
+            // Actualizar botones
+            tabs.forEach(x => {
+                const btn = document.getElementById(`tab-${x}`);
+                btn.classList.remove('active', 'text-blue-600', 'border-b-2', 'border-blue-600');
+                btn.classList.add('text-gray-500');
+            });
+            const activeBtn = document.getElementById(`tab-${t}`);
+            activeBtn.classList.add('active', 'text-blue-600', 'border-b-2', 'border-blue-600');
+            activeBtn.classList.remove('text-gray-500');
+
+            // Mostrar vista
+            document.querySelectorAll('.inventory-view').forEach(v => v.classList.add('hidden'));
+            document.getElementById(`view-${t}`).classList.remove('hidden');
+
+            if(t === 'assign') loadInventoryForAssignment();
+            if(t === 'count') loadInventoryForCounting('A'); // Cargar Deposito A por defecto
+        });
+    });
+
+    // Filtros de Depósito (Vista Conteo)
+    document.querySelectorAll('.deposito-filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.deposito-filter-btn').forEach(b => {
+                b.classList.remove('bg-gray-800', 'text-white');
+                b.classList.add('bg-gray-200', 'text-gray-700');
+            });
+            e.target.classList.remove('bg-gray-200', 'text-gray-700');
+            e.target.classList.add('bg-gray-800', 'text-white');
+            loadInventoryForCounting(e.target.dataset.deposito);
+        });
+    });
+
+    // Buscador Local en Conteo Físico
+    document.getElementById('count-search')?.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        if (!currentCountingProducts) return;
+
+        const filtered = currentCountingProducts.filter(p => 
+            (p.descripcion && p.descripcion.toLowerCase().includes(query)) || 
+            (p.codigo && p.codigo.toLowerCase().includes(query))
+        );
+        renderCountingList(filtered);
+    });
+
+    // Buscador Global Inventario
+    document.getElementById('inventory-global-search').addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        const container = document.getElementById('inventory-search-results');
+        if(query.length < 2) { container.innerHTML = ''; return; }
+        
+        const results = allProducts.filter(p => 
+            p.nombre.toLowerCase().includes(query) || 
+            (p.codigo && p.codigo.toLowerCase().includes(query))
+        ).slice(0, 12);
+
+        container.innerHTML = results.map(p => `
+            <div class="bg-white p-3 rounded-lg shadow border flex gap-3">
+                <img src="${optimizeImageUrl(p.imagen_url)}" class="w-16 h-16 object-cover rounded" onerror="this.src='/images/ProductImages.jpg'">
+                <div>
+                    <p class="font-bold text-sm">${p.nombre}</p>
+                    <p class="text-xs text-gray-500">${p.codigo || 'S/C'}</p>
+                    <p class="text-xs font-semibold mt-1">${p.departamento}</p>
+                </div>
+            </div>
+        `).join('');
+    });
+
+    // Botón Exportar
+    document.getElementById('export-inventory-btn').addEventListener('click', exportInventoryExcel);
+
+    // Carga inicial
+    loadInventoryForAssignment();
+}
+
+async function loadInventoryForAssignment() {
+    const list = document.getElementById('assign-list');
+    const loading = document.getElementById('assign-loading');
+    const empty = document.getElementById('assign-empty');
+    
+    list.innerHTML = '';
+    loading.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    try {
+        // Obtener TODOS los productos SIN depósito asignado con paginación
+        let data = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+
+        while(hasMore) {
+            const { data: batch, error } = await window.supabaseClient
+                .from('inventory_products')
+                .select('*')
+                .is('deposito', null)
+                .order('descripcion', { ascending: true })
+                .range(page * pageSize, (page + 1) * pageSize - 1);
+
+            if (error) throw error;
+
+            if (batch && batch.length > 0) {
+                data = data.concat(batch);
+                if (batch.length < pageSize) {
+                    hasMore = false;
+                } else {
+                    page++;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        if(!data || data.length === 0) {
+            empty.classList.remove('hidden');
+        } else {
+            data.forEach(item => {
+                const div = document.createElement('div');
+                div.className = "bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3";
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <h4 class="font-bold text-gray-800">${item.descripcion}</h4>
+                        <p class="text-xs text-gray-500">Código: ${item.codigo} | Dept: ${item.departamento}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        ${['A','B','C','D','E'].map(d => `
+                            <button class="w-8 h-8 rounded-full bg-gray-100 hover:bg-blue-600 hover:text-white font-bold text-sm transition-colors assign-btn" 
+                                data-id="${item.id}" data-dep="${d}">${d}</button>
+                        `).join('')}
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+
+            // Event listeners para botones
+            document.querySelectorAll('.assign-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const id = e.target.dataset.id;
+                    const dep = e.target.dataset.dep;
+                    
+                    // Optimistic UI update
+                    e.target.closest('.bg-white').remove();
+                    
+                    await window.supabaseClient
+                        .from('inventory_products')
+                        .update({ deposito: dep })
+                        .eq('id', id);
+                });
+            });
+        }
+    } catch (err) {
+        console.error("Error cargando asignaciones:", err);
+    } finally {
+        loading.classList.add('hidden');
+    }
+}
+
+async function loadInventoryForCounting(deposito) {
+    const list = document.getElementById('count-list');
+    const loading = document.getElementById('count-loading');
+    const searchInput = document.getElementById('count-search');
+    
+    list.innerHTML = '';
+    loading.classList.remove('hidden');
+    // Limpiar buscador al cambiar de depósito
+    if(searchInput) searchInput.value = '';
+
+    try {
+        let data = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+
+        while(hasMore) {
+            const { data: batch, error } = await window.supabaseClient
+                .from('inventory_products')
+                .select('*')
+                .eq('deposito', deposito)
+                .order('descripcion', { ascending: true })
+                .range(page * pageSize, (page + 1) * pageSize - 1);
+
+            if (error) throw error;
+
+            if (batch && batch.length > 0) {
+                data = data.concat(batch);
+                if (batch.length < pageSize) {
+                    hasMore = false;
+                } else {
+                    page++;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        currentCountingProducts = data; // Guardar en memoria para el buscador
+        renderCountingList(data);
+
+    } catch (err) {
+        console.error("Error cargando conteo:", err);
+    } finally {
+        loading.classList.add('hidden');
+    }
+}
+
+function renderCountingList(data) {
+    const list = document.getElementById('count-list');
+    list.innerHTML = '';
+
+    if(!data || data.length === 0) {
+        list.innerHTML = `<p class="text-center text-gray-500 py-8">No se encontraron productos</p>`;
+        return;
+    }
+
+    data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = "bg-white p-3 rounded-lg border border-gray-200 flex justify-between items-center";
+        div.innerHTML = `
+            <div class="w-2/3 pr-2">
+                <p class="font-semibold text-sm text-gray-800 truncate">${item.descripcion}</p>
+                <p class="text-xs text-gray-500">${item.codigo || ''}</p>
+            </div>
+            <div class="w-1/3">
+                <input type="number" value="${item.cantidad_fisica || 0}" 
+                    class="w-full p-2 border rounded text-center font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none qty-input"
+                    data-id="${item.id}">
+            </div>
+        `;
+        list.appendChild(div);
+    });
+
+    // Auto-guardado al cambiar valor
+    list.querySelectorAll('.qty-input').forEach(input => {
+        input.addEventListener('change', async (e) => {
+            const val = parseInt(e.target.value) || 0;
+            const id = e.target.dataset.id;
+            
+            e.target.classList.add('bg-green-50', 'border-green-500'); // Feedback visual
+            
+            // Actualizar también en el array local para que persista si se borra la búsqueda
+            const product = currentCountingProducts.find(p => p.id == id);
+            if(product) product.cantidad_fisica = val;
+
+            await window.supabaseClient
+                .from('inventory_products')
+                .update({ cantidad_fisica: val })
+                .eq('id', id);
+                
+            setTimeout(() => e.target.classList.remove('bg-green-50', 'border-green-500'), 1000);
+        });
+    });
+}
+
+async function exportInventoryExcel() {
+    try {
+        const exportBtn = document.getElementById('export-inventory-btn');
+        if(exportBtn) {
+            exportBtn.textContent = 'Generando Excel...';
+            exportBtn.disabled = true;
+        }
+
+        let allData = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+
+        while(hasMore) {
+            const { data, error } = await window.supabaseClient
+                .from('inventory_products')
+                .select('codigo, descripcion, precio_detal, precio_mayor, precio_gmayor, existencia_actual, departamento, deposito, cantidad_fisica')
+                .range(page * pageSize, (page + 1) * pageSize - 1);
+            
+            if(error) throw error;
+
+            if (data && data.length > 0) {
+                allData = allData.concat(data);
+                if (data.length < pageSize) {
+                    hasMore = false;
+                } else {
+                    page++;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        if(exportBtn) {
+            exportBtn.textContent = 'Exportar Excel';
+            exportBtn.disabled = false;
+        }
+
+        if (allData.length === 0) {
+            alert("No hay datos para exportar");
+            return;
+        }
+
+        const ws = XLSX.utils.json_to_sheet(allData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+        XLSX.writeFile(wb, `Inventario_Fisico_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+        console.error(err);
+        alert("Error exportando: " + err.message);
+        const exportBtn = document.getElementById('export-inventory-btn');
+        if(exportBtn) {
+            exportBtn.textContent = 'Exportar Excel';
+            exportBtn.disabled = false;
+        }
+    }
+}
