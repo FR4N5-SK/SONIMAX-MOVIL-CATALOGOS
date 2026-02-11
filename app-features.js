@@ -420,8 +420,24 @@
     searchInput.focus();
   };
 
-  function showEditForm(product, parentModal) {
+  async function showEditForm(product, parentModal) {
     parentModal.remove();
+    
+    // Obtener el depósito actual desde la base de datos
+    let currentDeposito = "";
+    try {
+        const { supabaseClient } = getGlobalState();
+        if (product.codigo) {
+            const { data } = await supabaseClient
+                .from('inventory_products')
+                .select('deposito')
+                .eq('codigo', product.codigo)
+                .maybeSingle();
+            if (data) currentDeposito = data.deposito || "";
+        }
+    } catch (err) {
+        console.error("Error fetching deposit:", err);
+    }
     
     const formDiv = document.createElement('div');
     formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
@@ -469,10 +485,21 @@
             <label class="block text-xs font-semibold text-gray-700 mb-1">URL Foto:</label>
             <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
           </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">Depósito (Inventario):</label>
+            <select id="edit-deposito" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm bg-white">
+                <option value="">Sin Asignar</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+            </select>
+          </div>
 
           <div class="flex gap-2 pt-4">
             <button class="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-lg font-semibold text-sm hover:bg-indigo-700 transition" 
-              onclick="window.saveProductEdit('${product.id}')">
+              onclick="window.saveProductEdit('${product.id}', '${product.codigo || ''}')">
               Guardar
             </button>
             <button class="flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition" 
@@ -484,10 +511,11 @@
       </div>
     `;
     document.body.appendChild(formDiv);
+    document.getElementById('edit-deposito').value = currentDeposito; // Ahora currentDeposito tiene el valor correcto
   }
 
-  window.saveProductEdit = async function(productId) {
-    const { supabaseClient } = getGlobalState();
+  window.saveProductEdit = async function(productId, productCode) {
+    const { supabaseClient, allProducts } = getGlobalState();
     
     const updates = {
       codigo: document.getElementById('edit-codigo').value,
@@ -501,6 +529,8 @@
       imagen_url: document.getElementById('edit-url').value
     };
 
+    const newDeposito = document.getElementById('edit-deposito').value || null;
+
     try {
       const { error } = await supabaseClient
         .from('products')
@@ -508,6 +538,27 @@
         .eq('id', productId);
 
       if (error) throw error;
+
+      // También actualizar la tabla de inventario para mantener la sincronización
+      if (productCode) {
+        const inventoryUpdates = {
+            descripcion: updates.nombre,
+            precio_detal: updates.precio_cliente,
+            precio_mayor: updates.precio_mayor,
+            precio_gmayor: updates.precio_gmayor,
+            existencia_actual: updates.stock,
+            departamento: updates.departamento,
+            deposito: newDeposito
+        };
+        const { error: invError } = await supabaseClient
+            .from('inventory_products')
+            .update(inventoryUpdates)
+            .eq('codigo', productCode);
+
+        if (invError) {
+            console.error('[EDIT] Error actualizando depósito en inventario:', invError);
+        }
+      }
 
       alert('✅ Producto actualizado correctamente');
       document.querySelector('.fixed')?.remove();
