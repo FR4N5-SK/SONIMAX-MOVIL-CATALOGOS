@@ -647,11 +647,19 @@
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        // OPTIMIZACIÓN: Redimensionar para evitar error "Invalid string length" en PDFs grandes
+        const MAX_DIM = 200; // Suficiente para miniaturas de tabla (25mm)
+        let width = img.width;
+        let height = img.height;
+        if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
+        else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/jpeg'));
+        ctx.drawImage(img, 0, 0, width, height);
+        // Calidad reducida para optimizar tamaño del PDF
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
       img.onerror = () => {
         console.warn('[PDF] No se pudo cargar imagen:', url);
