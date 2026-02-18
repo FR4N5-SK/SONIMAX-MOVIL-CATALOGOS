@@ -1,4 +1,5 @@
 // ============================================
+﻿// ============================================
 // EXTENSIONES DE CARACTERÍSTICAS - SONIMAX MÓVIL
 // ============================================
 // Usa variables GLOBALES del archivo principal (current-user.js)
