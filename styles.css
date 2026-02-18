@@ -1,6 +1,6 @@
 /* SONIMAX MÓVIL - Estilos Optimizados */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+/* Se importa la fuente Poppins desde index.html */
 
 * {
   margin: 0;
@@ -9,17 +9,68 @@
 }
 
 body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #F8FAFC; /* Gris casi blanco */
+  color: #1E293B; /* Azul muy oscuro */
+}
+
+/* [NUEVO] Estilos para Modo Oscuro */
+.dark body {
+  background: #0F172A; /* slate-900 */
+  color: #E2E8F0; /* slate-200 */
+}
+
+.dark .product-card {
+  background: #1f2937; /* gray-800 */
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dark .product-card:hover {
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+.dark .product-card h3 {
+  color: #F8FAFC; /* slate-50 */
+}
+.dark .product-card p, .dark .product-card span {
+  color: #94A3B8; /* slate-400 */
+}
+
+.dark .dept-button {
+  background: #374151; /* gray-700 */
+  color: #d1d5db; /* gray-300 */
+  border-color: #4b5563; /* gray-600 */
+}
+
+.dark .dept-button:hover {
+  background: #4b5563; /* gray-600 */
+  border-color: #dc2626;
+  color: #fef2f2; /* red-50 */
+}
+
+.dark .dept-button.active {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  color: white;
+  border-color: #dc2626;
+}
+
+.dark .cart-item {
+  background: #1f2937; /* gray-800 */
+  border-color: #374151; /* gray-700 */
+}
+.dark .cart-item h4, .dark .cart-item span {
+  color: #f9fafb; /* gray-50 */
 }
 
 /* Glassmorphism */
 .glass-card {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.7); /* bg-white/70 */
+  backdrop-filter: blur(12px); /* backdrop-blur-md */
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 /* Animaciones Optimizadas */
@@ -97,19 +148,18 @@ body {
 /* Tarjetas de Producto Mejoradas */
 .product-card {
   background: white;
-  border-radius: 1.5rem;
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 25px -5px rgba(30, 41, 59, 0.07);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: none;
   animation: fadeIn 0.4s ease-out;
-  will-change: transform;
+  will-change: transform, box-shadow;
 }
 
 .product-card:hover {
   transform: translateY(-8px);
-  box-shadow: 0 12px 32px rgba(220, 38, 38, 0.2);
-  border-color: rgba(220, 38, 38, 0.3);
+  box-shadow: 0 20px 35px -10px rgba(30, 41, 59, 0.15);
 }
 
 .product-image {
@@ -118,6 +168,8 @@ body {
   object-fit: cover;
   background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
   transition: transform 0.4s ease, filter 0.5s ease;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
 }
 
 .product-card:hover .product-image {
@@ -128,6 +180,8 @@ body {
   overflow: hidden;
   position: relative;
   background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
 }
 
 /* Efecto blur-up mejorado para carga progresiva de imágenes */
@@ -140,6 +194,34 @@ body {
 .image-loaded {
   filter: blur(0);
   transform: scale(1);
+}
+
+/* Grid de Productos */
+.product-grid-container {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 25px;
+}
+@media (min-width: 640px) {
+  .product-grid-container { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .product-grid-container { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .product-grid-container { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* [NUEVO] Skeleton para tarjetas de producto */
+.product-skeleton-card {
+  background: white;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.dark .product-skeleton-card {
+  background: #1f2937; /* gray-800 */
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Skeleton loading mejorado con gradiente más suave */
@@ -177,25 +259,30 @@ body {
 
 /* Botones de Departamento */
 .dept-button {
-  background: white;
-  color: #6b7280;
-  border: 2px solid #e5e7eb;
+  background: transparent;
+  color: #475569; /* slate-600 */
+  border: 2px solid transparent;
   transition: all 0.2s ease;
   font-weight: 600;
 }
 
 .dept-button:hover {
-  background: #fef2f2;
-  border-color: #dc2626;
-  color: #dc2626;
-  transform: translateY(-2px);
+  background: #fef2f2; /* red-50 */
+  color: #EF4444; /* red-500 */
 }
 
 .dept-button.active {
-  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  background: #EF4444;
   color: white;
-  border-color: #dc2626;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+  border-color: transparent;
+  box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.38);
+  transform: translateY(-2px);
+}
+.dark .dept-button.active {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  color: white;
+  border-color: #ef4444;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
 /* Tabs de Autenticación */
@@ -260,40 +347,64 @@ body {
   transform: translateX(4px);
 }
 
-/* Badges de Rol */
-.role-badge-cliente {
-  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-  color: white;
+/* Badges de Rol - Estilo Profesional */
+[class^="role-badge-"] {
+  display: inline-block;
   padding: 0.25rem 0.75rem;
-  border-radius: 0.5rem;
-  font-weight: 700;
+  border-radius: 9999px; /* pill shape */
+  font-size: 0.75rem; /* 12px */
+  font-weight: 700; /* bold */
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
+.role-badge-cliente {
+  background-color: #e5e7eb; /* gray-200 */
+  color: #4b5563; /* gray-600 */
 }
 
 .role-badge-distribuidor {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  color: white;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.5rem;
-  font-weight: 700;
+  background-color: #fef3c7; /* amber-100 */
+  color: #92400e; /* amber-800 */
 }
 
 .role-badge-gestor {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  color: white;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.5rem;
-  font-weight: 700;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  background-color: #dbeafe; /* blue-100 */
+  color: #1e40af; /* blue-800 */
 }
 
 .role-badge-admin {
-  background: linear-gradient(135deg, #1f2937 0%, #000000 100%);
-  color: white;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.5rem;
-  font-weight: 700;
+  background-color: #1f2937; /* gray-800 */
+  color: #f9fafb; /* gray-50 */
+}
+
+.role-badge-inventario {
+  background-color: #d1fae5; /* green-100 */
+  color: #065f46; /* green-800 */
+}
+
+/* Estilos para modo oscuro */
+.dark .role-badge-cliente {
+  background-color: #374151; /* gray-700 */
+  color: #d1d5db; /* gray-300 */
+}
+.dark .role-badge-distribuidor {
+  background-color: #78350f; /* amber-900 */
+  color: #fef3c7; /* amber-100 */
+}
+.dark .role-badge-gestor {
+  background-color: #1e3a8a; /* blue-900 */
+  color: #dbeafe; /* blue-100 */
+}
+.dark .role-badge-admin {
+  background-color: #f9fafb; /* gray-50 */
+  color: #1f2937; /* gray-800 */
+}
+.dark .role-badge-inventario {
+  background-color: #064e3b; /* green-900 */
+  color: #d1fae5; /* green-100 */
 }
 
 /* Botones de Cantidad */
@@ -325,36 +436,152 @@ body {
   position: relative;
   overflow: hidden;
   font-weight: 600;
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  transition: all 0.3s ease;
 }
 
-.add-to-cart-btn::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  transform: translate(-50%, -50%);
-  transition: width 0.5s, height 0.5s;
+.add-to-cart-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 20px rgba(239, 68, 68, 0.25);
+  filter: brightness(1.05);
 }
 
-.add-to-cart-btn:hover::before {
-  width: 300px;
-  height: 300px;
-}
-
-/* Badge de Precio */
-.price-badge {
-  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+/* [NUEVO] Badge de "Bajó de Precio" */
+.price-drop-badge {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%); /* green-500 to green-600 */
   color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 0.75rem;
-  font-weight: 800;
-  font-size: 1.125rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.75rem;
   display: inline-block;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+  animation: pulse 1.5s infinite;
+}
+
+/* [NUEVO] Botón de Favoritos */
+.favorite-btn {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.favorite-btn:hover {
+  transform: scale(1.1);
+  background: white;
+}
+.favorite-btn svg {
+  transition: all 0.2s ease-in-out;
+  color: #9CA3AF; /* gray-400 */
+}
+.favorite-btn:hover svg {
+  color: #F87171; /* red-400 */
+}
+.favorite-btn.active svg {
+  fill: #EF4444; /* red-500 */
+  color: #EF4444; /* red-500 */
+  transform: scale(1.1);
+}
+.dark .favorite-btn {
+  background: rgba(15, 23, 42, 0.7);
+}
+.dark .favorite-btn svg {
+  color: #64748B; /* slate-500 */
+}
+.dark .favorite-btn.active svg {
+  fill: #F87171; /* red-400 */
+  color: #F87171; /* red-400 */
+}
+
+/* [NUEVO] Estilos de Precios Modernos */
+.main-price {
+  font-size: 1.5rem; /* 24px */
+  font-weight: 800;
+}
+.main-price-detal {
+  color: #EF4444; /* Rojo Vibrante */
+}
+.main-price-mayor {
+  color: #10B981; /* Verde Esmeralda */
+}
+
+.price-pill {
+  font-size: 0.875rem; /* 14px */
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+}
+.pill-green {
+  background-color: #D1FAE5; /* green-100 */
+  color: #047857; /* green-700 */
+}
+.pill-blue {
+  background-color: #DBEAFE; /* blue-100 */
+  color: #1D4ED8; /* blue-700 */
+}
+
+.dark .main-price-detal { color: #F87171; } /* red-400 */
+.dark .main-price-mayor { color: #34D399; } /* green-400 */
+.dark .pill-green { background-color: #064E3B; color: #A7F3D0; }
+.dark .pill-blue { background-color: #1E3A8A; color: #BFDBFE; }
+
+/* [NUEVO] Estilos para Botones de Admin */
+.admin-btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s ease;
+  border: none;
+}
+.admin-btn:hover {
+  transform: translateY(-3px);
+  filter: brightness(1.1);
+}
+.btn-green {
+  background: linear-gradient(135deg, #10B981, #059669);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+.btn-orange, .btn-amber {
+  background: linear-gradient(135deg, #F97316, #EA580C);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+.btn-blue, .btn-indigo {
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+.btn-red {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+.btn-teal, .btn-cyan {
+  background: linear-gradient(135deg, #14B8A6, #0D9488);
+  box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
+}
+.btn-purple {
+  background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+.btn-pink {
+  background: linear-gradient(135deg, #EC4899, #DB2777);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
+}
+.btn-gray {
+  background: linear-gradient(135deg, #6B7280, #4B5563);
+  box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
 }
 
 /* Animación de Pulso para Carrito */
@@ -365,7 +592,7 @@ body {
 /* Loading Spinner */
 .loading-spinner {
   border: 4px solid #f3f3f3;
-  border-top: 4px solid #dc2626;
+  border-top: 4px solid #EF4444;
   border-radius: 50%;
   width: 48px;
   height: 48px;
@@ -468,6 +695,6 @@ img {
 /* Mejora de Accesibilidad */
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid #dc2626;
+  outline: 2px solid #EF4444;
   outline-offset: 2px;
 }
