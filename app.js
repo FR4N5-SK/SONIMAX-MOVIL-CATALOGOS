@@ -23,6 +23,9 @@ Object.defineProperty(window, 'allProducts', {
 });
 let filteredProducts = []
 let cart = []
+let favorites = [] // [NUEVO] Para sistema de favoritos
+let priceSnapshotMap = new Map(); // [NUEVO] Para comparación de precios
+let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
 let selectedProductForQuantity = null
 
@@ -35,6 +38,7 @@ let serviceWorkerRegistration = null
 
 const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
+const FAVORITES_KEY = "sonimax_favorites" // [NUEVO]
 const NEW_PRODUCTS_KEY = "sonimax_new_products"
 const PRODUCT_SALES_KEY = "sonimax_product_sales"
 const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot local
@@ -416,7 +420,7 @@ function checkProductsChanged(products) {
 async function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     try {
-      serviceWorkerRegistration = await navigator.serviceWorker.register("/sw.js")
+      serviceWorkerRegistration = await navigator.serviceWorker.register("sw.js")
       console.log("✅ Service Worker registrado para caché de imágenes")
 
       navigator.serviceWorker.addEventListener("message", (event) => {
@@ -1287,6 +1291,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     showApp()
     loadBanners()
   } else {
+    // [NUEVO] Limpiar datos de sesión anterior al cerrar sesión
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sonimax_')) {
+            localStorage.removeItem(key);
+        }
+    });
     console.log("ℹ️ No hay sesión activa")
     showLogin()
   }
@@ -1779,6 +1789,10 @@ function setupEventListeners() {
   document.getElementById("confirm-order-details")?.addEventListener("click", confirmOrderDetails)
 
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
+    // Limpiar estado de carga de CSV
+    const statusDiv = document.getElementById("csv-status");
+    if (statusDiv) statusDiv.classList.add("hidden");
+    document.getElementById("csv-file-name").classList.add("hidden");
     document.getElementById("csv-modal").classList.remove("hidden")
   })
 
@@ -1809,11 +1823,64 @@ function setupEventListeners() {
   })
 
   document.getElementById("confirm-quantity")?.addEventListener("click", confirmQuantity)
+
+  // [NUEVO] Event listeners para filtros de precio
+  document.getElementById("price-filter-btn")?.addEventListener("click", () => filterByDepartment(currentDepartment));
+
+  // [NUEVO] Event listener para botón de favoritos
+  document.getElementById("favorites-button")?.addEventListener("click", () => filterByDepartment("favorites"));
+
 }
 
 function closeSidebar() {
   document.getElementById("sidebar-menu").classList.remove("open")
   document.getElementById("sidebar-overlay").classList.add("hidden")
+}
+
+// [NUEVO] Cargar el snapshot de precios para la comparación de "Bajó de precio"
+async function loadPriceSnapshot() {
+    console.log("[PRICE-CHECK] Cargando snapshot de precios anterior...");
+    const previousSnapshot = await getPreviousCSVSnapshot();
+    if (previousSnapshot && previousSnapshot.length > 0) {
+        previousSnapshot.forEach(p => {
+            const key = (p.codigo || p.nombre || '').toLowerCase().trim();
+            if (key) {
+                priceSnapshotMap.set(key, p);
+            }
+        });
+        console.log(`[PRICE-CHECK] ✅ Snapshot cargado con ${priceSnapshotMap.size} productos para comparación.`);
+    } else {
+        console.log("[PRICE-CHECK] ⓘ No se encontró snapshot de precios anterior.");
+    }
+}
+
+// [NUEVO] Cargar favoritos desde Supabase (Por Usuario)
+async function loadFavorites() {
+    if (!currentUser) return;
+    
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('favorites')
+            .select('product_id')
+            .eq('user_id', currentUser.auth_id);
+            
+        if (error) throw error;
+        
+        if (data) {
+            favorites = data.map(f => f.product_id);
+            console.log(`[FAVORITES] ✅ ${favorites.length} favoritos cargados de la nube.`);
+        }
+    } catch (error) {
+        console.error("[FAVORITES] Error cargando favoritos:", error);
+        // Fallback a local si falla la red, aunque idealmente queremos la nube
+        const savedFavorites = localStorage.getItem(FAVORITES_KEY);
+        if (savedFavorites) favorites = JSON.parse(savedFavorites);
+    }
+}
+
+// [NUEVO] Guardar favoritos (Ya no se usa localStorage globalmente, se maneja en toggleFavorite)
+function saveFavoritesLocalBackup() { 
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); 
 }
 
 async function loadProducts() {
@@ -1855,6 +1922,19 @@ async function loadProducts() {
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
 
+    // [NUEVO] Inicializar Fuse.js para búsqueda difusa
+    const fuseOptions = {
+        keys: ['nombre', 'codigo', 'descripcion'],
+        includeScore: true,
+        threshold: 0.4, // Umbral de "flexibilidad" (0 es exacto, 1 es todo) - Más flexible
+        ignoreLocation: true,
+        useExtendedSearch: true, // Permite búsqueda multi-palabra
+    };
+    fuse = new Fuse(allProducts, fuseOptions);
+    console.log(`[FUSE] ✅ Búsqueda difusa inicializada con ${allProducts.length} productos.`);
+
+    await loadPriceSnapshot(); // Cargar precios antiguos
+    await loadFavorites(); // Cargar favoritos desde la nube
     filteredProducts = allProducts
     currentPage = 1
 
@@ -1902,6 +1982,14 @@ function renderDepartments() {
   bestSellingBtn.addEventListener("click", () => filterByDepartment("bestselling"))
   navContainer.appendChild(bestSellingBtn)
 
+  // [NUEVO] Botón para Favoritos
+  const favoritesBtn = document.createElement("button");
+  favoritesBtn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm";
+  favoritesBtn.innerHTML = "❤️ Favoritos";
+  favoritesBtn.dataset.dept = "favorites";
+  favoritesBtn.addEventListener("click", () => filterByDepartment("favorites"));
+  navContainer.appendChild(favoritesBtn);
+
   // Agregar todos los departamentos al sidebar
   const departments = [...new Set(allProducts.map((p) => p.departamento).filter(Boolean))]
 
@@ -1926,6 +2014,17 @@ function renderDepartments() {
     closeSidebar()
   })
   sidebarContainer.appendChild(sidebarBestBtn)
+
+  // [NUEVO] Botón de Favoritos en Sidebar
+  const sidebarFavoritesBtn = document.createElement("button");
+  sidebarFavoritesBtn.className = "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold";
+  sidebarFavoritesBtn.innerHTML = "❤️ Mis Favoritos";
+  sidebarFavoritesBtn.dataset.dept = "favorites";
+  sidebarFavoritesBtn.addEventListener("click", () => {
+      filterByDepartment("favorites");
+      closeSidebar();
+  });
+  sidebarContainer.appendChild(sidebarFavoritesBtn);
 
   departments.forEach((dept) => {
     const sidebarBtn = document.createElement("button")
@@ -1952,7 +2051,7 @@ function renderDepartments() {
   })
 }
 
-function filterByDepartment(dept) {
+function filterByDepartment(dept, keepSearch = false) {
   currentDepartment = dept
 
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
@@ -1962,6 +2061,19 @@ function filterByDepartment(dept) {
     }
   })
 
+  // [NUEVO] Lógica de filtro de precios
+  const minPrice = parseFloat(document.getElementById("price-min").value) || 0;
+  const maxPrice = parseFloat(document.getElementById("price-max").value) || Infinity;
+
+  const priceFilter = (product) => {
+      const priceInfo = getPriceForRole(product);
+      let priceToCompare = 0;
+      if (priceInfo.display === 'single') priceToCompare = priceInfo.price;
+      else priceToCompare = priceInfo.priceCliente; // Usar precio cliente como base para el filtro
+
+      return priceToCompare >= minPrice && priceToCompare <= maxPrice;
+  };
+
   const deptSearchContainer = document.getElementById("dept-search-container")
   if (dept === "all") {
     deptSearchContainer.classList.add("hidden")
@@ -1969,11 +2081,16 @@ function filterByDepartment(dept) {
     deptSearchContainer.classList.remove("hidden")
   }
 
+  let baseProducts = allProducts;
+
   if (dept === "all") {
-    filteredProducts = allProducts
+    filteredProducts = baseProducts.filter(priceFilter);
   } else if (dept === "new") {
     // Usar el nuevo campo is_new para filtrar
-    filteredProducts = allProducts.filter((p) => p.is_new)
+    filteredProducts = baseProducts.filter((p) => p.is_new && priceFilter(p));
+  } else if (dept === "favorites") {
+    const favoriteIds = new Set(favorites);
+    filteredProducts = baseProducts.filter(p => favoriteIds.has(p.id) && priceFilter(p));
   } else if (dept === "bestselling") {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
@@ -1994,6 +2111,8 @@ function filterByDepartment(dept) {
         })
         .filter((p) => p !== null)
 
+      filteredProducts = filteredProducts.filter(priceFilter);
+
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
       renderProducts()
@@ -2001,7 +2120,7 @@ function filterByDepartment(dept) {
     })
     return
   } else {
-    filteredProducts = allProducts.filter((p) => p.departamento === dept)
+    filteredProducts = baseProducts.filter((p) => p.departamento === dept && priceFilter(p));
   }
 
   currentPage = 1
@@ -2091,34 +2210,35 @@ function createProductCard(product) {
 
   let priceHTML = ""
   if (priceInfo.display === "single") {
-    priceHTML = `<span class="price-badge">$${priceInfo.price.toFixed(2)}</span>`
+    const priceColorClass = currentUserRole === 'distribuidor' ? 'main-price-mayor' : 'main-price-detal';
+    priceHTML = `<span class="main-price ${priceColorClass}">$${priceInfo.price.toFixed(2)}</span>`
   } else if (priceInfo.display === "dual") {
     priceHTML = `
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelCliente}:</span>
-          <span class="text-lg font-black text-red-600">$${priceInfo.priceCliente.toFixed(2)}</span>
+      <div class="space-y-3">
+        <div class="flex items-baseline justify-between">
+          <span class="text-sm font-medium text-gray-500">${priceInfo.labelCliente}</span>
+          <span class="main-price main-price-detal">$${priceInfo.priceCliente.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelMayor}:</span>
-          <span class="text-lg font-black text-green-600">$${priceInfo.priceMayor.toFixed(2)}</span>
+          <span class="text-sm font-medium text-gray-500">${priceInfo.labelMayor}</span>
+          <span class="price-pill pill-green">$${priceInfo.priceMayor.toFixed(2)}</span>
         </div>
       </div>
     `
   } else if (priceInfo.display === "triple") {
     priceHTML = `
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelCliente}:</span>
-          <span class="text-lg font-black text-red-600">$${priceInfo.priceCliente.toFixed(2)}</span>
+      <div class="space-y-3">
+        <div class="flex items-baseline justify-between">
+          <span class="text-sm font-medium text-gray-500">${priceInfo.labelCliente}</span>
+          <span class="main-price main-price-detal">$${priceInfo.priceCliente.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelMayor}:</span>
-          <span class="text-lg font-black text-green-600">$${priceInfo.priceMayor.toFixed(2)}</span>
+          <span class="text-sm font-medium text-gray-500">${priceInfo.labelMayor}</span>
+          <span class="price-pill pill-green">$${priceInfo.priceMayor.toFixed(2)}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-600">${priceInfo.labelGmayor}:</span>
-          <span class="text-lg font-black text-blue-600">$${priceInfo.priceGmayor.toFixed(2)}</span>
+          <span class="text-sm font-medium text-gray-500">${priceInfo.labelGmayor}</span>
+          <span class="price-pill pill-blue">$${priceInfo.priceGmayor.toFixed(2)}</span>
         </div>
       </div>
     `
@@ -2129,15 +2249,35 @@ function createProductCard(product) {
   const placeholderUrl = createImagePlaceholder(imageUrl)
 
   // Determinar el estado del stock
+  // [MODIFICADO] Mostrar siempre el stock
   let stockBadge = ''
-  if (product.stock === 0) {
-    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">❌ AGOTADO</span>'
-  } else if (product.stock <= 5) {
-    stockBadge = `<span class="absolute bottom-3 right-3 z-20 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-lg">⚠️ ${product.stock} unid.</span>`
+  const stock = product.stock || 0;
+  if (stock === 0) {
+    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
+  } else {
+    const stockColor = stock <= 5 ? 'bg-yellow-500' : 'bg-green-600';
+    stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-white text-xs font-bold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
+  }
+
+  // [NUEVO] Lógica para badge de "Bajó de Precio"
+  let priceDropBadge = '';
+  const oldProduct = priceSnapshotMap.get((product.codigo || '').toLowerCase().trim());
+  if (oldProduct) {
+      const oldPrice = parseFloat(oldProduct.precio_cliente || 0);
+      const newPrice = parseFloat(product.precio_cliente || 0);
+      if (newPrice > 0 && oldPrice > 0 && newPrice < oldPrice) {
+          priceDropBadge = '<span class="price-drop-badge absolute top-3 left-3 z-20">¡BAJÓ DE PRECIO!</span>';
+      }
   }
 
   card.innerHTML = `
     <div class="product-image-container">
+      <!-- [NUEVO] Botón de Favoritos -->
+      <button class="favorite-btn" data-product-id="${product.id}">
+        <svg class="w-6 h-6 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.5l1.318-1.182a4.5 4.5 0 116.364 6.364L12 20.273l-7.682-7.682a4.5 4.5 0 010-6.364z"></path>
+        </svg>
+      </button>
       <img src="${placeholderUrl}"
            data-src="${optimizedUrl}"
            alt="${product.nombre}"
@@ -2152,22 +2292,13 @@ function createProductCard(product) {
         ${priceHTML}
       </div>
       ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
-      ${product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : ""}
+      ${priceDropBadge || (product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : '')}
       ${stockBadge}
       <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
         Agregar al Carrito
       </button>
     </div>
   `
-
-  // Añadir indicación visual para productos nuevos
-  if (product.is_new) {
-    const newProductBadge = document.createElement("span")
-    newProductBadge.className =
-      "absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full z-10"
-    newProductBadge.textContent = "¡NUEVO!"
-    card.querySelector(".product-image-container").appendChild(newProductBadge)
-  }
 
   const productImage = card.querySelector(".product-image")
   if (imageObserver && productImage) {
@@ -2179,6 +2310,14 @@ function createProductCard(product) {
     showImageModal(imageUrl, product.nombre)
   })
 
+  // [NUEVO] Lógica de Favoritos
+  const favBtn = card.querySelector('.favorite-btn');
+  if (isFavorite(product.id)) {
+      favBtn.classList.add('active');
+  }
+  favBtn.addEventListener('click', (e) => {
+      toggleFavorite(product.id, e.currentTarget);
+  });
   // DEBUG: confirmar que los productos que se renderizan traen 'codigo' y 'descripcion'
   try {
     console.debug(`[RENDER] product id=${product.id} codigo=${product.codigo || ''} nombre=${product.nombre || ''} descripcion=${product.descripcion || ''}`)
@@ -2233,6 +2372,43 @@ function getPriceForRole(product) {
   }
   }
   }
+
+// [NUEVO] Funciones para sistema de favoritos
+function isFavorite(productId) {
+    return favorites.includes(productId);
+}
+
+async function toggleFavorite(productId, buttonElement) {
+    if (!currentUser) return;
+
+    const index = favorites.indexOf(productId);
+    const isAdding = index === -1;
+
+    // Actualización Optimista (UI primero)
+    if (index > -1) {
+        favorites.splice(index, 1); // Quitar de favoritos
+        buttonElement.classList.remove('active');
+    } else {
+        favorites.push(productId); // Agregar a favoritos
+        buttonElement.classList.add('active');
+    }
+    
+    // Sincronizar con Supabase
+    try {
+        if (isAdding) {
+            await window.supabaseClient.from('favorites').insert({ user_id: currentUser.auth_id, product_id: productId });
+            console.log(`[FAVORITES] ❤️ Guardado en nube.`);
+        } else {
+            await window.supabaseClient.from('favorites').delete().eq('user_id', currentUser.auth_id).eq('product_id', productId);
+            console.log(`[FAVORITES] 💔 Eliminado de nube.`);
+        }
+    } catch (error) {
+        console.error("[FAVORITES] Error sincronizando:", error);
+    }
+
+    saveFavoritesLocalBackup(); // Backup local por si acaso
+    if (currentDepartment === 'favorites') filterByDepartment('favorites'); // Re-renderizar si estamos en la vista de favoritos
+}
 
 function saveCartToStorage() {
   if (!currentUser) return
@@ -2895,42 +3071,6 @@ function getSearchWords(query) {
     .filter((word) => word.length > 0)
 }
 
-function searchProducts(products, query) {
-  if (!query || query.trim() === "") {
-    return products
-  }
-
-  const searchWords = getSearchWords(query)
-  if (searchWords.length === 0) {
-    return products
-  }
-
-  console.log("[SEARCH] Buscando palabras:", searchWords)
-
-  return products.filter((product) => {
-    const normalizedName = normalizeText(product.nombre)
-    const normalizedDescription = normalizeText(product.descripcion)
-    const normalizedDepartment = normalizeText(product.departamento)
-
-    const combinedText = `${normalizedName} ${normalizedDescription} ${normalizedDepartment}`
-
-    const allWordsFound = searchWords.every((word) => {
-      return (
-        normalizedName.includes(word) ||
-        normalizedDescription.includes(word) ||
-        normalizedDepartment.includes(word) ||
-        combinedText.includes(word)
-      )
-    })
-
-    if (allWordsFound) {
-      console.log(`[SEARCH] ✅ Encontrado: ${product.nombre}`)
-    }
-
-    return allWordsFound
-  })
-}
-
 let searchTimeout // Declare searchTimeout
 let deptSearchTimeout // Declare deptSearchTimeout
 
@@ -2940,7 +3080,7 @@ function handleGlobalSearch(e) {
   clearTimeout(searchTimeout)
 
   const searchLoading = document.getElementById("search-loading")
-
+  
   if (query === "") {
     filteredProducts = allProducts
     currentPage = 1
@@ -2954,9 +3094,16 @@ function handleGlobalSearch(e) {
 
   searchTimeout = setTimeout(() => {
     console.log("[SEARCH] Búsqueda global:", query)
-
-    filteredProducts = searchProducts(allProducts, query)
-
+    
+    // [MODIFICADO] Usar Fuse.js para búsqueda difusa
+    if (!fuse) {
+        console.warn("[FUSE] Fuse.js no está inicializado.");
+        filteredProducts = [];
+    } else {
+        // [NUEVO] Formatear query para búsqueda extendida (multi-palabra)
+        const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
+        filteredProducts = fuse.search(formattedQuery).map(result => result.item);
+    }
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     const searchResultUrls = filteredProducts
@@ -2999,7 +3146,15 @@ function handleDeptSearch(e) {
       productsInDept = allProducts.filter((p) => p.departamento === currentDepartment)
     }
 
-    filteredProducts = searchProducts(productsInDept, query)
+    // [MODIFICADO] Usar Fuse.js para búsqueda difusa en departamento
+    const deptFuse = new Fuse(productsInDept, {
+        keys: ['nombre', 'codigo', 'descripcion'],
+        threshold: 0.4,
+        ignoreLocation: true,
+        useExtendedSearch: true,
+    });
+    const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
+    filteredProducts = deptFuse.search(formattedQuery).map(result => result.item);
 
     console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
 
