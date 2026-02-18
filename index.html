@@ -10,6 +10,10 @@
     <link rel="preconnect" href="https://ibb.co">
     <link rel="dns-prefetch" href="https://i.ibb.co">
     <link rel="dns-prefetch" href="https://ibb.co">
+    <!-- [NUEVO] Poppins Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -17,9 +21,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <!-- Agregar librería para Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- [NUEVO] Fuse.js para búsqueda difusa -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+    <!-- [NUEVO] Chart.js para dashboard de ventas -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="styles.css">
     
     <style>
+        /* [NUEVO] Estilos para el modal de zoom de imagen */
+        #image-zoom-modal.visible { display: flex; }
+        #image-zoom-modal .zoom-content { animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
         /* SOLUCIÓN MEJORADA PARA BANNER RESPONSIVE Y ALTA CALIDAD */
         .banner-container {
             position: relative;
@@ -131,19 +143,44 @@
             }
         }
     </style>
+    <!-- [NUEVO] Script para modo oscuro automático -->
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
 </head>
-<body class="bg-gradient-to-br from-gray-50 to-gray-100">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
     <!-- Pantalla de Carga -->
-    <div id="loading-screen" class="fixed inset-0 bg-gradient-to-br from-red-600 to-black z-50 flex items-center justify-center">
-        <div class="text-center">
-            <div class="loading-spinner mx-auto mb-6"></div>
-            <p class="text-white text-xl font-semibold">Cargando SONIMAX MÓVIL...</p>
+    <div id="loading-screen" class="fixed inset-0 bg-gray-50 dark:bg-gray-900 z-50 p-4">
+        <div class="container mx-auto pt-6">
+            <!-- [NUEVO] Skeleton Screen -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-pulse">
+                <!-- Repetir este bloque para simular la carga -->
+                <div class="product-skeleton-card" script="repeat:8">
+                    <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div>
+                    <div class="p-5 space-y-4">
+                        <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div>
+                        <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div>
+                        <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div>
+                    </div>
+                </div>
+                <div class="product-skeleton-card hidden sm:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden lg:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden xl:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden sm:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden sm:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden lg:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+                <div class="product-skeleton-card hidden xl:block"> <div class="h-56 bg-gray-200 dark:bg-gray-700 rounded-t-2xl"></div> <div class="p-5 space-y-4"> <div class="h-6 bg-gray-300 dark:bg-gray-600 rounded w-3/4"></div> <div class="h-4 bg-gray-300 dark:bg-gray-600 rounded w-1/2"></div> <div class="h-10 bg-gray-300 dark:bg-gray-600 rounded-xl w-full mt-4"></div> </div> </div>
+            </div>
         </div>
     </div>
 
     <!-- Pantalla de Login -->
     <div id="login-screen" class="hidden fixed inset-0 bg-gradient-to-br from-red-900 via-red-800 to-black z-40 flex items-center justify-center p-4">
-        <div class="glass-card max-w-md w-full p-8 rounded-3xl shadow-2xl backdrop-blur-xl">
+        <div class="glass-card max-w-md w-full p-8 rounded-3xl shadow-2xl">
             <div class="text-center mb-8">
                 <div class="w-20 h-20 bg-white rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
                     <span class="text-3xl font-black text-red-600">SM</span>
@@ -245,7 +282,7 @@
         <div id="sidebar-overlay" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40"></div>
 
         <!-- Header -->
-        <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-xl shadow-lg border-b-4 border-red-600">
+        <header class="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl shadow-lg border-b-4 border-red-600">
             <div class="container mx-auto px-4 py-4">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-4">
@@ -260,13 +297,19 @@
                                 <span class="text-white font-black text-lg">SM</span>
                             </div>
                             <div>
-                                <h1 class="text-xl md:text-2xl font-black text-gray-900">SONIMAX MÓVIL</h1>
+                                <h1 class="text-xl md:text-2xl font-black text-gray-900 dark:text-white">SONIMAX MÓVIL</h1>
                                 <span id="user-role-badge" class="hidden text-sm font-bold inline-block mt-1 px-3 py-1 rounded-lg"></span>
                             </div>
                         </div>
                     </div>
                     
                     <div class="flex items-center space-x-3">
+                        <button id="favorites-button" class="relative p-3 hover:bg-red-50 dark:hover:bg-red-900/50 rounded-xl transition-all group">
+                            <svg class="w-6 h-6 text-red-600 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.5l1.318-1.182a4.5 4.5 0 116.364 6.364L12 20.273l-7.682-7.682a4.5 4.5 0 010-6.364z"></path>
+                            </svg>
+                        </button>
+
                         <button id="cart-button" class="relative p-3 hover:bg-red-50 rounded-xl transition-all group">
                             <svg class="w-6 h-6 text-red-600 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
@@ -284,7 +327,7 @@
                 <div class="mt-4">
                     <div class="relative">
                         <input type="text" id="global-search" 
-                            class="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-200 focus:outline-none focus:border-red-500 transition-all shadow-sm bg-white"
+                            class="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-200 dark:border-gray-700 focus:outline-none focus:border-red-500 transition-all shadow-sm bg-white dark:bg-gray-800 dark:text-white"
                             placeholder="Buscar productos por nombre, código o descripción...">
                         <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -302,7 +345,7 @@
         </header>
 
         <!-- Navegación de Departamentos -->
-        <nav class="bg-white shadow-sm border-b border-gray-200">
+        <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
             <div class="container mx-auto px-4 py-4">
                 <div class="flex items-center space-x-3 overflow-x-auto pb-2 scrollbar-hide">
                     <button data-dept="all" class="dept-button active whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm">
@@ -314,15 +357,23 @@
         </nav>
 
         <!-- Búsqueda por Departamento -->
-        <div id="dept-search-container" class="hidden bg-gray-50 border-b border-gray-200">
+        <div id="dept-search-container" class="hidden bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
             <div class="container mx-auto px-4 py-4">
-                <div class="relative max-w-2xl">
-                    <input type="text" id="dept-search" 
-                        class="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all bg-white"
-                        placeholder="Buscar en este departamento...">
-                    <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                    </svg>
+                <div class="flex flex-wrap items-center gap-4">
+                    <div class="relative flex-grow">
+                        <input type="text" id="dept-search" 
+                            class="w-full px-4 py-3 pl-12 rounded-xl border-2 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all bg-white dark:bg-gray-700 dark:text-white"
+                            placeholder="Buscar en este departamento...">
+                        <svg class="absolute left-4 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                    <!-- [NUEVO] Filtros de Precio -->
+                    <div class="flex items-center gap-2">
+                        <input type="number" id="price-min" placeholder="Precio Mín." class="w-28 px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                        <input type="number" id="price-max" placeholder="Precio Máx." class="w-28 px-3 py-2 border-2 border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                        <button id="price-filter-btn" class="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition-all">Filtrar</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -334,7 +385,6 @@
                 <div id="banner-carousel" class="relative banner-container shadow-xl">
                     <!-- Imagen Principal - RESPONSIVE Y ALTA CALIDAD -->
                     <img id="banner-image" 
-                         src="./banner-sonimax.png" 
                          alt="Banner SONIMAX MÓVIL - Tecnología al alcance de tus manos" 
                          class="banner-image-hq no-filter"
                          loading="eager"
@@ -370,7 +420,7 @@
 
         <!-- Modal para Gestionar Banners -->
         <div id="banners-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Gestionar Banners</h2>
                     <button id="close-banners-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -420,23 +470,28 @@
 <!-- Reemplazar los botones de admin-section con estos nuevos -->
 
         <!-- Sección de administración (solo admin) -->
-        <div id="admin-section" class="hidden container mx-auto px-4 py-6">
-            <div class="flex flex-wrap gap-3">
-                <button id="upload-csv-button" class="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:from-green-700 hover:to-green-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+        <div id="admin-section" class="hidden container mx-auto px-4 py-6 space-y-6">
+            <!-- [NUEVO] Dashboard de Ventas -->
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+                <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-4">Top 5 Productos Vendidos</h3>
+                <canvas id="sales-chart"></canvas>
+            </div>
+            <div class="flex flex-wrap gap-4">
+                <button id="upload-csv-button" class="admin-btn btn-green">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                     </svg>
                     <span>Subir CSV de Productos</span>
                 </button>
 
-                <button id="update-products-button" class="px-6 py-3 bg-gradient-to-r from-teal-600 to-teal-700 text-white rounded-xl hover:from-teal-700 hover:to-teal-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="update-products-button" class="admin-btn btn-teal">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
                     <span>Actualizar Inventario</span>
                 </button>
 
-                <button id="upload-excel-button" class="px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="upload-excel-button" class="admin-btn btn-purple">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                     </svg>
@@ -444,7 +499,7 @@
                 </button>
 
                 <!-- Nuevo botón para agregar producto individual -->
-                <button id="add-product-button" class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="add-product-button" class="admin-btn btn-blue">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                     </svg>
@@ -452,42 +507,42 @@
                 </button>
 
                 <!-- Nuevo botón para eliminar producto -->
-                <button id="delete-product-button" class="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="delete-product-button" class="admin-btn btn-red">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                     </svg>
                     <span>Eliminar Producto</span>
                 </button>
 
-                <button id="export-pdf-button" class="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-700 text-white rounded-xl hover:from-orange-700 hover:to-orange-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="export-pdf-button" class="admin-btn btn-orange">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                     </svg>
                     <span>Exportar PDF por Departamento</span>
                 </button>
 
-                <button id="add-merchandise-button" class="px-6 py-3 bg-gradient-to-r from-cyan-600 to-cyan-700 text-white rounded-xl hover:from-cyan-700 hover:to-cyan-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="add-merchandise-button" class="admin-btn btn-cyan">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                     </svg>
                     <span>Agregar Mercancía</span>
                 </button>
 
-                <button id="no-photo-button" class="px-6 py-3 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-xl hover:from-amber-700 hover:to-amber-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="no-photo-button" class="admin-btn btn-amber">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                     </svg>
                     <span>Productos sin Foto</span>
                 </button>
 
-                <button id="modify-product-button" class="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl hover:from-indigo-700 hover:to-indigo-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="modify-product-button" class="admin-btn btn-indigo">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                     </svg>
                     <span>Modificar Producto</span>
                 </button>
 
-                <button id="clean-duplicates-button" class="px-6 py-3 bg-gradient-to-r from-pink-600 to-pink-700 text-white rounded-xl hover:from-pink-700 hover:to-pink-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="clean-duplicates-button" class="admin-btn btn-pink">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
@@ -495,7 +550,7 @@
                 </button>
 
                 <!-- Nuevo botón para Bloquear/Desbloquear Inventario -->
-                <button id="toggle-inventory-lock-btn" class="px-6 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-xl hover:from-gray-700 hover:to-gray-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                <button id="toggle-inventory-lock-btn" class="admin-btn btn-gray">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                     </svg>
@@ -507,7 +562,7 @@
 
         <!-- Sección para gestores - crear usuarios (gestor y admin) -->
         <div id="gestor-section" class="hidden container mx-auto px-4 py-6">
-            <div class="bg-white rounded-2xl shadow-lg p-6">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
                 <h2 class="text-2xl font-black text-gray-800 mb-4">Gestión de Usuarios</h2>
                 <button id="create-user-button" class="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-700 text-white rounded-xl hover:from-orange-700 hover:to-orange-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -520,7 +575,7 @@
 
         <!-- Vista para Rol de Inventario -->
         <div id="inventory-section" class="hidden container mx-auto px-4 py-6">
-            <div class="bg-white rounded-2xl shadow-lg p-4 sm:p-6">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-4 sm:p-6">
                 <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
                     <div>
                         <h2 class="text-2xl font-black text-gray-800">Gestión de Inventario Físico</h2>
@@ -594,7 +649,7 @@
                 <p class="text-gray-600 text-lg font-medium">Cargando productos...</p>
             </div>
 
-            <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
+            <div id="products-grid" class="product-grid-container"></div>
             
             <div id="no-products" class="hidden text-center py-20">
                 <svg class="w-24 h-24 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -607,7 +662,7 @@
 
         <!-- Modal del Carrito -->
         <div id="cart-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                 <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-red-600 to-red-700">
                     <div class="flex items-center justify-between">
                         <h2 class="text-2xl font-black text-white">Carrito de Compras</h2>
@@ -621,7 +676,7 @@
                 
                 <div id="cart-items" class="flex-1 overflow-y-auto p-6"></div>
                 
-                <div class="p-6 border-t border-gray-200 bg-gray-50">
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
                     <div class="flex items-center justify-between mb-4">
                         <span class="text-lg font-bold text-gray-700">Total:</span>
                         <span id="cart-total" class="text-3xl font-black text-red-600">$0.00</span>
@@ -638,7 +693,7 @@
 
         <!-- Modal CSV -->
         <div id="csv-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Subir Productos CSV</h2>
                     <button id="close-csv-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -679,7 +734,7 @@
 
         <!-- Modal para exportar PDF -->
         <div id="pdf-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-md w-full p-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Exportar PDF</h2>
                     <button id="close-pdf-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -709,7 +764,7 @@
 
         <!-- Modal para crear usuarios (usado por gestor y admin) -->
         <div id="create-user-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-md w-full p-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Crear Nuevo Usuario</h2>
                     <button id="close-create-user-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -762,7 +817,7 @@
 
         <!-- Modal Cantidad con Observación -->
         <div id="quantity-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-md w-full p-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Seleccionar Cantidad</h2>
                     <button id="close-quantity-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -801,7 +856,7 @@
 
         <!-- Modal CSV -->
         <div id="csv-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Subir Productos CSV</h2>
                     <button id="close-csv-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -842,7 +897,7 @@
 
         <!-- Modal para Agregar Productos Individualmente -->
         <div id="add-product-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 overflow-y-auto">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 my-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8 my-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Agregar Producto Individual</h2>
                     <button id="close-add-product-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -901,7 +956,7 @@
 
         <!-- Modal para Eliminar Productos -->
         <div id="delete-product-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 overflow-y-auto">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 my-8">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8 my-8">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-black text-gray-800">Eliminar Producto</h2>
                     <button id="close-delete-product-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
@@ -923,6 +978,19 @@
                 <div id="delete-product-status" class="hidden mb-4 p-4 rounded-xl text-sm font-medium"></div>
             </div>
         </div>
+
+        <!-- [NUEVO] Modal para Zoom de Imagen -->
+        <div id="image-zoom-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 items-center justify-center p-4 hidden">
+            <div class="relative max-w-4xl max-h-full">
+                <img id="image-zoom-content" class="zoom-content max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" alt="Vista ampliada del producto">
+            </div>
+            <button id="image-zoom-close" class="absolute top-4 right-4 text-white bg-black/50 rounded-full w-10 h-10 flex items-center justify-center text-2xl font-bold hover:bg-black/75 transition-all z-10">
+                &times;
+            </button>
+        </div>
+
+
+
 
         <script src="supabase-config.js"></script>
         <script src="app.js"></script>
