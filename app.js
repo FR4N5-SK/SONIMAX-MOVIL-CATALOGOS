@@ -2253,10 +2253,10 @@ function createProductCard(product) {
   let stockBadge = ''
   const stock = product.stock || 0;
   if (stock === 0) {
-    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
+    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-black text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
   } else {
-    const stockColor = stock <= 5 ? 'bg-yellow-500' : 'bg-green-600';
-    stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-white text-xs font-bold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
+    const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
+    stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
   }
 
   // [NUEVO] Lógica para badge de "Bajó de Precio"
@@ -2291,7 +2291,7 @@ function createProductCard(product) {
       <div class="mb-4">
         ${priceHTML}
       </div>
-      ${product.departamento ? `<span class="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-600 font-semibold block mb-3">${product.departamento}</span>` : ""}
+      ${product.departamento ? `<span class="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full text-gray-600 dark:text-gray-300 font-semibold block mb-3">${product.departamento}</span>` : ""}
       ${priceDropBadge || (product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : '')}
       ${stockBadge}
       <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
