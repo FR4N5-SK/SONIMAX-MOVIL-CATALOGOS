@@ -449,14 +449,17 @@ body {
 /* [NUEVO] Badge de "Bajó de Precio" */
 .price-drop-badge {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%); /* green-500 to green-600 */
-  color: white;
+  color: black;
   padding: 0.25rem 0.75rem;
   border-radius: 9999px;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 0.75rem;
   display: inline-block;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
   animation: pulse 1.5s infinite;
+}
+.dark .price-drop-badge {
+  color: black;
 }
 
 /* [NUEVO] Botón de Favoritos */
