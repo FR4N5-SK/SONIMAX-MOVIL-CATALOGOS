@@ -29,7 +29,8 @@ body {
 }
 
 .dark .product-card:hover {
-  border-color: rgba(220, 38, 38, 0.5);
+  border-color: #F97316;
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.5);
 }
 
 .dark .product-card h3 {
@@ -436,7 +437,7 @@ body {
   position: relative;
   overflow: hidden;
   font-weight: 600;
-  background: linear-gradient(135deg, #EF4444, #DC2626);
+  background: linear-gradient(135deg, #DC2626, #F97316, #B91c1c);
   transition: all 0.3s ease;
 }
 
