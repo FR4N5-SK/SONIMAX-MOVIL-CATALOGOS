@@ -2016,7 +2016,9 @@ function renderDepartments() {
           { id: 'inv_B', label: 'Depósito B', icon: '🏢' },
           { id: 'inv_C', label: 'Depósito C', icon: '🏢' },
           { id: 'inv_D', label: 'Depósito D', icon: '🏢' },
-          { id: 'inv_E', label: 'Depósito E', icon: '🏢' }
+          { id: 'inv_E', label: 'Depósito E', icon: '🏢' },
+          { id: 'inv_PLANTA BAJA', label: 'Planta Baja', icon: '⬇️' },
+          { id: 'inv_PISO VENTA', label: 'Piso Venta', icon: '⬆️' }
       ];
 
       inventoryTabs.forEach(tab => {
@@ -2410,9 +2412,9 @@ function createProductCard(product) {
           actionButtonsHTML = `
             <div class="mt-3">
                 <p class="text-xs font-bold text-gray-500 mb-2 text-center uppercase tracking-wider">Asignar a Depósito:</p>
-                <div class="grid grid-cols-5 gap-1">
-                    ${['A','B','C','D','E'].map(d => `
-                        <button class="deposito-assign-btn w-full aspect-square rounded-lg font-bold text-sm bg-gray-100 hover:bg-blue-600 hover:text-white border border-gray-200 transition-all shadow-sm" 
+                <div class="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-7 gap-1">
+                    ${['A','B','C','D','E','PLANTA BAJA','PISO VENTA'].map(d => `
+                        <button class="deposito-assign-btn w-full h-auto min-h-[2.5rem] py-1 rounded-lg font-bold text-[10px] sm:text-xs bg-gray-100 hover:bg-blue-600 hover:text-white border border-gray-200 transition-all shadow-sm flex items-center justify-center text-center leading-tight" 
                             onclick="window.assignProductDeposit('${product.id}', '${product.codigo}', '${d}')">
                             ${d}
                         </button>
@@ -4400,8 +4402,8 @@ function createInventorySearchResultCard(item) {
                 <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">Depósito Actual: <span class="font-semibold text-blue-600 deposito-value">${item.deposito || 'N/A'}</span></p>
             </div>
             <div class="flex flex-wrap gap-2 justify-center pt-2 sm:pt-0">
-                ${['A','B','C','D','E'].map(d => `
-                    <button class="deposito-assign-btn w-9 h-9 rounded-lg font-bold text-sm bg-gray-200 hover:bg-blue-500 hover:text-white transition-all" data-product-id="${productId}" data-deposito="${d}">${d}</button>
+                ${['A','B','C','D','E','PLANTA BAJA','PISO VENTA'].map(d => `
+                    <button class="deposito-assign-btn px-2 py-1 rounded-lg font-bold text-[10px] sm:text-xs bg-gray-200 hover:bg-blue-500 hover:text-white transition-all" data-product-id="${productId}" data-deposito="${d}">${d}</button>
                 `).join('')}
             </div>
         </div>
@@ -4459,9 +4461,9 @@ async function loadInventoryForAssignment() {
                         <h4 class="font-bold text-gray-800">${item.descripcion}</h4>
                         <p class="text-xs text-gray-500">Código: ${item.codigo} | Dept: ${item.departamento}</p>
                     </div>
-                    <div class="flex gap-2">
-                        ${['A','B','C','D','E'].map(d => `
-                            <button class="w-8 h-8 rounded-full bg-gray-100 hover:bg-blue-600 hover:text-white font-bold text-sm transition-colors assign-btn" 
+                    <div class="flex flex-wrap gap-2 justify-end">
+                        ${['A','B','C','D','E','PLANTA BAJA','PISO VENTA'].map(d => `
+                            <button class="px-2 py-1 rounded-lg bg-gray-100 hover:bg-blue-600 hover:text-white font-bold text-xs transition-colors assign-btn" 
                                 data-id="${item.id}" data-dep="${d}">${d}</button>
                         `).join('')}
                     </div>
