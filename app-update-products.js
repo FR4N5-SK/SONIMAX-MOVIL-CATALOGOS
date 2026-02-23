@@ -614,6 +614,32 @@
         }
 
         // ============================================================
+        // MARCAR COMO AGOTADOS LOS PRODUCTOS QUE NO ESTÁN EN EL EXCEL
+        // ============================================================
+        progressText.textContent = "Verificando productos faltantes...";
+        const excelCodes = new Set(Array.from(codeRowsMap.keys()));
+        const dbCodes = new Set(existingProducts.map(p => normalizeCode(p.codigo)));
+        
+        const missingCodes = [...dbCodes].filter(code => !excelCodes.has(code));
+
+        if (missingCodes.length > 0) {
+            console.log(`[UPDATE-PROCESS] 📉 Encontrados ${missingCodes.length} productos para marcar como agotados.`);
+            progressText.textContent = `Marcando ${missingCodes.length} productos como agotados...`;
+
+            // Marcar en la tabla 'products'
+            const { error: stockError } = await supabaseClient.from('products').update({ stock: 0 }).in('codigo', missingCodes);
+            if (stockError) console.error('[UPDATE-PROCESS] Error al poner stock 0 en products:', stockError);
+
+            // Marcar en la tabla 'inventory_products'
+            const { error: invStockError } = await supabaseClient.from('inventory_products').update({ existencia_actual: 0 }).in('codigo', missingCodes);
+            if (invStockError) console.error('[UPDATE-PROCESS] Error al poner stock 0 en inventory_products:', invStockError);
+
+            console.log(`[UPDATE-PROCESS] ✅ ${missingCodes.length} productos marcados como agotados en ambas tablas.`);
+        } else {
+            console.log('[UPDATE-PROCESS] ✅ No se encontraron productos faltantes en el Excel. No se marcó nada como agotado.');
+        }
+
+        // ============================================================
         // SINCRONIZACIÓN CON TABLA DE INVENTARIO (NUEVO REQUERIMIENTO)
         // ============================================================
         try {
