@@ -22,6 +22,7 @@ Object.defineProperty(window, 'allProducts', {
   configurable: true
 });
 let filteredProducts = []
+let inventoryDataMap = new Map(); // [NUEVO] Mapa para datos de inventario (codigo -> datos)
 let cart = []
 let favorites = [] // [NUEVO] Para sistema de favoritos
 let priceSnapshotMap = new Map(); // [NUEVO] Para comparación de precios
@@ -1555,9 +1556,9 @@ function updateUIForRole() {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
     manageBannersBtn?.classList.add("hidden")
-    if(mainGrid) mainGrid.parentElement.classList.add("hidden"); // Ocultar grid normal
-    inventorySection?.classList.remove("hidden");
-    initInventoryRole(); // Inicializar lógica de inventario
+    if(mainGrid) mainGrid.parentElement.classList.remove("hidden"); // [MODIFICADO] Mostrar grid normal
+    inventorySection?.classList.add("hidden"); // [MODIFICADO] Ocultar sección vieja
+    // initInventoryRole(); // Ya no usamos la lógica vieja de lista
   } else {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
@@ -1935,6 +1936,46 @@ async function loadProducts() {
 
     await loadPriceSnapshot(); // Cargar precios antiguos
     await loadFavorites(); // Cargar favoritos desde la nube
+
+    // [NUEVO] Si es rol inventario, cargar datos de inventory_products
+    if (window.currentUserRole === 'inventario') {
+        console.log("📦 Cargando datos de inventario físico...");
+        
+        let allInvData = [];
+        let invStart = 0;
+        const invBatchSize = 1000;
+        let invHasMore = true;
+
+        while (invHasMore) {
+             const { data: invData, error: invError } = await window.supabaseClient
+                .from('inventory_products')
+                .select('*')
+                .range(invStart, invStart + invBatchSize - 1);
+            
+            if (invError) {
+                console.error("Error loading inventory data", invError);
+                break;
+            }
+
+            if (invData && invData.length > 0) {
+                allInvData = [...allInvData, ...invData];
+                if (invData.length < invBatchSize) {
+                    invHasMore = false;
+                } else {
+                    invStart += invBatchSize;
+                }
+            } else {
+                invHasMore = false;
+            }
+        }
+        
+        inventoryDataMap.clear();
+        allInvData.forEach(item => {
+            if (item.codigo) inventoryDataMap.set(item.codigo.trim().toUpperCase(), item);
+        });
+        console.log(`📦 Datos de inventario cargados: ${inventoryDataMap.size} registros`);
+    }
+
     filteredProducts = allProducts
     currentPage = 1
 
@@ -1965,6 +2006,45 @@ function renderDepartments() {
 
   navContainer.innerHTML = ""
   sidebarContainer.innerHTML = ""
+
+  // [NUEVO] Renderizado especial para ROL INVENTARIO
+  if (window.currentUserRole === 'inventario') {
+      const inventoryTabs = [
+          { id: 'inv_unassigned', label: '⚠️ Por Asignar', icon: '⚠️' },
+          { id: 'inv_A', label: 'Depósito A', icon: '🏢' },
+          { id: 'inv_B', label: 'Depósito B', icon: '🏢' },
+          { id: 'inv_C', label: 'Depósito C', icon: '🏢' },
+          { id: 'inv_D', label: 'Depósito D', icon: '🏢' },
+          { id: 'inv_E', label: 'Depósito E', icon: '🏢' }
+      ];
+
+      inventoryTabs.forEach(tab => {
+          // Botón Nav Superior
+          const btn = document.createElement("button");
+          btn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm";
+          btn.innerHTML = `${tab.icon} ${tab.label}`;
+          btn.dataset.dept = tab.id;
+          btn.addEventListener("click", () => filterByDepartment(tab.id));
+          navContainer.appendChild(btn);
+
+          // Botón Sidebar
+          const sidebarBtn = document.createElement("button");
+          sidebarBtn.className = "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold";
+          sidebarBtn.innerHTML = `${tab.icon} ${tab.label}`;
+          sidebarBtn.dataset.dept = tab.id;
+          sidebarBtn.addEventListener("click", () => {
+              filterByDepartment(tab.id);
+              closeSidebar();
+          });
+          sidebarContainer.appendChild(sidebarBtn);
+      });
+      
+      // Seleccionar "Por Asignar" por defecto si no hay selección
+      if (currentDepartment === 'all') {
+          setTimeout(() => filterByDepartment('inv_unassigned'), 100);
+      }
+      return; // Salir para no renderizar departamentos normales
+  }
 
   // Botón para Mercancía Recién Llegada
   const newProductsBtn = document.createElement("button")
@@ -2082,6 +2162,42 @@ function filterByDepartment(dept, keepSearch = false) {
   }
 
   let baseProducts = allProducts;
+
+  // [NUEVO] Filtro Global para Rol Inventario: Ocultar agotados (Stock 0)
+  if (window.currentUserRole === 'inventario') {
+      baseProducts = baseProducts.filter(p => (p.stock || 0) > 0);
+  }
+
+  // [NUEVO] Lógica de filtrado para INVENTARIO
+  if (window.currentUserRole === 'inventario' && dept.startsWith('inv_')) {
+      const targetDeposit = dept.replace('inv_', ''); // 'unassigned', 'A', 'B'...
+      
+      filteredProducts = baseProducts.filter(p => {
+          const pCode = (p.codigo || '').trim().toUpperCase();
+          const invData = inventoryDataMap.get(pCode);
+          
+          // Si no hay datos de inventario, se asume sin asignar (si tiene stock > 0)
+          // OJO: Si inventory_products no tiene el registro, lo tratamos como unassigned
+          const currentDep = invData ? invData.deposito : null;
+          const stock = p.stock || 0;
+
+          // Solo mostrar productos con stock > 0 en inventario
+          if (stock <= 0) return false;
+
+          if (targetDeposit === 'unassigned') {
+              return !currentDep; // Mostrar si no tiene depósito
+          } else {
+              return currentDep === targetDeposit; // Mostrar si coincide el depósito
+          }
+      });
+
+      // Aplicar filtro de búsqueda local si existe (usando Fuse o texto simple)
+      // Nota: handleDeptSearch se encarga de refiltrar filteredProducts, así que aquí solo filtramos por depósito
+      
+      currentPage = 1;
+      renderProducts();
+      return;
+  }
 
   if (dept === "all") {
     filteredProducts = baseProducts.filter(priceFilter);
@@ -2205,6 +2321,10 @@ function loadMoreProducts() {
 function createProductCard(product) {
   const card = document.createElement("div")
   card.className = "product-card"
+  
+  // [NUEVO] Datos de inventario para este producto
+  const pCode = (product.codigo || '').trim().toUpperCase();
+  const invData = inventoryDataMap.get(pCode);
 
   const priceInfo = getPriceForRole(product)
 
@@ -2252,11 +2372,15 @@ function createProductCard(product) {
   // [MODIFICADO] Mostrar siempre el stock
   let stockBadge = ''
   const stock = product.stock || 0;
-  if (stock === 0) {
-    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-black text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
-  } else {
-    const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
-    stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
+  
+  // Ocultar stock para rol inventario
+  if (window.currentUserRole !== 'inventario') {
+      if (stock === 0) {
+        stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-black text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
+      } else {
+        const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
+        stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
+      }
   }
 
   // [NUEVO] Lógica para badge de "Bajó de Precio"
@@ -2268,6 +2392,63 @@ function createProductCard(product) {
       if (newPrice > 0 && oldPrice > 0 && newPrice < oldPrice) {
           priceDropBadge = '<span class="price-drop-badge absolute top-3 left-3 z-20">¡BAJÓ DE PRECIO!</span>';
       }
+  }
+
+  // [NUEVO] Lógica de botones para ROL INVENTARIO
+  let actionButtonsHTML = '';
+  
+  if (window.currentUserRole === 'inventario') {
+      const currentDep = invData ? invData.deposito : null;
+      
+      if (!currentDep) {
+          // VISTA: POR ASIGNAR (Botones A-E)
+          actionButtonsHTML = `
+            <div class="mt-3">
+                <p class="text-xs font-bold text-gray-500 mb-2 text-center uppercase tracking-wider">Asignar a Depósito:</p>
+                <div class="grid grid-cols-5 gap-1">
+                    ${['A','B','C','D','E'].map(d => `
+                        <button class="deposito-assign-btn w-full aspect-square rounded-lg font-bold text-sm bg-gray-100 hover:bg-blue-600 hover:text-white border border-gray-200 transition-all shadow-sm" 
+                            onclick="window.assignProductDeposit('${product.id}', '${product.codigo}', '${d}')">
+                            ${d}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+          `;
+      } else {
+          // VISTA: EN DEPÓSITO (Input Cantidad)
+          // Lógica de bloqueo: Bloqueado si !inventoryEditMode Y ya tiene cantidad > 0
+          const currentQty = invData ? (invData.cantidad_fisica || 0) : 0;
+          const isLocked = !inventoryEditMode && currentQty > 0;
+          
+          actionButtonsHTML = `
+            <div class="mt-3">
+                <div class="flex justify-between items-center mb-1">
+                    <p class="text-xs font-bold text-gray-500 uppercase">Conteo Físico:</p>
+                    <span class="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-600">Dep: ${currentDep}</span>
+                </div>
+                <div class="relative">
+                    <input type="number" 
+                        value="${currentQty}" 
+                        min="0"
+                        class="w-full p-3 text-center text-xl font-bold border-2 rounded-xl outline-none transition-all ${isLocked ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-blue-600 border-blue-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20'}"
+                        ${isLocked ? 'disabled' : ''}
+                        onchange="window.updateInventoryQuantity('${product.codigo}', this)"
+                        onfocus="this.select()"
+                    >
+                    ${isLocked ? '<div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></div>' : ''}
+                </div>
+                ${!isLocked ? '<p class="text-[10px] text-center text-gray-400 mt-1">Ingresa la cantidad y presiona Enter o sal del campo</p>' : '<p class="text-[10px] text-center text-red-400 mt-1 font-medium">Edición bloqueada por Admin</p>'}
+            </div>
+          `;
+      }
+  } else {
+      // VISTA NORMAL (Botón Carrito)
+      actionButtonsHTML = `
+        <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 via-orange-500 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
+            Agregar al Carrito
+        </button>
+      `;
   }
 
   card.innerHTML = `
@@ -2294,9 +2475,7 @@ function createProductCard(product) {
       ${product.departamento ? `<span class="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full text-gray-600 dark:text-gray-300 font-semibold block mb-3">${product.departamento}</span>` : ""}
       ${priceDropBadge || (product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : '')}
       ${stockBadge}
-      <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 via-orange-500 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
-        Agregar al Carrito
-      </button>
+      ${actionButtonsHTML}
     </div>
   `
 
@@ -2325,12 +2504,79 @@ function createProductCard(product) {
     /* noop */
   }
 
-  card.querySelector(".add-to-cart-btn").addEventListener("click", () => {
-    openQuantityModal(product)
-  })
+  // Event listener solo si existe el botón de carrito (no es inventario)
+  const addToCartBtn = card.querySelector(".add-to-cart-btn");
+  if (addToCartBtn) {
+      addToCartBtn.addEventListener("click", () => {
+        openQuantityModal(product)
+      })
+  }
 
   return card
 }
+
+// [NUEVO] Funciones globales para acciones de inventario
+window.assignProductDeposit = async function(productId, productCode, deposito) {
+    try {
+        // Actualización Optimista
+        const pCode = productCode.trim().toUpperCase();
+        let itemData = inventoryDataMap.get(pCode);
+        
+        if (!itemData) {
+            // Si no existe en inventory_products, creamos estructura base
+            itemData = { codigo: pCode, deposito: deposito };
+        } else {
+            itemData.deposito = deposito;
+        }
+        inventoryDataMap.set(pCode, itemData);
+
+        // Refrescar vista actual (eliminará la tarjeta de "Por Asignar")
+        filterByDepartment(currentDepartment);
+
+        // Guardar en BD
+        const { error } = await window.supabaseClient
+            .from('inventory_products')
+            .update({ deposito: deposito })
+            .eq('codigo', pCode); // Usar código es más seguro para sync
+
+        if (error) throw error;
+        console.log(`✅ Producto ${pCode} asignado a ${deposito}`);
+
+    } catch (error) {
+        console.error("Error asignando depósito:", error);
+        alert("Error al asignar depósito. Recarga la página.");
+    }
+};
+
+window.updateInventoryQuantity = async function(productCode, inputElement) {
+    const val = parseInt(inputElement.value) || 0;
+    const pCode = productCode.trim().toUpperCase();
+    
+    // Feedback visual
+    inputElement.classList.add('bg-green-50', 'border-green-500', 'text-green-700');
+    
+    // Actualizar mapa local
+    const itemData = inventoryDataMap.get(pCode);
+    if (itemData) itemData.cantidad_fisica = val;
+
+    // Guardar en BD
+    await window.supabaseClient
+        .from('inventory_products')
+        .update({ cantidad_fisica: val })
+        .eq('codigo', pCode);
+        
+    setTimeout(() => {
+        inputElement.classList.remove('bg-green-50', 'border-green-500', 'text-green-700');
+        // Re-aplicar estilos base según estado
+        if (!inventoryEditMode && val > 0) {
+            inputElement.disabled = true;
+            inputElement.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+            inputElement.classList.remove('bg-white', 'text-blue-600');
+        } else {
+            inputElement.classList.add('bg-white', 'text-blue-600');
+        }
+    }, 500);
+};
 
 function getPriceForRole(product) {
   const userRole = currentUserRole || window.currentUserRole || 'cliente'
@@ -3104,6 +3350,12 @@ function handleGlobalSearch(e) {
         const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
         filteredProducts = fuse.search(formattedQuery).map(result => result.item);
     }
+
+    // [NUEVO] Filtrar agotados para rol inventario en búsqueda global
+    if (window.currentUserRole === 'inventario') {
+        filteredProducts = filteredProducts.filter(p => (p.stock || 0) > 0);
+    }
+
     console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
     const searchResultUrls = filteredProducts
@@ -3155,6 +3407,11 @@ function handleDeptSearch(e) {
     });
     const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
     filteredProducts = deptFuse.search(formattedQuery).map(result => result.item);
+
+    // [NUEVO] Filtrar agotados para rol inventario en búsqueda por departamento
+    if (window.currentUserRole === 'inventario') {
+        filteredProducts = filteredProducts.filter(p => (p.stock || 0) > 0);
+    }
 
     console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
 
@@ -3264,7 +3521,7 @@ async function handleCSVUpload() {
           departamento: departamento,
           imagen_url: url,
           is_new: false, // Inicialmente todos son false
-          stock: 0
+          stock: stockValue
         }
 
         products.push(product)
@@ -3274,20 +3531,42 @@ async function handleCSVUpload() {
         throw new Error("No se encontraron productos válidos en el CSV")
       }
 
-      showCSVStatus(`Procesando ${products.length} productos...`, "info")
+      showCSVStatus(`Procesando ${products.length} productos (Sincronizando)...`, "info")
 
-      // LIMPIAR PRODUCTOS EXISTENTES
-      const { error: deleteError } = await window.supabaseClient.from("products").delete().not("id", "is", null)
+      // OBTENER PRODUCTOS EXISTENTES PARA SINCRONIZACIÓN
+      const { data: existingProducts, error: fetchError } = await window.supabaseClient
+        .from("products")
+        .select("id, codigo, nombre")
+      
+      if (fetchError) throw new Error("Error al obtener productos existentes: " + fetchError.message)
 
-      if (deleteError) {
-        console.error("Error al limpiar productos existentes:", deleteError)
-        throw new Error("Error al limpiar productos existentes")
+      const existingMap = new Map()
+      existingProducts.forEach(p => {
+          const key = (p.codigo || p.nombre).toLowerCase().trim()
+          existingMap.set(key, p.id)
+      })
+
+      const processedIds = new Set()
+      const productsToUpsert = products.map(p => {
+          const key = (p.codigo || p.nombre).toLowerCase().trim()
+          const existingId = existingMap.get(key)
+          if (existingId) {
+              p.id = existingId
+              processedIds.add(existingId)
+          }
+          return p
+      })
+
+      // MARCAR COMO AGOTADOS (STOCK 0) LOS QUE NO ESTÁN EN EL CSV
+      const missingIds = existingProducts.map(p => p.id).filter(id => !processedIds.has(id))
+      
+      if (missingIds.length > 0) {
+          await window.supabaseClient.from("products").update({ stock: 0 }).in("id", missingIds)
+          console.log(`[CSV] 📉 ${missingIds.length} productos faltantes marcados con stock 0`)
       }
 
-      console.log("[CSV] ✅ Productos anteriores eliminados")
-
-      // INSERTAR NUEVOS PRODUCTOS
-      const { data: insertedProducts, error } = await window.supabaseClient.from("products").insert(products).select()
+      // UPSERT DE PRODUCTOS DEL CSV (Actualizar existentes o Insertar nuevos)
+      const { data: insertedProducts, error } = await window.supabaseClient.from("products").upsert(productsToUpsert).select()
 
       if (error) throw error
 
@@ -4007,27 +4286,85 @@ function initInventoryRole() {
     });
 
     // Buscador Global Inventario
+    let searchTimeout;
     document.getElementById('inventory-global-search').addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase();
+        const query = e.target.value.trim().toLowerCase();
         const container = document.getElementById('inventory-search-results');
-        if(query.length < 2) { container.innerHTML = ''; return; }
-        
-        const results = allProducts.filter(p => 
-            p.nombre.toLowerCase().includes(query) || 
-            (p.codigo && p.codigo.toLowerCase().includes(query))
-        ).slice(0, 12);
 
-        container.innerHTML = results.map(p => `
-            <div class="bg-white p-3 rounded-lg shadow border flex gap-3">
-                <img src="${optimizeImageUrl(p.imagen_url)}" class="w-16 h-16 object-cover rounded" onerror="this.src='/images/ProductImages.jpg'">
-                <div class="flex-1">
-                    <p class="font-bold text-sm">${p.nombre}</p>
-                    <p class="text-xs text-gray-500">${p.codigo || 'S/C'}</p>
-                    <p class="text-xs font-semibold mt-1">${p.departamento}</p>
-                    <p class="text-sm font-bold text-blue-600 mt-1">📦 Stock Sistema: ${p.stock || 0}</p>
-                </div>
-            </div>
-        `).join('');
+        clearTimeout(searchTimeout);
+
+        if (query.length < 2) {
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = `<div class="text-center py-5"><div class="loading-spinner mx-auto"></div></div>`;
+
+        searchTimeout = setTimeout(async () => {
+            try {
+                const { data, error } = await window.supabaseClient
+                    .from('inventory_products')
+                    .select('*')
+                    .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
+                    .not('existencia_actual', 'is', null)
+                    .gt('existencia_actual', 0) // Solo productos en stock
+                    .limit(50); // Traer más para filtrar en cliente
+
+                if (error) throw error;
+
+                if (!data || data.length === 0) {
+                    container.innerHTML = `<p class="text-center text-gray-500 py-5">No se encontraron productos en stock con ese criterio.</p>`;
+                    return;
+                }
+
+                // Filtrar productos que no existen en la tabla principal (allProducts)
+                // Esto evita mostrar productos "fantasmas" y asegura que tengan imagen
+                const validItems = data.filter(item => {
+                    const itemCode = String(item.codigo || '').trim().toUpperCase();
+                    return allProducts.some(p => String(p.codigo || '').trim().toUpperCase() === itemCode);
+                });
+
+                if (validItems.length === 0) {
+                    container.innerHTML = `<p class="text-center text-gray-500 py-5">Productos encontrados en inventario pero no en catálogo activo (o catálogo cargando).</p>`;
+                    return;
+                }
+
+                container.innerHTML = validItems.slice(0, 20).map(createInventorySearchResultCard).join('');
+
+            } catch (err) {
+                console.error("Error en búsqueda global de inventario:", err);
+                container.innerHTML = `<p class="text-center text-red-500 py-5">Error al realizar la búsqueda: ${err.message}</p>`;
+            }
+        }, 350);
+    });
+
+    // Event listener delegado para los botones de asignación en los resultados de búsqueda
+    document.getElementById('inventory-search-results').addEventListener('click', async (e) => {
+        if (e.target.classList.contains('deposito-assign-btn')) {
+            const id = e.target.dataset.productId;
+            const deposito = e.target.dataset.deposito;
+            const card = e.target.closest('.search-result-card');
+            const depositoSpan = card.querySelector('.deposito-value');
+
+            // Feedback visual inmediato
+            depositoSpan.textContent = '...';
+            
+            const { error } = await window.supabaseClient
+                .from('inventory_products')
+                .update({ deposito: deposito })
+                .eq('id', id);
+
+            if (error) {
+                console.error("Error al asignar depósito desde búsqueda:", error);
+                depositoSpan.textContent = 'Error';
+                depositoSpan.classList.add('text-red-500');
+            } else {
+                depositoSpan.textContent = deposito;
+                depositoSpan.classList.remove('text-red-500');
+                depositoSpan.classList.add('text-blue-600');
+                console.log(`Producto ${id} asignado al depósito ${deposito}`);
+            }
+        }
     });
 
     // Botón Exportar
@@ -4036,6 +4373,33 @@ function initInventoryRole() {
     // Carga inicial
     loadInventoryForAssignment();
 }
+
+function createInventorySearchResultCard(item) {
+    // Usamos el ID de la tabla inventory_products, no el de products
+    const productId = item.id; 
+    
+    // Normalizar códigos para búsqueda de imagen
+    const itemCode = String(item.codigo || '').trim().toUpperCase();
+    const productInCatalog = allProducts.find(p => String(p.codigo || '').trim().toUpperCase() === itemCode);
+    const imageUrl = productInCatalog?.imagen_url || '/images/ProductImages.jpg';
+
+    return `
+        <div class="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl shadow-sm flex flex-col sm:flex-row items-center gap-4 search-result-card">
+            <img src="${optimizeImageUrl(imageUrl)}" alt="Imagen del producto" class="w-16 h-16 object-cover rounded-lg flex-shrink-0 border bg-white" onerror="this.src='/images/ProductImages.jpg'">
+            <div class="flex-grow text-center sm:text-left">
+                <p class="font-semibold text-gray-800 dark:text-white">${item.descripcion}</p>
+                <p class="text-sm text-gray-500">Código: <code class="font-mono">${item.codigo}</code></p>
+                <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">Depósito Actual: <span class="font-semibold text-blue-600 deposito-value">${item.deposito || 'N/A'}</span></p>
+            </div>
+            <div class="flex flex-wrap gap-2 justify-center pt-2 sm:pt-0">
+                ${['A','B','C','D','E'].map(d => `
+                    <button class="deposito-assign-btn w-9 h-9 rounded-lg font-bold text-sm bg-gray-200 hover:bg-blue-500 hover:text-white transition-all" data-product-id="${productId}" data-deposito="${d}">${d}</button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
 
 async function loadInventoryForAssignment() {
     const list = document.getElementById('assign-list');
@@ -4058,6 +4422,7 @@ async function loadInventoryForAssignment() {
                 .from('inventory_products')
                 .select('*')
                 .is('deposito', null)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -4143,6 +4508,7 @@ async function loadInventoryForCounting(deposito) {
                 .from('inventory_products')
                 .select('*')
                 .eq('deposito', deposito)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
