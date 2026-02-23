@@ -64,6 +64,7 @@ const imageLoadState = {
 
 // Variable global para el estado de edición de inventario
 let inventoryEditMode = false;
+let inventoryShowStockMode = false; // NUEVO
 
 // ============================================
 // GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
@@ -1565,8 +1566,8 @@ function updateUIForRole() {
     manageBannersBtn?.classList.add("hidden")
   }
 
-  // Si es admin, cargar el estado del botón de bloqueo
-  if (window.currentUserRole === "admin") {
+  // Si es admin o inventario, cargar la configuración de inventario
+  if (window.currentUserRole === "admin" || window.currentUserRole === "inventario") {
     fetchInventoryConfig();
   }
 }
@@ -2373,8 +2374,12 @@ function createProductCard(product) {
   let stockBadge = ''
   const stock = product.stock || 0;
   
-  // Ocultar stock para rol inventario
-  if (window.currentUserRole !== 'inventario') {
+  // [MODIFICADO] Lógica de visibilidad de stock
+  // Por defecto, no se muestra. Se mostrará si el rol no es inventario,
+  // o si es inventario y el admin lo ha activado.
+  const showStock = window.currentUserRole !== 'inventario' || inventoryShowStockMode;
+
+  if (showStock) {
       if (stock === 0) {
         stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-black text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
       } else {
@@ -4225,6 +4230,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Evento para el botón de bloqueo de inventario
   document.getElementById("toggle-inventory-lock-btn")?.addEventListener("click", toggleInventoryConfig);
+
+  // NUEVO: Evento para el botón de visibilidad de stock en inventario
+  document.getElementById("toggle-inventory-stock-visibility-btn")?.addEventListener("click", toggleInventoryStockVisibility);
 })
 
 // ============================================
@@ -4670,7 +4678,7 @@ async function fetchInventoryConfig() {
         // Asumimos que el ID 1 es la configuración global
         const { data, error } = await window.supabaseClient
             .from('inventory_config')
-            .select('edit_enabled')
+            .select('edit_enabled, show_stock_enabled')
             .eq('id', 1)
             .single();
         
@@ -4678,12 +4686,17 @@ async function fetchInventoryConfig() {
             // Si falla (ej. tabla no existe), asumimos bloqueado por seguridad
             console.warn("No se pudo cargar config de inventario (posiblemente tabla no creada), usando defecto: BLOQUEADO");
             inventoryEditMode = false;
+            inventoryShowStockMode = false;
         } else {
             inventoryEditMode = data.edit_enabled;
+            inventoryShowStockMode = data.show_stock_enabled || false;
         }
         updateInventoryLockButtonUI();
+        updateInventoryStockVisibilityButtonUI();
     } catch (e) {
         console.error("Error fetching inventory config:", e);
+        inventoryEditMode = false;
+        inventoryShowStockMode = false;
     }
 }
 
@@ -4707,6 +4720,25 @@ async function toggleInventoryConfig() {
     }
 }
 
+async function toggleInventoryStockVisibility() {
+    const newStatus = !inventoryShowStockMode;
+    try {
+        const { error } = await window.supabaseClient
+            .from('inventory_config')
+            .upsert({ id: 1, show_stock_enabled: newStatus });
+        
+        if (error) throw error;
+        
+        inventoryShowStockMode = newStatus;
+        updateInventoryStockVisibilityButtonUI();
+        alert(`Visibilidad de stock para Inventario: ${inventoryShowStockMode ? 'ACTIVADO (Pueden ver stock)' : 'DESACTIVADO (No pueden ver stock)'}`);
+        
+    } catch (e) {
+        console.error(e);
+        alert("Error actualizando configuración. Error: " + e.message);
+    }
+}
+
 function updateInventoryLockButtonUI() {
     const btn = document.getElementById('toggle-inventory-lock-btn');
     if(!btn) return;
@@ -4719,5 +4751,20 @@ function updateInventoryLockButtonUI() {
         btn.classList.remove('from-green-600', 'to-green-700');
         btn.classList.add('from-gray-600', 'to-gray-700');
         span.textContent = '🔒 Edición Inventario: BLOQUEADA';
+    }
+}
+
+function updateInventoryStockVisibilityButtonUI() {
+    const btn = document.getElementById('toggle-inventory-stock-visibility-btn');
+    if(!btn) return;
+    const span = btn.querySelector('span');
+    if (inventoryShowStockMode) {
+        btn.classList.remove('from-gray-600', 'to-gray-700');
+        btn.classList.add('from-blue-600', 'to-blue-700');
+        span.textContent = '👁️ Ver Stock (Inv): ACTIVO';
+    } else {
+        btn.classList.remove('from-blue-600', 'to-blue-700');
+        btn.classList.add('from-gray-600', 'to-gray-700');
+        span.textContent = '👁️ Ver Stock (Inv): BLOQUEADO';
     }
 }
