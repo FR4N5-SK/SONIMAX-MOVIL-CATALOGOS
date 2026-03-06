@@ -1894,14 +1894,14 @@ async function loadProducts() {
 
     allProducts = []
     let start = 0
-  const batchSize = 1000
+    const batchSize = 500
     let hasMore = true
 
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
         .select("*")
-      .order("nombre", { ascending: true }) // El orden principal se aplica en cliente (stock), este es el secundario.
+        .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
       if (error) throw error
@@ -1923,21 +1923,6 @@ async function loadProducts() {
     // Los productos ya vienen con is_new desde Supabase
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
-
-    // Ordenar productos: Agotados (stock: 0) al final, manteniendo el orden alfabético.
-    allProducts.sort((a, b) => {
-      const a_outOfStock = (a.stock || 0) === 0;
-      const b_outOfStock = (b.stock || 0) === 0;
-
-      if (a_outOfStock && !b_outOfStock) {
-        return 1; // 'a' (agotado) va después de 'b' (en stock)
-      }
-      if (!a_outOfStock && b_outOfStock) {
-        return -1; // 'a' (en stock) va antes de 'b' (agotado)
-      }
-      // Si ambos tienen el mismo estado de stock, se respeta el orden alfabético por nombre que ya viene de la BD.
-      return (a.nombre || '').localeCompare(b.nombre || '');
-    });
 
     // [NUEVO] Inicializar Fuse.js para búsqueda difusa
     const fuseOptions = {
@@ -2230,7 +2215,7 @@ function filterByDepartment(dept, keepSearch = false) {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
       console.log("[SALES-DB] Primer item de sales:", salesData[0])
       console.log("[SALES-DB] Primer producto en allProducts:", allProducts[0])
- 
+
       filteredProducts = salesData
         .map((sale) => {
           // Try to find using both possible field names
@@ -2244,21 +2229,9 @@ function filterByDepartment(dept, keepSearch = false) {
           return fullProduct ? { ...fullProduct, total_sold: sale.total_sold } : null
         })
         .filter((p) => p !== null)
- 
-      // Ordenar los más vendidos para que los agotados aparezcan al final
-      filteredProducts.sort((a, b) => {
-        const a_outOfStock = (a.stock || 0) === 0;
-        const b_outOfStock = (b.stock || 0) === 0;
- 
-        if (a_outOfStock && !b_outOfStock) return 1;
-        if (!a_outOfStock && b_outOfStock) return -1;
- 
-        // Si el estado de stock es el mismo, mantener el orden por más vendidos
-        return (b.total_sold || 0) - (a.total_sold || 0);
-      });
- 
+
       filteredProducts = filteredProducts.filter(priceFilter);
- 
+
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
       renderProducts()
@@ -3382,21 +3355,7 @@ function handleGlobalSearch(e) {
     } else {
         // [NUEVO] Formatear query para búsqueda extendida (multi-palabra)
         const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
-        let searchResults = fuse.search(formattedQuery);
-
-        // Ordenar resultados para poner agotados al final, manteniendo la relevancia de la búsqueda
-        searchResults.sort((a, b) => {
-            const a_outOfStock = (a.item.stock || 0) === 0;
-            const b_outOfStock = (b.item.stock || 0) === 0;
-
-            if (a_outOfStock && !b_outOfStock) return 1;
-            if (!a_outOfStock && b_outOfStock) return -1;
-
-            // Si el estado de stock es el mismo, se mantiene el orden por relevancia de Fuse
-            return a.score - b.score;
-        });
-
-        filteredProducts = searchResults.map(result => result.item);
+        filteredProducts = fuse.search(formattedQuery).map(result => result.item);
     }
 
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda global
@@ -3449,26 +3408,12 @@ function handleDeptSearch(e) {
     // [MODIFICADO] Usar Fuse.js para búsqueda difusa en departamento
     const deptFuse = new Fuse(productsInDept, {
         keys: ['nombre', 'codigo', 'descripcion'],
-        includeScore: true,
         threshold: 0.4,
         ignoreLocation: true,
         useExtendedSearch: true,
     });
     const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
-    let searchResults = deptFuse.search(formattedQuery);
-
-    // Ordenar resultados para poner agotados al final, manteniendo la relevancia de la búsqueda
-    searchResults.sort((a, b) => {
-        const a_outOfStock = (a.item.stock || 0) === 0;
-        const b_outOfStock = (b.item.stock || 0) === 0;
-
-        if (a_outOfStock && !b_outOfStock) return 1;
-        if (!a_outOfStock && b_outOfStock) return -1;
-
-        // Si el estado de stock es el mismo, se mantiene el orden por relevancia de Fuse
-        return a.score - b.score;
-    });
-    filteredProducts = searchResults.map(result => result.item);
+    filteredProducts = deptFuse.search(formattedQuery).map(result => result.item);
 
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda por departamento
     if (window.currentUserRole === 'inventario') {
@@ -4077,10 +4022,10 @@ async function cleanDuplicateProducts() {
     // Obtener TODOS los productos con paginación (igual que loadProducts)
     let allProducts = []
     let start = 0
-    const batchSize = 1000
+    const batchSize = 500
     let hasMore = true
 
-    console.log(`[CLEAN-DUPLICATES] Obteniendo productos de BD en lotes de ${batchSize}...`)
+    console.log('[CLEAN-DUPLICATES] Obteniendo productos de BD en lotes de 500...')
     
     while (hasMore) {
       console.log(`[CLEAN-DUPLICATES] Cargando productos desde ${start} a ${start + batchSize - 1}...`)
