@@ -1164,28 +1164,26 @@
                     }
                 };
         
-                // [CORREGIDO] Función para ocultar productos SLD. El ordenamiento ahora se hace en app.js
+                // [NUEVO] Función para ocultar productos SLD de los resultados de búsqueda/grid
                 const setupProductGridObserver = () => {
                     const productsGrid = document.getElementById('products-grid');
                     if (!productsGrid) return;
- 
+
                     const observer = new MutationObserver((mutations) => {
                         const userRole = window.currentUserRole;
                         // Si es admin, permitimos ver todo. Si no, filtramos.
                         if (userRole === 'admin') return;
- 
+
                         mutations.forEach((mutation) => {
                             mutation.addedNodes.forEach((node) => {
                                 // Si el nodo agregado (tarjeta de producto) contiene "SLD", lo ocultamos.
-                                if (node.nodeType === 1) {
-                                    if (userRole !== 'admin' && node.textContent.toUpperCase().includes('SLD')) {
-                                        node.style.display = 'none';
-                                    }
+                                if (node.nodeType === 1 && node.textContent.toUpperCase().includes('SLD')) {
+                                    node.style.display = 'none';
                                 }
                             });
                         });
                     });
- 
+
                     observer.observe(productsGrid, { childList: true });
                 };
 
