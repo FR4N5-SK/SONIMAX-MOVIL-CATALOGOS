@@ -292,6 +292,28 @@ async function getBestSellingProducts(limit = 20) {
   }
 }
 
+// [NUEVO] Función para ordenar productos: disponibles primero, agotados al final.
+function sortProductsByStock(products) {
+    if (!Array.isArray(products)) return [];
+    
+    // Usamos una separación para garantizar un ordenamiento estable.
+    const inStock = [];
+    const outOfStock = [];
+
+    products.forEach(p => {
+        // Un producto está agotado si su stock es 0 o nulo.
+        if ((p.stock || 0) > 0) {
+            inStock.push(p);
+        } else {
+            outOfStock.push(p);
+        }
+    });
+
+    // Los sub-arrays mantienen su orden original (alfabético por la consulta a la BD).
+    // Simplemente los concatenamos para tener los agotados al final.
+    return [...inStock, ...outOfStock];
+}
+
 // Function to fetch all products
 async function fetchAllProducts() {
   try {
@@ -1304,6 +1326,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   setupEventListeners()
+
+  // [NUEVO] Manejador de estado de autenticación para robustez
+  // Esto soluciona los errores de "Invalid Refresh Token" al manejar correctamente los cierres de sesión.
+  window.supabaseClient.auth.onAuthStateChange((event, session) => {
+    console.log('[AUTH] El estado de la sesión cambió:', event);
+    if (event === 'SIGNED_OUT') {
+        // Limpieza completa cuando el usuario cierra sesión o el token expira.
+        currentUser = null;
+        window.currentUserRole = null;
+        cart = [];
+        // Limpiar todo el almacenamiento local específico de la app
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('sonimax_')) {
+                localStorage.removeItem(key);
+            }
+        });
+        showLogin();
+    } else if (event === 'INITIAL_SESSION' && session) {
+        // Si hay una sesión al cargar, nos aseguramos de que los datos del usuario estén cargados.
+        // Esto es redundante con el código de arriba, pero es una buena práctica.
+        if (!currentUser) loadUserData(session.user.id);
+    }
+  });
 })
 
 document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -1980,6 +2025,9 @@ async function loadProducts() {
     filteredProducts = allProducts
     currentPage = 1
 
+    // [CORREGIDO] Ordenar productos en la carga inicial para que los agotados siempre salgan de último.
+    filteredProducts = sortProductsByStock(filteredProducts);
+
     console.log("Renderizando departamentos...")
     renderDepartments()
 
@@ -2214,6 +2262,9 @@ function filterByDepartment(dept, keepSearch = false) {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
       console.log("[SALES-DB] Primer item de sales:", salesData[0])
+
+      // [MODIFICADO] Ordenar para poner agotados al final
+      filteredProducts = sortProductsByStock(filteredProducts);
       console.log("[SALES-DB] Primer producto en allProducts:", allProducts[0])
 
       filteredProducts = salesData
@@ -2232,6 +2283,9 @@ function filterByDepartment(dept, keepSearch = false) {
 
       filteredProducts = filteredProducts.filter(priceFilter);
 
+      // [MODIFICADO] Ordenar para poner agotados al final
+      filteredProducts = sortProductsByStock(filteredProducts);
+
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
       renderProducts()
@@ -2241,6 +2295,9 @@ function filterByDepartment(dept, keepSearch = false) {
   } else {
     filteredProducts = baseProducts.filter((p) => p.departamento === dept && priceFilter(p));
   }
+
+  // [MODIFICADO] Ordenar para poner agotados al final
+  filteredProducts = sortProductsByStock(filteredProducts);
 
   currentPage = 1
   renderProducts()
@@ -3358,6 +3415,9 @@ function handleGlobalSearch(e) {
         filteredProducts = fuse.search(formattedQuery).map(result => result.item);
     }
 
+    // [MODIFICADO] Ordenar para poner agotados al final
+    filteredProducts = sortProductsByStock(filteredProducts);
+
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda global
     if (window.currentUserRole === 'inventario') {
         filteredProducts = filteredProducts.filter(p => (p.stock || 0) > 0);
@@ -3414,6 +3474,9 @@ function handleDeptSearch(e) {
     });
     const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
     filteredProducts = deptFuse.search(formattedQuery).map(result => result.item);
+
+    // [MODIFICADO] Ordenar para poner agotados al final
+    filteredProducts = sortProductsByStock(filteredProducts);
 
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda por departamento
     if (window.currentUserRole === 'inventario') {
