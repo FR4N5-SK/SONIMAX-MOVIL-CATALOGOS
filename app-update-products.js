@@ -705,7 +705,6 @@
               const { data: batch, error: batchErr } = await supabaseClient
                 .from('products')
                 .select('*')
-                .order('nombre', { ascending: true })
                 .range(p * pSize, (p + 1) * pSize - 1);
 
               if (batchErr) throw batchErr;
@@ -720,23 +719,9 @@
             }
 
             if (allUpdatedProducts.length > 0) {
-              // Ordenar productos: Agotados (stock: 0) al final, manteniendo el orden alfabético.
-              allUpdatedProducts.sort((a, b) => {
-                const a_outOfStock = (a.stock || 0) === 0;
-                const b_outOfStock = (b.stock || 0) === 0;
-
-                if (a_outOfStock && !b_outOfStock) {
-                  return 1;
-                }
-                if (!a_outOfStock && b_outOfStock) {
-                  return -1;
-                }
-                return (a.nombre || '').localeCompare(b.nombre || '');
-              });
-
               window.allProducts = allUpdatedProducts;
               if (window.renderProducts) window.renderProducts();
-              console.log(`[UPDATE-PROCESS] Inventario recargado y ordenado: ${allUpdatedProducts.length} productos.`);
+              console.log(`[UPDATE-PROCESS] Inventario recargado: ${allUpdatedProducts.length} productos.`);
             }
           } catch (err) {
             console.error('[UPDATE-PROCESS] Error recargando inventario:', err);
