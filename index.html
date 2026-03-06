@@ -1164,27 +1164,131 @@
                     }
                 };
         
-                // [NUEVO] Función para ocultar productos SLD de los resultados de búsqueda/grid
+                // [MODIFICADO] Función para ocultar productos SLD y ORDENAR productos (Agotados al final)
                 const setupProductGridObserver = () => {
                     const productsGrid = document.getElementById('products-grid');
                     if (!productsGrid) return;
 
+                    // Función para ordenar productos: Disponibles primero, Agotados al final
+                    const sortProducts = () => {
+                        const cards = Array.from(productsGrid.children);
+                        if (cards.length === 0) return;
+
+                        const available = [];
+                        const exhausted = [];
+
+                        cards.forEach(card => {
+                            const text = card.textContent.toUpperCase();
+                            // Criterios para identificar agotados: Texto "AGOTADO", "STOCK: 0" o "EXISTENCIA: 0"
+                            if (text.includes('AGOTADO') || text.includes('STOCK: 0') || text.includes('EXISTENCIA: 0')) {
+                                exhausted.push(card);
+                            } else {
+                                available.push(card);
+                            }
+                        });
+
+                        // Reordenar en el DOM: Primero disponibles, luego agotados
+                        // Nota: appendChild mueve el nodo si ya existe
+                        available.forEach(c => productsGrid.appendChild(c));
+                        exhausted.forEach(c => productsGrid.appendChild(c));
+                    };
+
+                    let sortTimeout;
                     const observer = new MutationObserver((mutations) => {
                         const userRole = window.currentUserRole;
-                        // Si es admin, permitimos ver todo. Si no, filtramos.
-                        if (userRole === 'admin') return;
+                        let shouldSort = false;
 
                         mutations.forEach((mutation) => {
                             mutation.addedNodes.forEach((node) => {
-                                // Si el nodo agregado (tarjeta de producto) contiene "SLD", lo ocultamos.
-                                if (node.nodeType === 1 && node.textContent.toUpperCase().includes('SLD')) {
-                                    node.style.display = 'none';
+                                if (node.nodeType === 1) {
+                                    // Filtrado SLD (Solo si no es admin)
+                                    if (userRole !== 'admin' && node.textContent.toUpperCase().includes('SLD')) {
+                                        node.style.display = 'none';
+                                    }
+                                    // Marcar para ordenar
+                                    shouldSort = true;
                                 }
                             });
                         });
+
+                        if (shouldSort) {
+                            // Usamos debounce para evitar múltiples ordenamientos seguidos y bucles
+                            clearTimeout(sortTimeout);
+                            sortTimeout = setTimeout(() => {
+                                observer.disconnect(); // Pausar observador para evitar bucle infinito al mover nodos
+                                sortProducts();
+                                observer.observe(productsGrid, { childList: true }); // Reanudar observador
+                            }, 100);
+                        }
                     });
 
                     observer.observe(productsGrid, { childList: true });
+                };
+
+                // [NUEVO] Sincronización de Carrito en la Nube (Supabase)
+                const initCloudCart = () => {
+                    // 1. Interceptar guardado local para sincronizar con la nube
+                    const originalSetItem = localStorage.setItem;
+                    localStorage.setItem = function(key, value) {
+                        originalSetItem.apply(this, arguments);
+                        
+                        // Si se modifica el carrito ('cart' es la clave usual)
+                        if (key === 'cart') {
+                            // Intentar obtener usuario actual (ajustar clave según implementación real)
+                            const userStr = localStorage.getItem('sb-user') || localStorage.getItem('user') || localStorage.getItem('currentUser');
+                            if (userStr && window.supabase) {
+                                try {
+                                    const user = JSON.parse(userStr);
+                                    // Solo guardar si hay ID de usuario y Supabase está activo
+                                    if (user && user.id) {
+                                        // Guardar en tabla 'user_carts'. NOTA: Esta tabla debe existir en Supabase.
+                                        window.supabase
+                                            .from('user_carts')
+                                            .upsert({ user_id: user.id, cart_data: JSON.parse(value), updated_at: new Date() }, { onConflict: 'user_id' })
+                                            .then(({ error }) => {
+                                                if (error) console.error('Error sincronizando carrito:', error);
+                                            });
+                                    }
+                                } catch (e) { console.error('Error en sync cart:', e); }
+                            }
+                        }
+                    };
+
+                    // 2. Cargar carrito de la nube al iniciar (si hay usuario)
+                    const loadCloudCart = async () => {
+                        const userStr = localStorage.getItem('sb-user') || localStorage.getItem('user') || localStorage.getItem('currentUser');
+                        if (userStr && window.supabase) {
+                            try {
+                                const user = JSON.parse(userStr);
+                                if (user && user.id) {
+                                    const { data, error } = await window.supabase
+                                        .from('user_carts')
+                                        .select('cart_data')
+                                        .eq('user_id', user.id)
+                                        .single();
+                                    
+                                    if (data && data.cart_data) {
+                                        const cloudCartStr = JSON.stringify(data.cart_data);
+                                        const localCartStr = localStorage.getItem('cart');
+                                        
+                                        // Si el carrito de la nube es diferente al local, actualizar local
+                                        if (cloudCartStr !== localCartStr) {
+                                            console.log('Sincronizando carrito desde la nube...');
+                                            localStorage.setItem('cart', cloudCartStr);
+                                            // Recargar página para reflejar cambios (solución simple ya que no tenemos acceso a app.js)
+                                            // Opcional: Solo recargar si el carrito estaba vacío o es muy diferente
+                                            if (!localCartStr || localCartStr === '[]') {
+                                                location.reload();
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) { console.error('Error cargando carrito nube:', e); }
+                        }
+                    };
+
+                    // Ejecutar carga inicial
+                    loadCloudCart();
                 };
 
                 // Esta función se llamará para configurar la lógica de observación.
@@ -1229,6 +1333,7 @@
                             if (mutation.attributeName === 'class' && !appScreen.classList.contains('hidden')) {
                                 setupDepartmentObserver();
                                 setupProductGridObserver(); // [NUEVO] Iniciar observador de productos
+                                initCloudCart(); // [NUEVO] Iniciar sincronización de carrito
                                 // Una vez que hemos configurado nuestros observadores, ya no necesitamos observar la pantalla de la app.
                                 appObserver.disconnect();
                                 return;
