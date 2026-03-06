@@ -1189,93 +1189,6 @@
                     observer.observe(productsGrid, { childList: true });
                 };
 
-                // [CORREGIDO] Sincronización de Carrito en la Nube (Supabase) - Versión robusta
-                let isSyncingFromCloud = false; // Flag para evitar bucles de sincronización
-
-                const initCloudCart = () => {
-                    // 1. Cargar el carrito de la nube al iniciar sesión
-                    loadCloudCart();
-
-                    // 2. Interceptar guardado local para sincronizar con la nube
-                    const originalSetItem = localStorage.setItem;
-                    localStorage.setItem = function(key, value) {
-                        originalSetItem.apply(this, arguments);
-                        
-                        if (isSyncingFromCloud) {
-                            // Si el cambio viene de la nube, no lo volvemos a subir.
-                            return;
-                        }
-
-                        // La app guarda el carrito en una clave como 'sonimax_cart_USER_ID'
-                        if (key.startsWith('sonimax_cart_') && window.supabaseClient) {
-                            const currentUser = window.currentUser;
-                            if (currentUser && currentUser.auth_id) {
-                                try {
-                                    const cartData = JSON.parse(value);
-                                    window.supabaseClient
-                                        .from('user_carts')
-                                        .upsert({ 
-                                            user_id: currentUser.auth_id, 
-                                            cart_data: cartData, 
-                                            updated_at: new Date().toISOString() 
-                                        })
-                                        .then(({ error }) => {
-                                            if (error) console.error('Error sincronizando carrito a la nube:', error);
-                                            else console.log('🛒 Carrito sincronizado a la nube.');
-                                        });
-                                } catch (e) { 
-                                    console.error('Error al parsear carrito para sincronización:', e); 
-                                }
-                            }
-                        }
-                    };
-                };
-
-                const loadCloudCart = async () => {
-                    const currentUser = window.currentUser;
-                    if (!currentUser || !currentUser.auth_id || !window.supabaseClient) {
-                        console.log("No hay usuario para sincronizar carrito desde la nube.");
-                        return;
-                    }
-
-                    try {
-                        const { data: cloudData, error } = await window.supabaseClient
-                            .from('user_carts')
-                            .select('cart_data')
-                            .eq('user_id', currentUser.auth_id)
-                            .single();
-
-                        // Si hay un error que no sea "no se encontró fila", lo mostramos.
-                        if (error && error.code !== 'PGRST116') {
-                            console.error('Error cargando carrito de la nube:', error);
-                            return;
-                        }
-
-                        if (cloudData && cloudData.cart_data) {
-                            const cartKey = `sonimax_cart_${currentUser.auth_id}`;
-                            const localCartStr = localStorage.getItem(cartKey) || '[]';
-                            const cloudCartStr = JSON.stringify(cloudData.cart_data);
-
-                            if (cloudCartStr !== localCartStr) {
-                                console.log('☁️ Sincronizando carrito desde la nube...');
-                                isSyncingFromCloud = true;
-                                localStorage.setItem(cartKey, cloudCartStr); // Esto usa el override, pero el flag lo detiene
-                                isSyncingFromCloud = false;
-
-                                // Actualizar el estado de la app en memoria y la UI
-                                window.cart = cloudData.cart_data;
-                                window.updateCartCount();
-                                if (!document.getElementById('cart-modal').classList.contains('hidden')) {
-                                    window.renderCart();
-                                }
-                                console.log('✅ Carrito local actualizado desde la nube.');
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Error en la lógica de carga del carrito de la nube:', e);
-                    }
-                };
-
                 // Esta función se llamará para configurar la lógica de observación.
                 const setupDepartmentObserver = () => {
                     try {
@@ -1318,7 +1231,6 @@
                             if (mutation.attributeName === 'class' && !appScreen.classList.contains('hidden')) {
                                 setupDepartmentObserver();
                                 setupProductGridObserver(); // [NUEVO] Iniciar observador de productos
-                                initCloudCart(); // [NUEVO] Iniciar sincronización de carrito
                                 // Una vez que hemos configurado nuestros observadores, ya no necesitamos observar la pantalla de la app.
                                 appObserver.disconnect();
                                 return;
