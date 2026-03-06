@@ -25,7 +25,6 @@ let filteredProducts = []
 let inventoryDataMap = new Map(); // [NUEVO] Mapa para datos de inventario (codigo -> datos)
 let cart = []
 let favorites = [] // [NUEVO] Para sistema de favoritos
-let isSyncingFromCloud = false; // [NUEVO] Flag para sincronización de carrito
 let priceSnapshotMap = new Map(); // [NUEVO] Para comparación de precios
 let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
@@ -291,103 +290,6 @@ async function getBestSellingProducts(limit = 20) {
     console.error("[SALES-DB] ❌ Error inesperado:", error.message)
     return []
   }
-}
-
-// [NUEVO] Sincronización de Carrito en la Nube (Supabase)
-async function loadCloudCart() {
-    if (!currentUser || !currentUser.auth_id || !window.supabaseClient) {
-        console.log("No hay usuario para sincronizar carrito desde la nube.");
-        return;
-    }
-
-    try {
-        const { data: cloudData, error } = await window.supabaseClient
-            .from('user_carts')
-            .select('cart_data')
-            .eq('user_id', currentUser.auth_id)
-            .single();
-
-        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
-            console.error('Error cargando carrito de la nube:', error);
-            return;
-        }
-
-        const cartKey = `sonimax_cart_${currentUser.auth_id}`;
-        const localCartStr = localStorage.getItem(cartKey) || '[]';
-
-        if (cloudData && cloudData.cart_data) {
-            const cloudCartStr = JSON.stringify(cloudData.cart_data);
-
-            if (cloudCartStr !== localCartStr) {
-                console.log('☁️ Sincronizando carrito desde la nube...');
-                isSyncingFromCloud = true;
-                localStorage.setItem(cartKey, cloudCartStr);
-                isSyncingFromCloud = false;
-
-                // Actualizar estado de la app en memoria y la UI
-                cart = cloudData.cart_data;
-                updateCartCount();
-                if (document.getElementById('cart-modal') && !document.getElementById('cart-modal').classList.contains('hidden')) {
-                    renderCart();
-                }
-                console.log('✅ Carrito local actualizado desde la nube.');
-            }
-        }
-    } catch (e) {
-        console.error('Error en la lógica de carga del carrito de la nube:', e);
-    }
-}
-
-function initCloudCart() {
-    const originalSetItem = localStorage.setItem;
-    localStorage.setItem = function(key, value) {
-        originalSetItem.apply(this, arguments);
-        
-        if (isSyncingFromCloud) {
-            return;
-        }
-
-        if (key.startsWith('sonimax_cart_') && window.supabaseClient && currentUser) {
-            try {
-                const cartData = JSON.parse(value);
-                window.supabaseClient
-                    .from('user_carts')
-                    .upsert({ 
-                        user_id: currentUser.auth_id, 
-                        cart_data: cartData, 
-                        updated_at: new Date().toISOString() 
-                    })
-                    .then(({ error }) => {
-                        if (error) console.error('Error sincronizando carrito a la nube:', error);
-                        else console.log('🛒 Carrito sincronizado a la nube.');
-                    });
-            } catch (e) { 
-                console.error('Error al parsear carrito para sincronización:', e); 
-            }
-        }
-    };
-}
-
-// [NUEVO] Función para ordenar productos: disponibles primero, agotados al final.
-function sortProductsByStock(products) {
-    if (!Array.isArray(products)) return [];
-    
-    // Usamos una separación para garantizar un ordenamiento estable.
-    const inStock = [];
-    const outOfStock = [];
-
-    products.forEach(p => {
-        // Un producto está agotado si su stock es 0 o nulo.
-        if ((p.stock || 0) > 0) {
-            inStock.push(p);
-        } else {
-            outOfStock.push(p);
-        }
-    });
-
-    // Los sub-arrays mantienen su orden original (alfabético por la consulta a la BD).
-    // Simplemente los concatenamos para tener los agotados al final.
-    return [...inStock, ...outOfStock];
 }
 
 // Function to fetch all products
@@ -1378,38 +1280,30 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await registerServiceWorker()
 
-  initImageObserver();
-  initCloudCart(); // [NUEVO] Iniciar interceptor de carrito
+  initImageObserver()
+
+  const {
+    data: { session },
+  } = await window.supabaseClient.auth.getSession()
+
+  if (session) {
+    console.log("✅ Sesión activa encontrada")
+    await loadUserData(session.user.id)
+    loadCartFromStorage()
+    showApp()
+    loadBanners()
+  } else {
+    // [NUEVO] Limpiar datos de sesión anterior al cerrar sesión
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sonimax_')) {
+            localStorage.removeItem(key);
+        }
+    });
+    console.log("ℹ️ No hay sesión activa")
+    showLogin()
+  }
 
   setupEventListeners()
-
-  // [MODIFICADO] onAuthStateChange ahora maneja toda la lógica de sesión para mayor robustez.
-  window.supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    console.log('[AUTH] El estado de la sesión cambió:', event);
-    
-    if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
-        console.log("✅ Sesión activa o iniciada.");
-        await loadUserData(session.user.id);
-        loadCartFromStorage(); // Carga el carrito local primero
-        await loadCloudCart(); // Intenta sincronizar desde la nube
-        showApp();
-        loadBanners();
-    } else if (event === 'SIGNED_OUT') {
-        console.log("ℹ️ Sesión cerrada.");
-        currentUser = null;
-        window.currentUserRole = null;
-        cart = [];
-        Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('sonimax_')) {
-                localStorage.removeItem(key);
-            }
-        });
-        showLogin();
-    } else if (event === 'INITIAL_SESSION' && !session) {
-        console.log("ℹ️ No hay sesión activa inicial.");
-        showLogin();
-    }
-  });
 })
 
 document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -2000,14 +1894,14 @@ async function loadProducts() {
 
     allProducts = []
     let start = 0
-    const batchSize = 500
+  const batchSize = 1000
     let hasMore = true
 
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
         .select("*")
-        .order("nombre", { ascending: true })
+      .order("nombre", { ascending: true }) // El orden principal se aplica en cliente (stock), este es el secundario.
         .range(start, start + batchSize - 1)
 
       if (error) throw error
@@ -2029,6 +1923,21 @@ async function loadProducts() {
     // Los productos ya vienen con is_new desde Supabase
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
+
+    // Ordenar productos: Agotados (stock: 0) al final, manteniendo el orden alfabético.
+    allProducts.sort((a, b) => {
+      const a_outOfStock = (a.stock || 0) === 0;
+      const b_outOfStock = (b.stock || 0) === 0;
+
+      if (a_outOfStock && !b_outOfStock) {
+        return 1; // 'a' (agotado) va después de 'b' (en stock)
+      }
+      if (!a_outOfStock && b_outOfStock) {
+        return -1; // 'a' (en stock) va antes de 'b' (agotado)
+      }
+      // Si ambos tienen el mismo estado de stock, se respeta el orden alfabético por nombre que ya viene de la BD.
+      return (a.nombre || '').localeCompare(b.nombre || '');
+    });
 
     // [NUEVO] Inicializar Fuse.js para búsqueda difusa
     const fuseOptions = {
@@ -2085,9 +1994,6 @@ async function loadProducts() {
 
     filteredProducts = allProducts
     currentPage = 1
-
-    // [CORREGIDO] Ordenar productos en la carga inicial para que los agotados siempre salgan de último.
-    filteredProducts = sortProductsByStock(filteredProducts);
 
     console.log("Renderizando departamentos...")
     renderDepartments()
@@ -2323,11 +2229,8 @@ function filterByDepartment(dept, keepSearch = false) {
     getBestSellingProducts().then((salesData) => {
       console.log("[SALES-DB] Intentando mapear ", salesData.length, " productos")
       console.log("[SALES-DB] Primer item de sales:", salesData[0])
-
-      // [MODIFICADO] Ordenar para poner agotados al final
-      filteredProducts = sortProductsByStock(filteredProducts);
       console.log("[SALES-DB] Primer producto en allProducts:", allProducts[0])
-
+ 
       filteredProducts = salesData
         .map((sale) => {
           // Try to find using both possible field names
@@ -2341,12 +2244,21 @@ function filterByDepartment(dept, keepSearch = false) {
           return fullProduct ? { ...fullProduct, total_sold: sale.total_sold } : null
         })
         .filter((p) => p !== null)
-
+ 
+      // Ordenar los más vendidos para que los agotados aparezcan al final
+      filteredProducts.sort((a, b) => {
+        const a_outOfStock = (a.stock || 0) === 0;
+        const b_outOfStock = (b.stock || 0) === 0;
+ 
+        if (a_outOfStock && !b_outOfStock) return 1;
+        if (!a_outOfStock && b_outOfStock) return -1;
+ 
+        // Si el estado de stock es el mismo, mantener el orden por más vendidos
+        return (b.total_sold || 0) - (a.total_sold || 0);
+      });
+ 
       filteredProducts = filteredProducts.filter(priceFilter);
-
-      // [MODIFICADO] Ordenar para poner agotados al final
-      filteredProducts = sortProductsByStock(filteredProducts);
-
+ 
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
       renderProducts()
@@ -2356,9 +2268,6 @@ function filterByDepartment(dept, keepSearch = false) {
   } else {
     filteredProducts = baseProducts.filter((p) => p.departamento === dept && priceFilter(p));
   }
-
-  // [MODIFICADO] Ordenar para poner agotados al final
-  filteredProducts = sortProductsByStock(filteredProducts);
 
   currentPage = 1
   renderProducts()
@@ -3473,11 +3382,22 @@ function handleGlobalSearch(e) {
     } else {
         // [NUEVO] Formatear query para búsqueda extendida (multi-palabra)
         const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
-        filteredProducts = fuse.search(formattedQuery).map(result => result.item);
-    }
+        let searchResults = fuse.search(formattedQuery);
 
-    // [MODIFICADO] Ordenar para poner agotados al final
-    filteredProducts = sortProductsByStock(filteredProducts);
+        // Ordenar resultados para poner agotados al final, manteniendo la relevancia de la búsqueda
+        searchResults.sort((a, b) => {
+            const a_outOfStock = (a.item.stock || 0) === 0;
+            const b_outOfStock = (b.item.stock || 0) === 0;
+
+            if (a_outOfStock && !b_outOfStock) return 1;
+            if (!a_outOfStock && b_outOfStock) return -1;
+
+            // Si el estado de stock es el mismo, se mantiene el orden por relevancia de Fuse
+            return a.score - b.score;
+        });
+
+        filteredProducts = searchResults.map(result => result.item);
+    }
 
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda global
     if (window.currentUserRole === 'inventario') {
@@ -3529,15 +3449,26 @@ function handleDeptSearch(e) {
     // [MODIFICADO] Usar Fuse.js para búsqueda difusa en departamento
     const deptFuse = new Fuse(productsInDept, {
         keys: ['nombre', 'codigo', 'descripcion'],
+        includeScore: true,
         threshold: 0.4,
         ignoreLocation: true,
         useExtendedSearch: true,
     });
     const formattedQuery = query.split(' ').filter(term => term.length > 0).map(term => `'${term}`).join(' ');
-    filteredProducts = deptFuse.search(formattedQuery).map(result => result.item);
+    let searchResults = deptFuse.search(formattedQuery);
 
-    // [MODIFICADO] Ordenar para poner agotados al final
-    filteredProducts = sortProductsByStock(filteredProducts);
+    // Ordenar resultados para poner agotados al final, manteniendo la relevancia de la búsqueda
+    searchResults.sort((a, b) => {
+        const a_outOfStock = (a.item.stock || 0) === 0;
+        const b_outOfStock = (b.item.stock || 0) === 0;
+
+        if (a_outOfStock && !b_outOfStock) return 1;
+        if (!a_outOfStock && b_outOfStock) return -1;
+
+        // Si el estado de stock es el mismo, se mantiene el orden por relevancia de Fuse
+        return a.score - b.score;
+    });
+    filteredProducts = searchResults.map(result => result.item);
 
     // [NUEVO] Filtrar agotados para rol inventario en búsqueda por departamento
     if (window.currentUserRole === 'inventario') {
@@ -4146,10 +4077,10 @@ async function cleanDuplicateProducts() {
     // Obtener TODOS los productos con paginación (igual que loadProducts)
     let allProducts = []
     let start = 0
-    const batchSize = 500
+    const batchSize = 1000
     let hasMore = true
 
-    console.log('[CLEAN-DUPLICATES] Obteniendo productos de BD en lotes de 500...')
+    console.log(`[CLEAN-DUPLICATES] Obteniendo productos de BD en lotes de ${batchSize}...`)
     
     while (hasMore) {
       console.log(`[CLEAN-DUPLICATES] Cargando productos desde ${start} a ${start + batchSize - 1}...`)
