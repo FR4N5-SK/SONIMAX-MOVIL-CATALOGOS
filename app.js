@@ -25,6 +25,7 @@ let filteredProducts = []
 let inventoryDataMap = new Map(); // [NUEVO] Mapa para datos de inventario (codigo -> datos)
 let cart = []
 let favorites = [] // [NUEVO] Para sistema de favoritos
+let isSyncingFromCloud = false; // [NUEVO] Flag para sincronización de carrito
 let priceSnapshotMap = new Map(); // [NUEVO] Para comparación de precios
 let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
@@ -290,6 +291,81 @@ async function getBestSellingProducts(limit = 20) {
     console.error("[SALES-DB] ❌ Error inesperado:", error.message)
     return []
   }
+}
+
+// [NUEVO] Sincronización de Carrito en la Nube (Supabase)
+async function loadCloudCart() {
+    if (!currentUser || !currentUser.auth_id || !window.supabaseClient) {
+        console.log("No hay usuario para sincronizar carrito desde la nube.");
+        return;
+    }
+
+    try {
+        const { data: cloudData, error } = await window.supabaseClient
+            .from('user_carts')
+            .select('cart_data')
+            .eq('user_id', currentUser.auth_id)
+            .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+            console.error('Error cargando carrito de la nube:', error);
+            return;
+        }
+
+        const cartKey = `sonimax_cart_${currentUser.auth_id}`;
+        const localCartStr = localStorage.getItem(cartKey) || '[]';
+
+        if (cloudData && cloudData.cart_data) {
+            const cloudCartStr = JSON.stringify(cloudData.cart_data);
+
+            if (cloudCartStr !== localCartStr) {
+                console.log('☁️ Sincronizando carrito desde la nube...');
+                isSyncingFromCloud = true;
+                localStorage.setItem(cartKey, cloudCartStr);
+                isSyncingFromCloud = false;
+
+                // Actualizar estado de la app en memoria y la UI
+                cart = cloudData.cart_data;
+                updateCartCount();
+                if (document.getElementById('cart-modal') && !document.getElementById('cart-modal').classList.contains('hidden')) {
+                    renderCart();
+                }
+                console.log('✅ Carrito local actualizado desde la nube.');
+            }
+        }
+    } catch (e) {
+        console.error('Error en la lógica de carga del carrito de la nube:', e);
+    }
+}
+
+function initCloudCart() {
+    const originalSetItem = localStorage.setItem;
+    localStorage.setItem = function(key, value) {
+        originalSetItem.apply(this, arguments);
+        
+        if (isSyncingFromCloud) {
+            return;
+        }
+
+        if (key.startsWith('sonimax_cart_') && window.supabaseClient && currentUser) {
+            try {
+                const cartData = JSON.parse(value);
+                window.supabaseClient
+                    .from('user_carts')
+                    .upsert({ 
+                        user_id: currentUser.auth_id, 
+                        cart_data: cartData, 
+                        updated_at: new Date().toISOString() 
+                    })
+                    .then(({ error }) => {
+                        if (error) console.error('Error sincronizando carrito a la nube:', error);
+                        else console.log('🛒 Carrito sincronizado a la nube.');
+                    });
+            } catch (e) { 
+                console.error('Error al parsear carrito para sincronización:', e); 
+            }
+        }
+    };
 }
 
 // [NUEVO] Función para ordenar productos: disponibles primero, agotados al final.
@@ -1302,51 +1378,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await registerServiceWorker()
 
-  initImageObserver()
-
-  const {
-    data: { session },
-  } = await window.supabaseClient.auth.getSession()
-
-  if (session) {
-    console.log("✅ Sesión activa encontrada")
-    await loadUserData(session.user.id)
-    loadCartFromStorage()
-    showApp()
-    loadBanners()
-  } else {
-    // [NUEVO] Limpiar datos de sesión anterior al cerrar sesión
-    Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('sonimax_')) {
-            localStorage.removeItem(key);
-        }
-    });
-    console.log("ℹ️ No hay sesión activa")
-    showLogin()
-  }
+  initImageObserver();
+  initCloudCart(); // [NUEVO] Iniciar interceptor de carrito
 
   setupEventListeners()
 
-  // [NUEVO] Manejador de estado de autenticación para robustez
-  // Esto soluciona los errores de "Invalid Refresh Token" al manejar correctamente los cierres de sesión.
-  window.supabaseClient.auth.onAuthStateChange((event, session) => {
+  // [MODIFICADO] onAuthStateChange ahora maneja toda la lógica de sesión para mayor robustez.
+  window.supabaseClient.auth.onAuthStateChange(async (event, session) => {
     console.log('[AUTH] El estado de la sesión cambió:', event);
-    if (event === 'SIGNED_OUT') {
-        // Limpieza completa cuando el usuario cierra sesión o el token expira.
+    
+    if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
+        console.log("✅ Sesión activa o iniciada.");
+        await loadUserData(session.user.id);
+        loadCartFromStorage(); // Carga el carrito local primero
+        await loadCloudCart(); // Intenta sincronizar desde la nube
+        showApp();
+        loadBanners();
+    } else if (event === 'SIGNED_OUT') {
+        console.log("ℹ️ Sesión cerrada.");
         currentUser = null;
         window.currentUserRole = null;
         cart = [];
-        // Limpiar todo el almacenamiento local específico de la app
         Object.keys(localStorage).forEach(key => {
             if (key.startsWith('sonimax_')) {
                 localStorage.removeItem(key);
             }
         });
         showLogin();
-    } else if (event === 'INITIAL_SESSION' && session) {
-        // Si hay una sesión al cargar, nos aseguramos de que los datos del usuario estén cargados.
-        // Esto es redundante con el código de arriba, pero es una buena práctica.
-        if (!currentUser) loadUserData(session.user.id);
+    } else if (event === 'INITIAL_SESSION' && !session) {
+        console.log("ℹ️ No hay sesión activa inicial.");
+        showLogin();
     }
   });
 })
