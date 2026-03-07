@@ -1289,7 +1289,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (session) {
     console.log("✅ Sesión activa encontrada")
     await loadUserData(session.user.id)
-    loadCartFromStorage()
+    await loadCartFromSupabase() // [MODIFICADO] Cargar carrito desde la nube
     showApp()
     loadBanners()
   } else {
@@ -1330,7 +1330,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
 
     console.log("✅ Login exitoso")
     await loadUserData(data.user.id)
-    loadCartFromStorage()
+    await loadCartFromSupabase() // [MODIFICADO] Cargar carrito desde la nube
     showApp()
     loadBanners()
   } catch (error) {
@@ -1392,6 +1392,7 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
 
     setTimeout(async () => {
       await loadUserData(data.user.id)
+      await loadCartFromSupabase() // [NUEVO] Cargar carrito para nuevo usuario
       showApp()
       loadBanners()
     }, 1500)
@@ -1776,7 +1777,7 @@ function setupEventListeners() {
     if (window.currentUserRole === "admin") {
       showOrderDetailsModal()
     } else {
-      sendWhatsAppOrder()
+      sendWhatsAppOrder() // Esto se ha convertido en una función async
     }
   })
 
@@ -1788,7 +1789,7 @@ function setupEventListeners() {
     document.getElementById("order-details-modal").classList.add("hidden")
   })
 
-  document.getElementById("confirm-order-details")?.addEventListener("click", confirmOrderDetails)
+  document.getElementById("confirm-order-details")?.addEventListener("click", async () => await confirmOrderDetails())
 
   document.getElementById("upload-csv-button")?.addEventListener("click", () => {
     // Limpiar estado de carga de CSV
@@ -1824,7 +1825,7 @@ function setupEventListeners() {
     document.getElementById("quantity-modal").classList.add("hidden")
   })
 
-  document.getElementById("confirm-quantity")?.addEventListener("click", confirmQuantity)
+  document.getElementById("confirm-quantity")?.addEventListener("click", async () => await confirmQuantity())
 
   // [NUEVO] Event listeners para filtros de precio
   document.getElementById("price-filter-btn")?.addEventListener("click", () => filterByDepartment(currentDepartment));
@@ -2686,41 +2687,70 @@ async function toggleFavorite(productId, buttonElement) {
     if (currentDepartment === 'favorites') filterByDepartment('favorites'); // Re-renderizar si estamos en la vista de favoritos
 }
 
-function saveCartToStorage() {
-  if (!currentUser) return
+// [NUEVO] Guardar carrito en Supabase
+async function saveCartToSupabase() {
+  if (!currentUser) return;
 
-  const cartKey = `sonimax_cart_${currentUser.auth_id}`
-  localStorage.setItem(cartKey, JSON.stringify(cart))
-  console.log(`💾 Carrito guardado para usuario ${currentUser.username}`)
-}
+  console.log(`[CARRITO-NUBE] ☁️ Guardando carrito en Supabase para ${currentUser.username}...`);
+  try {
+    const { error } = await window.supabaseClient
+      .from('user_carts')
+      .upsert({
+        user_id: currentUser.auth_id,
+        cart_data: cart,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id' // Asume que user_id es UNIQUE o PK
+      });
 
-function loadCartFromStorage() {
-  if (!currentUser) return
-
-  const cartKey = `sonimax_cart_${currentUser.auth_id}`
-  const savedCart = localStorage.getItem(cartKey)
-
-  if (savedCart) {
-    try {
-      cart = JSON.parse(savedCart)
-      updateCartCount()
-      console.log(`📦 Carrito cargado: ${cart.length} items`)
-    } catch (error) {
-      console.error("Error al cargar carrito:", error)
-      cart = []
+    if (error) {
+      console.error('[CARRITO-NUBE] ❌ Error guardando carrito en la nube:', error);
+    } else {
+      console.log(`[CARRITO-NUBE] ✅ Carrito guardado en la nube con ${cart.length} items.`);
     }
+  } catch (error) {
+    console.error('[CARRITO-NUBE] ❌ Error inesperado al guardar en la nube:', error);
   }
 }
 
-function clearCart() {
-  cart = []
-  if (currentUser) {
-    const cartKey = `sonimax_cart_${currentUser.auth_id}`
-    localStorage.removeItem(cartKey)
+// [NUEVO] Cargar carrito desde Supabase
+async function loadCartFromSupabase() {
+  if (!currentUser) return;
+
+  console.log(`[CARRITO-NUBE] ☁️ Cargando carrito desde Supabase para ${currentUser.username}...`);
+  try {
+    const { data, error } = await window.supabaseClient
+      .from('user_carts')
+      .select('cart_data')
+      .eq('user_id', currentUser.auth_id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found, no es un error
+      console.error('[CARRITO-NUBE] ❌ Error cargando carrito desde la nube:', error);
+      cart = []
+    } else if (data && data.cart_data) {
+      cart = data.cart_data;
+      console.log(`[CARRITO-NUBE] ✅ Carrito cargado desde la nube: ${cart.length} items.`);
+    } else {
+      cart = [];
+      console.log('[CARRITO-NUBE] ⓘ No se encontró carrito en la nube, iniciando uno nuevo.');
+    }
+  } catch (error) {
+    console.error('[CARRITO-NUBE] ❌ Error inesperado al cargar desde la nube:', error);
+    cart = [];
   }
+  updateCartCount();
+}
+
+async function clearCart() {
+  cart = []
   updateCartCount()
   renderCart()
-  console.log("🗑️ Carrito limpiado")
+  console.log("🗑️ Carrito limpiado, actualizando la nube...")
+
+  if (currentUser) {
+    await saveCartToSupabase();
+  }
 }
 
 function openQuantityModal(product) {
@@ -2794,7 +2824,7 @@ function openQuantityModal(product) {
   quantityInput.focus()
 }
 
-function confirmQuantity() {
+async function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
   const observation = document.getElementById("observation-input").value.trim()
 
@@ -2824,11 +2854,11 @@ function confirmQuantity() {
     selectedPrice = priceInfo.price
   }
 
-  addToCart(selectedProductForQuantity, quantity, selectedPrice, observation)
+  await addToCart(selectedProductForQuantity, quantity, selectedPrice, observation)
   document.getElementById("quantity-modal").classList.add("hidden")
 }
 
-function addToCart(product, quantity, price, observation = "") {
+async function addToCart(product, quantity, price, observation = "") {
   const existingItemIndex = cart.findIndex(
     (item) => item.id === product.id && item.price === price && item.observation === observation,
   )
@@ -2845,9 +2875,9 @@ function addToCart(product, quantity, price, observation = "") {
   }
 
   // Registrar venta para estadísticas con el precio
-  recordSaleToDatabase(product.id, quantity, price)
+  await recordSaleToDatabase(product.id, quantity, price)
 
-  saveCartToStorage()
+  await saveCartToSupabase()
   updateCartCount()
   animateCartButton()
 
@@ -2941,23 +2971,19 @@ function renderCart() {
       showImageModal(item.imagen_url || "/images/ProductImages.jpg", item.nombre)
     })
 
-    const decreaseBtn = cartItemDiv.querySelector(".cart-decrease-btn")
-    const increaseBtn = cartItemDiv.querySelector(".cart-increase-btn")
-    const removeBtn = cartItemDiv.querySelector(".cart-remove-btn")
-
-    decreaseBtn.addEventListener("click", () => {
+    cartItemDiv.querySelector(".cart-decrease-btn").addEventListener("click", async () => {
       console.log("Disminuyendo cantidad del item", index)
-      updateCartItemQuantityByIndex(index, -1)
+      await updateCartItemQuantityByIndex(index, -1)
     })
 
-    increaseBtn.addEventListener("click", () => {
+    cartItemDiv.querySelector(".cart-increase-btn").addEventListener("click", async () => {
       console.log("Aumentando cantidad del item", index)
-      updateCartItemQuantityByIndex(index, 1)
+      await updateCartItemQuantityByIndex(index, 1)
     })
 
-    removeBtn.addEventListener("click", () => {
+    cartItemDiv.querySelector(".cart-remove-btn").addEventListener("click", async () => {
       console.log("Eliminando item", index)
-      removeFromCartByIndex(index)
+      await removeFromCartByIndex(index)
     })
 
     cartItems.appendChild(cartItemDiv)
@@ -2997,25 +3023,25 @@ function renderCart() {
   console.log("Carrito renderizado exitosamente")
 }
 
-function updateCartItemQuantityByIndex(index, change) {
+async function updateCartItemQuantityByIndex(index, change) {
   if (index < 0 || index >= cart.length) return
 
   cart[index].quantity += change
 
   if (cart[index].quantity <= 0) {
-    removeFromCartByIndex(index)
+    await removeFromCartByIndex(index)
   } else {
-    saveCartToStorage()
+    await saveCartToSupabase()
     updateCartCount()
     renderCart()
   }
 }
 
-function removeFromCartByIndex(index) {
+async function removeFromCartByIndex(index) {
   if (index < 0 || index >= cart.length) return
 
   cart.splice(index, 1)
-  saveCartToStorage()
+  await saveCartToSupabase()
   updateCartCount()
   renderCart()
 }
@@ -3090,7 +3116,7 @@ function showOrderDetailsModal() {
   document.getElementById("order-responsables").focus()
 }
 
-function confirmOrderDetails() {
+async function confirmOrderDetails() {
   const orderModal = document.getElementById("order-details-modal")
   if (orderModal) {
     orderModal.classList.add("hidden")
@@ -3108,10 +3134,10 @@ function confirmOrderDetails() {
 
   errorDiv.classList.add("hidden")
 
-  generateExcelAndSendOrder(responsables, sitio)
+  await generateExcelAndSendOrder(responsables, sitio)
 }
 
-function generateExcelAndSendOrder(responsables, sitio) {
+async function generateExcelAndSendOrder(responsables, sitio) {
   console.log("Generando Excel y enviando pedido para admin...")
 
   try {
@@ -3205,7 +3231,7 @@ function generateExcelAndSendOrder(responsables, sitio) {
     console.log("Abriendo WhatsApp...")
     window.open(whatsappURL, "_blank")
 
-    clearCart()
+    await clearCart()
 
     document.getElementById("cart-modal").classList.add("hidden")
 
@@ -3214,11 +3240,11 @@ function generateExcelAndSendOrder(responsables, sitio) {
     console.error("❌ Error al generar Excel:", error)
     alert("Error al generar el archivo Excel. Se enviará solo el mensaje de WhatsApp.")
 
-    sendWhatsAppOrderFallback(responsables, sitio)
+    await sendWhatsAppOrderFallback(responsables, sitio)
   }
 }
 
-function sendWhatsAppOrderFallback(responsables, sitio) {
+async function sendWhatsAppOrderFallback(responsables, sitio) {
   let message = `*PEDIDO SONIMAX MÓVIL*\n\n`
   message += `*Cliente:* ${currentUser.name}\n`
   if (responsables) {
@@ -3254,11 +3280,10 @@ function sendWhatsAppOrderFallback(responsables, sitio) {
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
-  clearCart()
-  // No se llama a renderCart() aquí porque clearCart() ya lo hace.
+  await clearCart()
 }
 
-function sendWhatsAppOrder() {
+async function sendWhatsAppOrder() {
   console.log("Enviando pedido por WhatsApp...")
 
   if (cart.length === 0) {
@@ -3324,7 +3349,7 @@ function sendWhatsAppOrder() {
   console.log("Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
 
-  clearCart()
+  await clearCart()
 
   document.getElementById("cart-modal").classList.add("hidden")
 
