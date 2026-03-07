@@ -1924,6 +1924,17 @@ async function loadProducts() {
     const newProductsCount = allProducts.filter((p) => p.is_new).length
     console.log(`[PRODUCTOS] ${newProductsCount} productos marcados como nuevos en la base de datos`)
 
+    // [MODIFICADO] Ordenar productos: Primero con stock, luego sin stock (al final), manteniendo orden alfabético
+    allProducts.sort((a, b) => {
+      const stockA = (a.stock || 0) > 0 ? 1 : 0;
+      const stockB = (b.stock || 0) > 0 ? 1 : 0;
+      
+      if (stockA !== stockB) {
+        return stockB - stockA; // 1 (con stock) antes que 0 (sin stock)
+      }
+      return (a.nombre || '').localeCompare(b.nombre || '');
+    });
+
     // [NUEVO] Inicializar Fuse.js para búsqueda difusa
     const fuseOptions = {
         keys: ['nombre', 'codigo', 'descripcion'],
@@ -2207,6 +2218,8 @@ function filterByDepartment(dept, keepSearch = false) {
   } else if (dept === "new") {
     // Usar el nuevo campo is_new para filtrar
     filteredProducts = baseProducts.filter((p) => p.is_new && priceFilter(p));
+    // [MODIFICADO] Limitar a 50 productos nuevos
+    filteredProducts = filteredProducts.slice(0, 50);
   } else if (dept === "favorites") {
     const favoriteIds = new Set(favorites);
     filteredProducts = baseProducts.filter(p => favoriteIds.has(p.id) && priceFilter(p));
@@ -2231,6 +2244,14 @@ function filterByDepartment(dept, keepSearch = false) {
         .filter((p) => p !== null)
 
       filteredProducts = filteredProducts.filter(priceFilter);
+
+      // [MODIFICADO] Asegurar que los productos sin stock salgan al final también en más vendidos
+      filteredProducts.sort((a, b) => {
+        const stockA = (a.stock || 0) > 0 ? 1 : 0;
+        const stockB = (b.stock || 0) > 0 ? 1 : 0;
+        if (stockA !== stockB) return stockB - stockA;
+        return 0; // Mantener orden de ventas
+      });
 
       console.log("[SALES-DB] Productos después del map:", filteredProducts.length)
       currentPage = 1
@@ -2383,7 +2404,7 @@ function createProductCard(product) {
 
   if (showStock) {
       if (stock === 0) {
-        stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-black text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
+        stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
       } else {
         const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
         stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
@@ -2401,8 +2422,8 @@ function createProductCard(product) {
       }
   }
 
-  // [NUEVO] Lógica de botones para ROL INVENTARIO
-  let actionButtonsHTML = '';
+  // [MODIFICADO] Badge de nuevo producto, con animación y z-index
+  const newBadge = product.is_new ? '<span class="absolute top-3 right-3 z-20 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse">¡NUEVO!</span>' : '';
   
   if (window.currentUserRole === 'inventario') {
       const currentDep = invData ? invData.deposito : null;
@@ -2472,6 +2493,10 @@ function createProductCard(product) {
            class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
            loading="lazy"
            onerror="this.src='/images/ProductImages.jpg'">
+      <!-- [MODIFICADO] Badges movidos aquí para correcta superposición y visibilidad -->
+      ${priceDropBadge}
+      ${newBadge}
+      ${stockBadge}
     </div>
     <div class="p-5">
       <h3 class="font-bold text-lg text-gray-800 mb-2 line-clamp-2">${product.nombre}</h3>
@@ -2480,8 +2505,6 @@ function createProductCard(product) {
         ${priceHTML}
       </div>
       ${product.departamento ? `<span class="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full text-gray-600 dark:text-gray-300 font-semibold block mb-3">${product.departamento}</span>` : ""}
-      ${priceDropBadge || (product.is_new ? '<span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">¡NUEVO!</span>' : '')}
-      ${stockBadge}
       ${actionButtonsHTML}
     </div>
   `
