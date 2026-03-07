@@ -719,6 +719,14 @@
             }
 
             if (allUpdatedProducts.length > 0) {
+              // [MODIFICADO] Ordenar productos al recargar: Stock > 0 primero
+              allUpdatedProducts.sort((a, b) => {
+                const stockA = (a.stock || 0) > 0 ? 1 : 0;
+                const stockB = (b.stock || 0) > 0 ? 1 : 0;
+                if (stockA !== stockB) return stockB - stockA;
+                return (a.nombre || '').localeCompare(b.nombre || '');
+              });
+
               window.allProducts = allUpdatedProducts;
               if (window.renderProducts) window.renderProducts();
               console.log(`[UPDATE-PROCESS] Inventario recargado: ${allUpdatedProducts.length} productos.`);
