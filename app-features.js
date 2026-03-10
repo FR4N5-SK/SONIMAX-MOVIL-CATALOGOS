@@ -722,9 +722,12 @@
         filtered = allProducts.filter(p => p.departamento === selectedDept);
       }
 
+      // Excluir productos con stock 0
+      filtered = filtered.filter(p => (p.stock || 0) > 0);
+
       if (filtered.length === 0) {
         progressModal.remove();
-        alert('No hay productos para este departamento');
+        alert('No hay productos con stock disponible para este departamento.');
         return;
       }
 
@@ -801,6 +804,7 @@
         { header: 'Imagen', dataKey: 'image' },
         { header: 'Código', dataKey: 'codigo' },
         { header: 'Descripción', dataKey: 'nombre' },
+        { header: 'Stock', dataKey: 'stock' },
         { header: 'Precio Detal', dataKey: 'precio_cliente' },
         { header: 'Precio Mayor', dataKey: 'precio_mayor' }
       ];
@@ -811,6 +815,7 @@
         image: '', // Placeholder para el hook
         codigo: p.codigo || 'S/C',
         nombre: p.nombre || 'Sin descripción',
+        stock: p.stock || 0,
         precio_cliente: `$${parseFloat(p.precio_cliente || 0).toLocaleString('es-CO')}`,
         precio_mayor: `$${parseFloat(p.precio_mayor || 0).toLocaleString('es-CO')}`
       }));
@@ -838,10 +843,11 @@
         },
         columnStyles: {
           image: { cellWidth: 25, minCellHeight: 25 },
-          codigo: { cellWidth: 25, fontStyle: 'bold', halign: 'center' },
+          codigo: { cellWidth: 20, fontStyle: 'bold', halign: 'center' },
           nombre: { cellWidth: 'auto' },
-          precio_cliente: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] }, // Rojo para Detal
-          precio_mayor: { cellWidth: 30, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] } // Verde para Mayor (contraste)
+          stock: { cellWidth: 15, halign: 'center' },
+          precio_cliente: { cellWidth: 25, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] }, // Rojo para Detal
+          precio_mayor: { cellWidth: 25, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] } // Verde para Mayor (contraste)
         },
         alternateRowStyles: {
           fillColor: [254, 242, 242] // Rojo muy tenue para filas alternas
