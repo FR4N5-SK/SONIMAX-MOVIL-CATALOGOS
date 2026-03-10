@@ -1,5 +1,4 @@
 // ============================================
-﻿// ============================================
 // EXTENSIONES DE CARACTERÍSTICAS - SONIMAX MÓVIL
 // ============================================
 // Usa variables GLOBALES del archivo principal (current-user.js)
@@ -210,7 +209,7 @@
     parentModal.remove();
     
     const formDiv = document.createElement('div');
-    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
     formDiv.innerHTML = `
       <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl">
         <div class="bg-gradient-to-r from-cyan-600 to-cyan-700 p-6 text-white flex items-center justify-between">
@@ -441,7 +440,7 @@
     }
     
     const formDiv = document.createElement('div');
-    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
+    formDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto';
     formDiv.innerHTML = `
       <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl my-8">
         <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white flex items-center justify-between">
@@ -672,241 +671,249 @@
     });
   };
 
-  window.generatePdf = async function() {
+  window.generatePdf = async function () {
     const { allProducts } = getGlobalState();
-    
+
     const selectedDept = document.getElementById('pdf-department').value;
     if (!selectedDept) {
       alert('Selecciona un departamento');
       return;
     }
 
-    try {
-      // Crear modal de progreso
-      const progressModal = document.createElement('div');
-      progressModal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-      progressModal.innerHTML = `
-        <div class="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-          <div class="text-center">
-            <h2 class="text-2xl font-bold text-red-600 mb-6">Generando Catálogo PDF</h2>
-            
-            <div class="mb-6">
-              <div class="w-full h-2 bg-gray-300 rounded-full overflow-hidden">
-                <div id="pdf-progress-bar" class="h-full bg-gradient-to-r from-red-600 to-red-800 w-0 transition-all duration-300"></div>
-              </div>
-              <div class="mt-3 text-sm text-gray-700">
-                <span id="pdf-progress-text" class="font-semibold">Iniciando...</span>
-              </div>
+    // --- 1. Configuración del Modal de Progreso ---
+    const progressModal = document.createElement('div');
+    progressModal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+    progressModal.innerHTML = `
+      <div class="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
+        <div class="text-center">
+          <h2 class="text-2xl font-bold text-red-600 mb-6">Generando Catálogo PDF</h2>
+          <div class="mb-6">
+            <div class="w-full h-2 bg-gray-300 rounded-full overflow-hidden">
+              <div id="pdf-progress-bar" class="h-full bg-gradient-to-r from-red-600 to-red-800 w-0 transition-all duration-300"></div>
             </div>
-            
-            <p class="text-xs text-gray-500">Por favor espera, esto puede tomar unos momentos...</p>
+            <div class="mt-3 text-sm text-gray-700">
+              <span id="pdf-progress-text" class="font-semibold">Iniciando...</span>
+            </div>
           </div>
+          <p class="text-xs text-gray-500">Por favor espera, esto puede tomar unos momentos...</p>
         </div>
-      `;
-      document.body.appendChild(progressModal);
-      
-      const progressBar = document.getElementById('pdf-progress-bar');
-      const progressText = document.getElementById('pdf-progress-text');
-      
-      const updateProgress = (current, total, message) => {
-        const percentage = Math.round((current / total) * 100);
-        progressBar.style.width = percentage + '%';
-        progressText.textContent = message || `${current} de ${total} (${percentage}%)`;
-      };
+      </div>
+    `;
+    document.body.appendChild(progressModal);
 
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const progressBar = document.getElementById('pdf-progress-bar');
+    const progressText = document.getElementById('pdf-progress-text');
+    const updateProgress = (current, total, message) => {
+      const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+      progressBar.style.width = percentage + '%';
+      progressText.textContent = message || `${current} de ${total} (${percentage}%)`;
+    };
 
+    try {
+      // --- 2. Filtrar Productos y Cargar Recursos ---
       let filtered = allProducts;
       if (selectedDept !== 'all') {
         filtered = allProducts.filter(p => p.departamento === selectedDept);
       }
-
-      // Excluir productos con stock 0
       filtered = filtered.filter(p => (p.stock || 0) > 0);
 
       if (filtered.length === 0) {
         progressModal.remove();
-        alert('No hay productos con stock disponible para este departamento.');
+        alert('No hay productos con stock para este departamento.');
         return;
       }
 
-      console.log('[PDF] Procesando', filtered.length, 'productos...');
-      updateProgress(0, filtered.length, 'Descargando imágenes...');
-      
-      // Pre-cargar todas las imágenes como base64 con progreso
-      const imageCache = {};
-      let imagesProcessed = 0;
-      const totalImages = filtered.filter(p => p.imagen_url && p.imagen_url.trim() !== '').length;
+      // --- 2. Cargar Recursos y Paleta de Colores ---
+      const assets = {}; // Almacenará imágenes en base64
+
+      const totalResources = filtered.length;
+      updateProgress(0, totalResources, 'Cargando recursos...');
+
       let imagesLoaded = 0;
-      
       for (const product of filtered) {
-        if (product.imagen_url && product.imagen_url.trim() !== '') {
-          console.log('[PDF] Cargando imagen de:', product.codigo);
-          imageCache[product.id || product.codigo] = await imageUrlToBase64(product.imagen_url);
-          imagesLoaded++;
-          updateProgress(imagesLoaded, totalImages, `Descargando imagen ${imagesLoaded} de ${totalImages}...`);
+        if (product.imagen_url) {
+          assets[product.id] = await imageUrlToBase64(product.imagen_url);
         }
-        imagesProcessed++;
+        imagesLoaded++;
+        updateProgress(imagesLoaded, totalResources, `Cargando imagen ${imagesLoaded} de ${filtered.length}...`);
       }
-      console.log('[PDF] Imágenes cargadas:', Object.keys(imageCache).length);
-      updateProgress(totalImages, totalImages, 'Generando documento PDF...');
 
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const pageWidth = doc.internal.pageSize.getWidth();
+      updateProgress(totalResources, totalResources, 'Generando documento...');
 
-      // ==================== CREAR PORTADA ====================
-      // Fondo rojo sólido (Color corporativo Sonimax)
-      doc.setFillColor(220, 38, 38); // #DC2626
-      doc.rect(0, 0, pageWidth, pageHeight, 'F');
-      
-      // Elemento decorativo (Círculo sutil para dar profundidad)
-      doc.setFillColor(185, 28, 28); // #B91C1C (Rojo más oscuro)
-      doc.circle(pageWidth, 0, 120, 'F');
-      doc.circle(0, pageHeight, 100, 'F');
+      // --- 3. Inicialización de PDF y Constantes de Diseño ---
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const PAGE_WIDTH = doc.internal.pageSize.getWidth();
+      const PAGE_HEIGHT = doc.internal.pageSize.getHeight();
+      const MARGIN = 10;
+      const HEADER_HEIGHT = 25;
+      const FOOTER_HEIGHT = 15;
+      const GRID_COLS = 3;
+      const GRID_ROWS = 3;
+      const GAP = 3;
+      const CELL_WIDTH = (PAGE_WIDTH - MARGIN * 2 - GAP * (GRID_COLS - 1)) / GRID_COLS;
+      const CELL_HEIGHT = (PAGE_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - MARGIN * 2 - GAP * (GRID_ROWS - 1)) / GRID_ROWS;
 
-      // Logo/Título SONIMAX MÓVIL
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(42);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SONIMAX MÓVIL', pageWidth / 2, pageHeight * 0.35, { align: 'center' });
-      
-      // Línea decorativa roja
-      doc.setDrawColor(255, 255, 255);
-      doc.setLineWidth(1);
-      doc.line(pageWidth * 0.2, pageHeight * 0.37, pageWidth * 0.8, pageHeight * 0.37);
+      // Paleta de colores premium (basado en la web y la solicitud)
+      const bgColor = [45, 55, 72]; // #2D3748 gris oscuro profundo
+      const cardBgColor = [55, 65, 81]; // #374151 gris más oscuro para tarjetas
+      const cardBorderColor = [220, 38, 38]; // #DC2626 rojo para borde sutil
+      const redColor = [220, 38, 38]; // #DC2626 rojo intenso
+      const greenNeon = [16, 185, 129]; // #10B981 verde neón
+      const blueNeon = [59, 130, 246]; // #3B82F6 azul neón
+      const white = [255, 255, 255];
+      const black = [0, 0, 0];
 
-      // Departamento en grande
-      doc.setFontSize(24);
-      doc.setFont('helvetica', 'normal');
-      const deptTitle = selectedDept === 'all' ? 'CATÁLOGO GENERAL' : selectedDept.toUpperCase();
-      doc.text(deptTitle, pageWidth / 2, pageHeight * 0.45, { align: 'center' });
+      // --- 4. Funciones de Dibujo ---
+      const drawWatermark = (doc) => {
+        // Watermark eliminado por solicitud del usuario.
+      };
 
-      // Fecha
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'italic');
-      const today = new Date();
-      const dateStr = today.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
-      doc.text(dateStr, pageWidth / 2, pageHeight * 0.50, { align: 'center' });
+      const drawHeader = (doc, dept, assets) => {
+        doc.setFillColor(...bgColor);
+        doc.rect(0, 0, PAGE_WIDTH, HEADER_HEIGHT, 'F');
+        // Logo eliminado
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(...white);
+        doc.text('SONIMAX MÓVIL', MARGIN, 12);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(200, 200, 200);
+        doc.text(dept.toUpperCase(), MARGIN, 17);
 
-      // Información de contacto al pie
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Tecnología al alcance de tus manos', pageWidth / 2, pageHeight - 30, { align: 'center' });
-      doc.setFontSize(10);
-      doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 20, { align: 'center' });
+        doc.setFillColor(...redColor);
+        doc.roundedRect(PAGE_WIDTH / 2, 5, PAGE_WIDTH / 2 - MARGIN, 15, 3, 3, 'F');
+        // Icono eliminado
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`Catálogo de Productos - ${dept}`, PAGE_WIDTH / 2 + 5, 11);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        const dateStr = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+        doc.text(`Fecha: ${dateStr}`, PAGE_WIDTH / 2 + 5, 17);
+      };
 
-      // ==================== TABLA DE PRODUCTOS ====================
-      doc.addPage();
+      const drawFooter = (doc, pageNum) => {
+        doc.setFillColor(...bgColor);
+        doc.rect(0, PAGE_HEIGHT - FOOTER_HEIGHT, PAGE_WIDTH, FOOTER_HEIGHT, 'F');
+        doc.setFontSize(8);
+        doc.setTextColor(200, 200, 200);
+        doc.text('Tecnología al alcance de tus manos', MARGIN, PAGE_HEIGHT - 9);
+        doc.text(`Página ${pageNum}`, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 9, { align: 'right' });
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', PAGE_WIDTH / 2, PAGE_HEIGHT - 6, { align: 'center' });
+      };
 
-      // Definir columnas
-      const columns = [
-        { header: 'Imagen', dataKey: 'image' },
-        { header: 'Código', dataKey: 'codigo' },
-        { header: 'Descripción', dataKey: 'nombre' },
-        { header: 'Stock', dataKey: 'stock' },
-        { header: 'Precio Detal', dataKey: 'precio_cliente' },
-        { header: 'Precio Mayor', dataKey: 'precio_mayor' }
-      ];
+      const drawProductCell = (doc, product, x, y, w, h, assets) => {
+        // Tarjeta con fondo oscuro y borde rojo
+        doc.setFillColor(...cardBgColor);
+        doc.setDrawColor(...cardBorderColor);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(x, y, w, h, 5, 5, 'FD');
 
-      // Preparar datos
-      const body = filtered.map(p => ({
-        id: p.id,
-        image: '', // Placeholder para el hook
-        codigo: p.codigo || 'S/C',
-        nombre: p.nombre || 'Sin descripción',
-        stock: p.stock || 0,
-        precio_cliente: `$${parseFloat(p.precio_cliente || 0).toLocaleString('es-CO')}`,
-        precio_mayor: `$${parseFloat(p.precio_mayor || 0).toLocaleString('es-CO')}`
-      }));
-
-      // Generar tabla con autoTable
-      doc.autoTable({
-        columns: columns,
-        body: body,
-        startY: 20,
-        theme: 'striped',
-        styles: {
-          fontSize: 10,
-          cellPadding: 4, // Aumentado para que no esté pegado
-          valign: 'middle',
-          overflow: 'linebreak',
-          lineColor: [220, 220, 220],
-          lineWidth: 0.1
-        },
-        headStyles: {
-          fillColor: [220, 38, 38], // Rojo corporativo
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 11,
-          halign: 'center'
-        },
-        columnStyles: {
-          image: { cellWidth: 25, minCellHeight: 25 },
-          codigo: { cellWidth: 20, fontStyle: 'bold', halign: 'center' },
-          nombre: { cellWidth: 'auto' },
-          stock: { cellWidth: 15, halign: 'center' },
-          precio_cliente: { cellWidth: 25, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] }, // Rojo para Detal
-          precio_mayor: { cellWidth: 25, halign: 'right', fontStyle: 'bold', textColor: [22, 163, 74] } // Verde para Mayor (contraste)
-        },
-        alternateRowStyles: {
-          fillColor: [254, 242, 242] // Rojo muy tenue para filas alternas
-        },
-        didDrawCell: (data) => {
-          // Dibujar imagen en la celda correspondiente
-          if (data.column.dataKey === 'image' && data.cell.section === 'body') {
-            const productId = data.row.raw.id;
-            const imgData = imageCache[productId];
-            
-            if (imgData) {
-              const cell = data.cell;
-              const padding = 2;
-              const dim = Math.min(cell.width, cell.height) - (padding * 2);
-              const x = cell.x + (cell.width - dim) / 2;
-              const y = cell.y + (cell.height - dim) / 2;
-              
-              try {
-                doc.addImage(imgData, 'JPEG', x, y, dim, dim);
-                // Borde sutil
-                doc.setDrawColor(200, 200, 200);
-                doc.setLineWidth(0.1);
-                doc.rect(x, y, dim, dim);
-              } catch (e) {
-                // Fallo silencioso
-              }
-            } else {
-              // Marcador de posición estético
-              doc.setFontSize(6);
-              doc.setTextColor(150);
-              doc.text('Sin Foto', data.cell.x + data.cell.width/2, data.cell.y + data.cell.height/2, { align: 'center', baseline: 'middle' });
-            }
+        // Imagen del producto
+        const imgData = assets[product.id];
+        if (imgData) {
+          // NOTA: La calidad de la imagen y si tiene fondo o no depende de la URL de origen.
+          // Este código no puede eliminar fondos de imágenes.
+          try {
+            doc.addImage(imgData, 'JPEG', x + 4, y + 4, w - 8, h * 0.5, undefined, 'FAST');
+          } catch (e) {
+            console.warn('[PDF] Error al añadir imagen para', product.codigo, e);
           }
-        },
-        didDrawPage: (data) => {
-          // Encabezado de página
-          doc.setFontSize(10);
-          doc.setTextColor(100);
-          doc.text('SONIMAX MÓVIL - Catálogo', data.settings.margin.left, 10);
-          
-          // Pie de página con numeración
-          const pageCount = doc.internal.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.text(`Página ${pageCount}`, pageWidth - 20, pageHeight - 10, { align: 'right' });
-          doc.text('Av 20 entre calles 27 y 28 - Barquisimeto | Tel: 0424-9316999', pageWidth / 2, pageHeight - 10, { align: 'center' });
         }
-      });
 
-      updateProgress(100, 100, 'Completado! Descargando...');
+        // Contenido debajo de la imagen
+        const contentY = y + h * 0.5 + 8;
+
+        // Nombre/Descripción del producto
+        doc.setTextColor(...white);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        const descLines = doc.splitTextToSize(product.nombre || '', w - 8);
+        doc.text(descLines.slice(0, 2), x + 4, contentY);
+
+        // Código del producto (etiqueta roja con texto negro)
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        const codeText = product.codigo || 'S/C';
+        const codeWidth = doc.getTextWidth(codeText);
+        doc.setFillColor(...redColor);
+        doc.roundedRect(x + 4, contentY + 10, codeWidth + 4, 6, 2, 2, 'F');
+        doc.setTextColor(...black);
+        doc.text(codeText, x + 6, contentY + 14);
+
+        // Stock (blanco)
+        doc.setTextColor(...white);
+        doc.setFontSize(7);
+        doc.text(`Stock: ${product.stock || 0}`, x + 4 + codeWidth + 8, contentY + 14);
+
+        // Precio Detal (verde neón)
+        doc.setTextColor(...greenNeon);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        const detalPrice = `$${parseFloat(product.precio_cliente || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })}`;
+        doc.text(`Detal: ${detalPrice}`, x + 4, h + y - 9);
+
+        // Precio Mayor (azul neón)
+        doc.setTextColor(...blueNeon);
+        doc.setFontSize(8);
+        const mayorPrice = `$${parseFloat(product.precio_mayor || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })}`;
+        doc.text(`Mayor: ${mayorPrice}`, x + 4, h + y - 4);
+      };
+
+      // --- 5. Bucle de Generación de Páginas ---
+      let productOnPageIndex = 0;
+      let pageNum = 1;
+
+      // Primera página
+      doc.setFillColor(...bgColor);
+      doc.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, 'F');
+      drawWatermark(doc);
+      drawHeader(doc, selectedDept, assets);
+
+      for (let i = 0; i < filtered.length; i++) {
+        const product = filtered[i];
+        const col = productOnPageIndex % GRID_COLS;
+        const row = Math.floor(productOnPageIndex / GRID_COLS);
+
+        const x = MARGIN + col * (CELL_WIDTH + GAP);
+        const y = HEADER_HEIGHT + MARGIN + row * (CELL_HEIGHT + GAP);
+
+        drawProductCell(doc, product, x, y, CELL_WIDTH, CELL_HEIGHT, assets);
+
+        productOnPageIndex++;
+
+        if (productOnPageIndex === GRID_COLS * GRID_ROWS && i < filtered.length - 1) {
+          drawFooter(doc, pageNum);
+          pageNum++;
+          productOnPageIndex = 0;
+          doc.addPage();
+
+          // Fondo para la nueva página
+          doc.setFillColor(...bgColor);
+          doc.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, 'F');
+
+          drawWatermark(doc);
+          drawHeader(doc, selectedDept, assets);
+        }
+      }
+
+      drawFooter(doc, pageNum);
+
+      // --- 6. Guardar PDF y Limpiar ---
+      updateProgress(100, 100, 'Completado. Descargando...');
       doc.save(`Catalogo_${selectedDept}_${new Date().toISOString().split('T')[0]}.pdf`);
-      
-      // Cerrar modal después de 1 segundo
-      setTimeout(() => {
-        progressModal.remove();
-      }, 1000);
-      
+
+      setTimeout(() => progressModal.remove(), 1500);
+
     } catch (error) {
       console.error('[PDF] Error:', error);
       alert('Error generando PDF: ' + error.message);
+      progressModal.remove();
     }
   };
 
