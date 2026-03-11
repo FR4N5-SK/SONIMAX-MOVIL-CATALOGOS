@@ -1806,17 +1806,11 @@ function setupEventListeners() {
   document.getElementById("csv-file-input")?.addEventListener("change", handleCSVFileSelect)
   document.getElementById("upload-csv-submit")?.addEventListener("click", handleCSVUpload)
 
-  document.getElementById("export-pdf-button")?.addEventListener("click", () => {
-    document.getElementById("pdf-modal").classList.remove("hidden")
-    loadDepartmentsForPDF()
-  })
-
-  document.getElementById("close-pdf-modal")?.addEventListener("click", () => {
-    document.getElementById("pdf-modal").classList.add("hidden")
-  })
-
-  document.getElementById("generate-pdf-button")?.addEventListener("click", generatePDF)
-
+  /* El listener para exportar PDF ahora está en app-features.js para evitar duplicados
+  document.getElementById("export-pdf-button")?.addEventListener("click", ...)
+  document.getElementById("close-pdf-modal")?.addEventListener("click", ...)
+  document.getElementById("generate-pdf-button")?.addEventListener("click", ...)
+  */
   document.getElementById("close-quantity-modal")?.addEventListener("click", () => {
     document.getElementById("quantity-modal").classList.add("hidden")
   })
@@ -3797,40 +3791,134 @@ async function generatePDF() {
   }
 
   try {
-  showPDFStatus("Generando PDF...", "info")
-  
-  const { jsPDF } = window.jspdf
-  const doc = new jsPDF()
-  
-  const productsInDept = allProducts.filter((p) => p.departamento === department)
-  
-  // Encabezado del documento
-  doc.setTextColor(0, 0, 0)
-  doc.setFontSize(16)
-  doc.setFont(undefined, 'bold')
-  doc.text(`SONIMAX MÓVIL - ${department}`, 14, 20)
-  
-  doc.setFontSize(10)
-  doc.setFont(undefined, 'normal')
-  doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28)
-  doc.text(`Total de productos: ${productsInDept.length}`, 14, 34)
-
-  const tableData = productsInDept.map((p) => [
-  p.codigo || "N/A",
-  p.nombre,
-  `$${p.precio_cliente.toFixed(2)}`,
-  `$${p.precio_mayor.toFixed(2)}`,
-  `$${p.precio_gmayor.toFixed(2)}`,
-  ])
-
-  doc.autoTable({
-  startY: 40,
-  head: [["Código", "Descripción", "Detal", "Mayor", "G. Mayor"]],
-  body: tableData,
-  theme: "grid",
-  headStyles: { fillColor: [220, 38, 38] },
-  })
-
+    showPDFStatus("Generando PDF...", "info")
+    
+    const { jsPDF } = window.jspdf
+    const doc = new jsPDF('p', 'mm', 'a4') // Portrait, mm, A4
+    
+    const productsInDept = allProducts.filter((p) => p.departamento === department)
+    const productsPerPage = 9 // 3x3 grid
+    const totalPages = Math.ceil(productsInDept.length / productsPerPage)
+    
+    // Colors
+    const bgColor = [45, 55, 72] // #2D3748 dark gray
+    const cardBgColor = [55, 65, 81] // #374151 darker gray
+    const cardBorderColor = [220, 38, 38] // #DC2626 red
+    const orangeColor = [234, 88, 12] // #EA580C orange
+    const greenNeon = [16, 185, 129] // #10B981 green
+    const blueNeon = [59, 130, 246] // #3B82F6 blue
+    const white = [255, 255, 255]
+    
+    // Load logo
+    const logoUrl = 'https://i.ibb.co/RkyBVXBP/LOGO-SONIMAX-PNG-2.png'
+    
+    for (let page = 0; page < totalPages; page++) {
+      if (page > 0) doc.addPage()
+      
+      // Background
+      doc.setFillColor(...bgColor)
+      doc.rect(0, 0, 210, 297, 'F')
+      
+      // Header
+      doc.setFillColor(...bgColor)
+      doc.rect(0, 0, 210, 30, 'F')
+      
+      // Logo
+      try {
+        doc.addImage(logoUrl, 'PNG', 10, 5, 30, 20)
+      } catch (e) {
+        console.log('Logo not loaded')
+      }
+      
+      // Header text container
+      doc.setFillColor(...orangeColor)
+      doc.roundedRect(50, 5, 150, 20, 5, 5, 'F')
+      doc.setTextColor(...white)
+      doc.setFontSize(12)
+      doc.setFont('helvetica', 'bold')
+      doc.text(`Catálogo de Productos - ${department}`, 55, 12)
+      doc.setFontSize(10)
+      doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 55, 18)
+      
+      // Products grid
+      const startY = 40
+      const cardWidth = 60
+      const cardHeight = 70
+      const marginX = 10
+      const marginY = 10
+      
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          const productIndex = page * productsPerPage + i * 3 + j
+          if (productIndex >= productsInDept.length) break
+          
+          const product = productsInDept[productIndex]
+          const x = marginX + j * (cardWidth + marginX)
+          const y = startY + i * (cardHeight + marginY)
+          
+          // Card background
+          doc.setFillColor(...cardBgColor)
+          doc.roundedRect(x, y, cardWidth, cardHeight, 5, 5, 'F')
+          
+          // Card border
+          doc.setDrawColor(...cardBorderColor)
+          doc.setLineWidth(0.5)
+          doc.roundedRect(x, y, cardWidth, cardHeight, 5, 5, 'S')
+          
+          // Product image
+          if (product.imagen) {
+            try {
+              doc.addImage(product.imagen, 'JPEG', x + 5, y + 5, 30, 30)
+            } catch (e) {
+              console.log('Image not loaded for', product.codigo)
+            }
+          }
+          
+          // Code label
+          doc.setFillColor(...orangeColor)
+          doc.roundedRect(x + 5, y + 38, 30, 8, 2, 2, 'F')
+          doc.setTextColor(...white)
+          doc.setFontSize(8)
+          doc.setFont('helvetica', 'bold')
+          doc.text(product.codigo || 'N/A', x + 7, y + 43)
+          
+          // Stock
+          const stock = inventoryDataMap.get(product.codigo)?.stock || 0
+          doc.setTextColor(...greenNeon)
+          doc.setFontSize(7)
+          doc.text(`En Stock: ${stock} uds.`, x + 5, y + 50)
+          
+          // Description
+          doc.setTextColor(...white)
+          doc.setFontSize(6)
+          const desc = product.nombre || ''
+          const descLines = doc.splitTextToSize(desc, cardWidth - 10)
+          doc.text(descLines.slice(0, 2), x + 5, y + 55)
+          
+          // Price Detal
+          doc.setTextColor(...orangeColor)
+          doc.setFontSize(10)
+          doc.setFont('helvetica', 'bold')
+          doc.text(`$${product.precio_cliente?.toFixed(2) || '0.00'}`, x + 5, y + 62)
+          
+          // Price Mayor
+          doc.setTextColor(...blueNeon)
+          doc.setFontSize(8)
+          doc.text(`Mayor: $${product.precio_mayor?.toFixed(2) || '0.00'}`, x + 5, y + 68)
+        }
+      }
+      
+      // Footer
+      doc.setFillColor(...bgColor)
+      doc.rect(0, 270, 210, 27, 'F')
+      doc.setTextColor(...white)
+      doc.setFontSize(8)
+      doc.setFont('helvetica', 'normal')
+      doc.text('Tecnología al alcance de tus manos. Los mejores productos con la mejor calidad.', 10, 275)
+      doc.text('© 2026 SONIMAX MÓVIL - Todos los derechos reservados.', 10, 280)
+      doc.text('Precios y disponibilidad sujetos a cambios sin previo aviso.', 10, 285)
+    }
+    
     doc.save(`SONIMAX_${department}_${new Date().toISOString().split("T")[0]}.pdf`)
 
     showPDFStatus("✅ PDF generado exitosamente", "success")
