@@ -847,9 +847,10 @@
         doc.text(codeText, x + 6, contentY + 14);
 
         // Stock (blanco)
-        doc.setTextColor(...white);
-        doc.setFontSize(7);
-        doc.text(`Stock: ${product.stock || 0}`, x + 4 + codeWidth + 8, contentY + 14);
+        // [MODIFICADO] Ocultar Stock en PDF
+        // doc.setTextColor(...white);
+        // doc.setFontSize(7);
+        // doc.text(`Stock: ${product.stock || 0}`, x + 4 + codeWidth + 8, contentY + 14);
 
         // Precio Detal (verde neón)
         doc.setTextColor(...greenNeon);
