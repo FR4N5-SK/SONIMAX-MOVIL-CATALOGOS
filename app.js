@@ -65,6 +65,14 @@ const imageLoadState = {
 // Variable global para el estado de edición de inventario
 let inventoryEditMode = false;
 let inventoryShowStockMode = false; // NUEVO
+// Variable global para configuración de visibilidad de stock por rol
+let stockVisibilityConfig = {
+  admin: true,
+  gestor: true,
+  distribuidor: true,
+  cliente: true,
+  inventario: false
+};
 
 // ============================================
 // GESTIÓN DE PRODUCTOS NUEVOS Y MÁS VENDIDOS (GLOBAL) - CORREGIDO
@@ -1530,6 +1538,26 @@ function updateUIForRole() {
   if(inventorySection) inventorySection.classList.add("hidden");
   if(mainGrid) mainGrid.parentElement.classList.remove("hidden"); // Mostrar grid normal por defecto
 
+    // Inject "Gestionar Visibilidad Stock" button for Admin if it doesn't exist
+    if (!document.getElementById('manage-stock-visibility-btn')) {
+      const btn = document.createElement('button');
+      btn.id = 'manage-stock-visibility-btn';
+      btn.className = "w-full bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold py-3 rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all shadow-lg mb-3 flex items-center justify-center gap-2";
+      btn.innerHTML = "👁️ Gestionar Visibilidad de Stock";
+      btn.onclick = showStockVisibilityModal;
+      
+      // Insert in admin section
+      if (adminSection) {
+        // Try to insert after manage banners or at the end
+        const bannersBtn = document.getElementById('manage-banners-btn');
+        if (bannersBtn && bannersBtn.parentNode === adminSection) {
+            adminSection.insertBefore(btn, bannersBtn.nextSibling);
+        } else {
+            adminSection.appendChild(btn);
+        }
+      }
+    }
+
   if (window.currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     // Asegurar que todos los botones sean visibles
@@ -2389,21 +2417,24 @@ function createProductCard(product) {
 
   // Determinar el estado del stock
   // [MODIFICADO] Mostrar siempre el stock
-  let stockBadge = ''
+  let stockBadge = '';
   const stock = product.stock || 0;
   
   // [MODIFICADO] Lógica de visibilidad de stock
-  // Por defecto, no se muestra. Se mostrará si el rol no es inventario,
-  // o si es inventario y el admin lo ha activado.
-  const showStock = window.currentUserRole !== 'inventario' || inventoryShowStockMode;
+  // Ahora depende de la configuración global por rol
+  const userRole = window.currentUserRole || 'cliente';
+  // Verificar permiso en config global. Si no existe la key, por defecto true salvo inventario.
+  const canSeeStock = (stockVisibilityConfig && typeof stockVisibilityConfig[userRole] !== 'undefined') 
+                      ? stockVisibilityConfig[userRole] 
+                      : (userRole !== 'inventario');
 
-  if (showStock) {
-      if (stock === 0) {
-        stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
-      } else {
-        const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
-        stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
-      }
+  if (stock === 0) {
+    // Siempre mostrar AGOTADO independientemente del rol
+    stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
+  } else if (canSeeStock) {
+    // Solo mostrar cantidad si tiene permiso
+    const stockColor = stock <= 5 ? 'bg-yellow-500 text-black' : 'bg-emerald-600 dark:bg-emerald-500 text-black';
+    stockBadge = `<span class="absolute bottom-3 right-3 z-20 ${stockColor} text-xs font-extrabold px-3 py-2 rounded-lg">Stock: ${stock}</span>`;
   }
 
   // [NUEVO] Lógica para badge de "Bajó de Precio"
@@ -4816,7 +4847,7 @@ async function fetchInventoryConfig() {
         // Asumimos que el ID 1 es la configuración global
         const { data, error } = await window.supabaseClient
             .from('inventory_config')
-            .select('edit_enabled, show_stock_enabled')
+            .select('edit_enabled, show_stock_enabled, role_visibility')
             .eq('id', 1)
             .single();
         
@@ -4828,6 +4859,10 @@ async function fetchInventoryConfig() {
         } else {
             inventoryEditMode = data.edit_enabled;
             inventoryShowStockMode = data.show_stock_enabled || false;
+            
+            if (data.role_visibility) {
+                stockVisibilityConfig = { ...stockVisibilityConfig, ...data.role_visibility };
+            }
         }
         updateInventoryLockButtonUI();
         updateInventoryStockVisibilityButtonUI();
@@ -4836,6 +4871,88 @@ async function fetchInventoryConfig() {
         inventoryEditMode = false;
         inventoryShowStockMode = false;
     }
+}
+
+// ============================================
+// GESTIÓN DE VISIBILIDAD DE STOCK (NUEVO)
+// ============================================
+
+function showStockVisibilityModal() {
+  const roles = ['admin', 'gestor', 'distribuidor', 'cliente', 'inventario'];
+  
+  const modalDiv = document.createElement('div');
+  modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+  modalDiv.innerHTML = `
+    <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-fade-in">
+      <div class="bg-gradient-to-r from-purple-600 to-purple-700 p-6 text-white flex justify-between items-center">
+        <h2 class="text-xl font-bold">Visibilidad de Stock</h2>
+        <button class="text-white hover:bg-white/20 rounded-lg p-1 text-xl font-bold transition-colors" onclick="this.closest('.fixed').remove()">✕</button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded mb-4">
+            <p class="text-sm text-purple-800">Selecciona qué roles pueden ver la cantidad numérica de stock. <br><strong>Nota:</strong> Los productos agotados (0) siempre mostrarán la etiqueta "AGOTADO".</p>
+        </div>
+        <div class="space-y-3 max-h-[60vh] overflow-y-auto" id="roles-visibility-list">
+          ${roles.map(role => `
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-100">
+              <span class="font-bold text-gray-700 capitalize flex items-center gap-2">
+                ${role === 'admin' ? '🛡️' : role === 'inventario' ? '📦' : role === 'cliente' ? '👤' : '👥'} 
+                ${role}
+              </span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="sr-only peer role-visibility-toggle" data-role="${role}" 
+                  ${stockVisibilityConfig[role] ? 'checked' : ''}>
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+          `).join('')}
+        </div>
+        <div class="pt-4">
+            <button id="save-visibility-btn" class="w-full bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold py-3 rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all shadow-lg transform active:scale-95">
+                Guardar Configuración
+            </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modalDiv);
+
+  document.getElementById('save-visibility-btn').addEventListener('click', async () => {
+      const newConfig = { ...stockVisibilityConfig };
+      document.querySelectorAll('.role-visibility-toggle').forEach(toggle => {
+          newConfig[toggle.dataset.role] = toggle.checked;
+      });
+      
+      const btn = document.getElementById('save-visibility-btn');
+      btn.textContent = 'Guardando...';
+      btn.disabled = true;
+      
+      // Actualizar variable global y base de datos
+      stockVisibilityConfig = newConfig;
+      
+      try {
+        // Intentar guardar en Supabase (si existe la columna role_visibility)
+        await window.supabaseClient.from('inventory_config').update({ role_visibility: newConfig }).eq('id', 1);
+        
+        // Si estamos en rol inventario y cambiamos su configuración, actualizar legacy también para consistencia
+        if (typeof newConfig.inventario !== 'undefined') {
+             await window.supabaseClient.from('inventory_config').update({ show_stock_enabled: newConfig.inventario }).eq('id', 1);
+             inventoryShowStockMode = newConfig.inventario;
+        }
+
+        alert('✅ Configuración guardada exitosamente');
+        modalDiv.remove();
+        
+        // Recargar productos para aplicar cambios visuales
+        renderProducts();
+        
+      } catch (e) {
+        console.error(e);
+        alert('⚠️ Configuración aplicada localmente, pero hubo un error guardando en la nube (Verifica si la tabla inventory_config tiene la columna role_visibility).');
+        modalDiv.remove();
+        renderProducts();
+      }
+  });
 }
 
 async function toggleInventoryConfig() {
