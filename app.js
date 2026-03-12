@@ -1508,7 +1508,7 @@ async function loadUserData(userId) {
       globalRole: window.currentUserRole
     })
 
-    updateUIForRole()
+    await updateUIForRole() // [CORREGIDO] Esperar a que la UI y la config se carguen
   } catch (error) {
     console.error("❌ Error al cargar datos del usuario:", error)
     await window.supabaseClient.auth.signOut()
@@ -1516,7 +1516,8 @@ async function loadUserData(userId) {
   }
 }
 
-function updateUIForRole() {
+// [CORREGIDO] Convertida a async para esperar la carga de configuración
+async function updateUIForRole() {
   console.log("Actualizando UI para rol:", currentUserRole)
 
   const roleBadge = document.getElementById("user-role-badge")
@@ -1568,7 +1569,7 @@ function updateUIForRole() {
     manageBannersBtn?.classList.remove("hidden")
   } else if (window.currentUserRole === "gestor") {
     gestorSection?.classList.remove("hidden")
-    
+
     // Mostrar admin-section pero solo el botón de PDF
     adminSection?.classList.remove("hidden")
     const adminButtons = adminSection.querySelectorAll("button")
@@ -1595,10 +1596,8 @@ function updateUIForRole() {
     manageBannersBtn?.classList.add("hidden")
   }
 
-  // Si es admin o inventario, cargar la configuración de inventario
-  if (window.currentUserRole === "admin" || window.currentUserRole === "inventario") {
-    fetchInventoryConfig();
-  }
+  // [CORREGIDO] Cargar la configuración de inventario para TODOS los roles, ya que afecta la visibilidad del stock para todos.
+  await fetchInventoryConfig();
 }
 
 document.getElementById("logout-button")?.addEventListener("click", async () => {
@@ -3914,10 +3913,11 @@ async function generatePDF() {
           doc.text(product.codigo || 'N/A', x + 7, y + 43)
           
           // Stock
-          const stock = inventoryDataMap.get(product.codigo)?.stock || 0
-          doc.setTextColor(...greenNeon)
-          doc.setFontSize(7)
-          doc.text(`En Stock: ${stock} uds.`, x + 5, y + 50)
+          // [MODIFICADO] Ocultar Stock en PDF
+          // const stock = inventoryDataMap.get(product.codigo)?.stock || 0
+          // doc.setTextColor(...greenNeon)
+          // doc.setFontSize(7)
+          // doc.text(`En Stock: ${stock} uds.`, x + 5, y + 50)
           
           // Description
           doc.setTextColor(...white)
@@ -4842,35 +4842,45 @@ async function exportInventoryExcel() {
 // ============================================
 
 async function fetchInventoryConfig() {
-    try {
-        // Intentamos obtener la configuración de la tabla 'inventory_config'
-        // Asumimos que el ID 1 es la configuración global
-        const { data, error } = await window.supabaseClient
-            .from('inventory_config')
-            .select('edit_enabled, show_stock_enabled, role_visibility')
-            .eq('id', 1)
-            .single();
-        
-        if (error) {
-            // Si falla (ej. tabla no existe), asumimos bloqueado por seguridad
-            console.warn("No se pudo cargar config de inventario (posiblemente tabla no creada), usando defecto: BLOQUEADO");
-            inventoryEditMode = false;
-            inventoryShowStockMode = false;
-        } else {
-            inventoryEditMode = data.edit_enabled;
-            inventoryShowStockMode = data.show_stock_enabled || false;
-            
-            if (data.role_visibility) {
-                stockVisibilityConfig = { ...stockVisibilityConfig, ...data.role_visibility };
-            }
-        }
-        updateInventoryLockButtonUI();
-        updateInventoryStockVisibilityButtonUI();
-    } catch (e) {
-        console.error("Error fetching inventory config:", e);
-        inventoryEditMode = false;
-        inventoryShowStockMode = false;
+  try {
+    // Intentamos obtener la configuración de la tabla 'inventory_config'
+    const { data, error } = await window.supabaseClient
+      .from("inventory_config")
+      .select("edit_enabled, show_stock_enabled, role_visibility")
+      .eq("id", 1)
+      .single()
+
+    // [CORREGIDO] Manejar el caso donde la consulta no devuelve datos (data es null),
+    // lo que puede ocurrir por RLS o porque la fila no existe.
+    if (error) {
+      console.error("[CONFIG] Error al obtener la configuración de inventario:", error)
+      inventoryEditMode = false
+      inventoryShowStockMode = false
+    } else if (!data) {
+      console.warn(
+        "[CONFIG] No se encontró la fila de configuración (id=1) en la base de datos. Usando valores por defecto. (Verifica los permisos RLS para la tabla 'inventory_config')",
+      )
+      inventoryEditMode = false
+      inventoryShowStockMode = false
+    } else {
+      // La configuración fue encontrada
+      inventoryEditMode = data.edit_enabled
+      inventoryShowStockMode = data.show_stock_enabled || false
+
+      if (data.role_visibility) {
+        stockVisibilityConfig = data.role_visibility
+        console.log("✅ Configuración de visibilidad de stock cargada desde la BD:", stockVisibilityConfig)
+      } else {
+        console.warn("⚠️ La columna `role_visibility` es nula en la BD. Se usarán los valores por defecto.")
+      }
     }
+    updateInventoryLockButtonUI()
+    updateInventoryStockVisibilityButtonUI()
+  } catch (e) {
+    console.error("Error inesperado en fetchInventoryConfig:", e)
+    inventoryEditMode = false
+    inventoryShowStockMode = false
+  }
 }
 
 // ============================================
