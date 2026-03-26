@@ -913,6 +913,18 @@
                         </select>
                     </div>
 
+                    <!-- Toggle: ¿Puede ver cantidades de stock? -->
+                    <div id="can-see-stock-container" class="flex items-center justify-between p-4 bg-gray-50 rounded-xl border-2 border-gray-200">
+                        <div>
+                            <label class="block text-gray-700 font-bold text-sm">¿Puede ver cantidades?</label>
+                            <p class="text-xs text-gray-500 mt-0.5">Si está desactivado, el usuario no verá el stock numérico</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="new-user-can-see-stock" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+                        </label>
+                    </div>
+
                     <button type="submit" 
                         class="w-full bg-orange-600 text-white font-bold py-3 rounded-xl hover:bg-orange-700 transition-all shadow-lg">
                         Crear Usuario
