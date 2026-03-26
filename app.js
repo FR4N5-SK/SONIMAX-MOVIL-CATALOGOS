@@ -1421,6 +1421,9 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
   const username = document.getElementById("new-user-username").value.trim().toLowerCase()
   const password = document.getElementById("new-user-password").value
   const role = document.getElementById("new-user-role").value
+  // [NUEVO] Leer si el usuario puede ver cantidades de stock
+  const canSeeStockCheckbox = document.getElementById("new-user-can-see-stock");
+  const canSeeStock = canSeeStockCheckbox ? canSeeStockCheckbox.checked : true;
 
   showCreateUserMessage("Creando usuario...", "info")
 
@@ -1458,6 +1461,7 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
       .update({
         role: role,
         created_by: currentUser.auth_id,
+        can_see_stock: canSeeStock,
       })
       .eq("auth_id", data.user.id)
 
@@ -1466,10 +1470,12 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
       throw new Error("Usuario creado pero no se pudo asignar el rol correctamente")
     }
 
-    console.log("✅ Usuario creado exitosamente con rol:", role)
+    console.log(`✅ Usuario creado exitosamente con rol: ${role}, puede ver stock: ${canSeeStock}`)
     showCreateUserMessage(`Usuario "${username}" creado exitosamente con rol de ${role}`, "success")
 
     document.getElementById("create-user-form").reset()
+    // Restaurar el checkbox a su estado por defecto (checked)
+    if (canSeeStockCheckbox) canSeeStockCheckbox.checked = true;
 
     setTimeout(() => {
       document.getElementById("create-user-modal").classList.add("hidden")
@@ -2420,12 +2426,18 @@ function createProductCard(product) {
   const stock = product.stock || 0;
   
   // [MODIFICADO] Lógica de visibilidad de stock
-  // Ahora depende de la configuración global por rol
+  // Ahora depende de la configuración global por rol Y del permiso individual del usuario
   const userRole = window.currentUserRole || 'cliente';
   // Verificar permiso en config global. Si no existe la key, por defecto true salvo inventario.
-  const canSeeStock = (stockVisibilityConfig && typeof stockVisibilityConfig[userRole] !== 'undefined') 
+  const roleCanSeeStock = (stockVisibilityConfig && typeof stockVisibilityConfig[userRole] !== 'undefined') 
                       ? stockVisibilityConfig[userRole] 
                       : (userRole !== 'inventario');
+  // [NUEVO] Verificar permiso individual del usuario (can_see_stock). Si el campo no existe, se asume true.
+  const userCanSeeStock = (currentUser && typeof currentUser.can_see_stock !== 'undefined') 
+                      ? currentUser.can_see_stock 
+                      : true;
+  // El usuario ve stock SOLO si ambas condiciones se cumplen
+  const canSeeStock = roleCanSeeStock && userCanSeeStock;
 
   if (stock === 0) {
     // Siempre mostrar AGOTADO independientemente del rol
@@ -2469,7 +2481,7 @@ function createProductCard(product) {
             </div>
           `;
       } else {
-          // VISTA: EN DEPÓSITO (Input Cantidad)
+          // VISTA: EN DEPÓSITO (Input Cantidad + Botones Cambiar Depósito)
           // Lógica de bloqueo: Bloqueado si !inventoryEditMode Y ya tiene cantidad > 0
           const currentQty = invData ? (invData.cantidad_fisica || 0) : 0;
           const isLocked = !inventoryEditMode && currentQty > 0;
@@ -2478,7 +2490,7 @@ function createProductCard(product) {
             <div class="mt-3">
                 <div class="flex justify-between items-center mb-1">
                     <p class="text-xs font-bold text-gray-500 uppercase">Conteo Físico:</p>
-                    <span class="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-600">Dep: ${currentDep}</span>
+                    <span class="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Dep: ${currentDep}</span>
                 </div>
                 <div class="relative">
                     <input type="number" 
@@ -2492,6 +2504,24 @@ function createProductCard(product) {
                     ${isLocked ? '<div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></div>' : ''}
                 </div>
                 ${!isLocked ? '<p class="text-[10px] text-center text-gray-400 mt-1">Ingresa la cantidad y presiona Enter o sal del campo</p>' : '<p class="text-[10px] text-center text-red-400 mt-1 font-medium">Edición bloqueada por Admin</p>'}
+                
+                <!-- [NUEVO] Botones para cambiar depósito -->
+                <div class="mt-3 pt-3 border-t border-gray-200">
+                    <p class="text-[10px] font-bold text-gray-400 mb-1.5 text-center uppercase tracking-wider">Cambiar Depósito:</p>
+                    <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-1">
+                        ${['A','B','C','D','E','PLANTA BAJA','PISO VENTA'].map(d => `
+                            <button class="deposito-change-btn w-full h-auto min-h-[2rem] py-1 rounded-lg font-bold text-[9px] sm:text-[10px] ${
+                                d === currentDep 
+                                ? 'bg-blue-600 text-white border-blue-700 shadow-md cursor-default' 
+                                : 'bg-gray-100 hover:bg-orange-500 hover:text-white border border-gray-200 transition-all shadow-sm'
+                            } flex items-center justify-center text-center leading-tight" 
+                                ${d === currentDep ? 'disabled' : ''}
+                                onclick="window.assignProductDeposit('${product.id}', '${product.codigo}', '${d}')">
+                                ${d === currentDep ? '✓ ' + d : d}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
             </div>
           `;
       }
