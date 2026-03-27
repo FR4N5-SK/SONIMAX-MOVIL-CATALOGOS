@@ -195,7 +195,6 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
       newProductIds.push(product.id)
       console.log(`[COMPARISON] ✨ Producto NUEVO: ${product.nombre}`)
     } else {
-      // Verificar si cambió algún dato importante
       const priceChanged =
         previousProduct.precio_cliente !== product.precio_cliente ||
         previousProduct.precio_mayor !== product.precio_mayor ||
@@ -204,9 +203,17 @@ function compareProductsAndDetectNew(currentProducts, previousSnapshot) {
       const dataChanged =
         previousProduct.nombre !== product.nombre || previousProduct.departamento !== product.departamento
 
-      if (priceChanged || dataChanged) {
-        modifiedProductIds.push(product.id)
-        console.log(`[COMPARISON] 🔄 Producto MODIFICADO: ${product.nombre}`)
+      const backInStock = (previousProduct.stock || 0) === 0 && (product.stock || 0) > 0
+
+      if (priceChanged || dataChanged || backInStock) {
+        if (backInStock) {
+          newProductIds.push(product.id)
+          console.log(`[COMPARISON] 🆕 Producto VOLVIÓ A STOCK: ${product.nombre}`)
+        } else {
+          modifiedProductIds.push(product.id)
+          console.log(`[COMPARISON] 🔄 Producto MODIFICADO: ${product.nombre}`)
+        }
+        
         if (priceChanged) {
           console.log(`   💰 Cambio de precios detectado`)
         }
@@ -1767,6 +1774,8 @@ function setupEventListeners() {
         <option value="distribuidor">Mayorista</option>
         <option value="gestor">Gestor</option>
       `
+      // [NUEVO] El gestor no puede ver el toggle
+      document.getElementById("can-see-stock-container")?.classList.add("hidden")
     } else if (window.currentUserRole === "admin") {
       roleSelect.innerHTML = `
         <option value="cliente">Cliente</option>
@@ -1775,6 +1784,8 @@ function setupEventListeners() {
         <option value="admin">Administrador</option>
         <option value="inventario">Inventario</option>
       `
+      // [NUEVO] Solo el admin puede ver el toggle de ver cantidades
+      document.getElementById("can-see-stock-container")?.classList.remove("hidden")
     }
 
     document.getElementById("create-user-modal").classList.remove("hidden")
@@ -3699,6 +3710,23 @@ async function handleCSVUpload() {
               console.log(
                 `[NEW-PRODUCTS] ✅ ${comparisonResult.newProductIds.length} productos marcados como nuevos en BD`,
               )
+
+              // [NUEVO] Gestionar lista rotativa (Límite 100)
+              try {
+                const { data: allNewlyMarked } = await window.supabaseClient
+                  .from('products')
+                  .select('id')
+                  .eq('is_new', true)
+                  .order('created_at', { ascending: false });
+                
+                if (allNewlyMarked && allNewlyMarked.length > 100) {
+                    const idsToRemove = allNewlyMarked.slice(100).map(p => p.id);
+                    await window.supabaseClient.from('products').update({ is_new: false }).in('id', idsToRemove);
+                    console.log(`[NEW-PRODUCTS] 🔄 Rotación: Se quitó la marca 'nuevo' a ${idsToRemove.length} productos antiguos.`);
+                }
+              } catch (rotErr) {
+                console.error("[NEW-PRODUCTS] Error en rotación:", rotErr);
+              }
             }
 
             // También guardar en localStorage para compatibilidad
