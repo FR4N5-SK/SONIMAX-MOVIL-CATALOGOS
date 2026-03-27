@@ -310,7 +310,7 @@
         while (hasMore) {
           const { data, error: fetchError } = await supabaseClient
             .from('products')
-            .select('id, codigo, nombre, descripcion')
+            .select('id, codigo, nombre, descripcion, stock')
             .range(page * pageSize, (page + 1) * pageSize - 1);
 
           if (fetchError) throw new Error('Error obteniendo productos: ' + fetchError.message);
@@ -329,11 +329,13 @@
 
         const codesMap = new Map(); // codigo -> id
         const descMap = new Map(); // descripcion -> id
+        const outOfStockIds = new Set(); // IDs de productos anteriormente agotados
         (existingProducts || []).forEach(p => {
           const codeKey = normalizeCode(p.codigo);
           if (codeKey) codesMap.set(codeKey, p.id);
           const descKey = normalizeDescKey(p.nombre || p.descripcion || '');
           if (descKey && !descMap.has(descKey)) descMap.set(descKey, p.id);
+          if ((p.stock || 0) <= 0) outOfStockIds.add(p.id);
         });
 
         // Mapas locales para agrupar filas del Excel (evitar duplicados en el mismo archivo)
@@ -749,29 +751,76 @@
           } else if (newRows && newRows.length > 0) {
             console.log('[UPDATE-PROCESS] Productos creados en esta operación:', newRows);
 
+            // [NUEVO] Identificar productos que estaban agotados y ahora tienen stock
+            const backInStockIds = [];
+            upsertByCode.forEach(p => {
+                const codeKey = normalizeCode(p.codigo);
+                const id = codesMap.get(codeKey);
+                if (id && outOfStockIds.has(id) && p.stock > 0) {
+                    backInStockIds.push(id);
+                }
+            });
+            updatesById.forEach(p => {
+                if (outOfStockIds.has(p.id) && p.stock > 0) {
+                    backInStockIds.push(p.id);
+                }
+            });
+
             // Marcar como is_new en la BD para que aparezcan en 'Mercancía Recién Llegada'
             try {
-              const newIds = newRows.map(r => r.id).filter(Boolean);
-              if (newIds.length > 0) {
+              const newlyCreatedIds = newRows.map(r => r.id).filter(Boolean);
+              // Combinar nuevos con los que volvieron a tener stock
+              const allNewIds = [...new Set([...newlyCreatedIds, ...backInStockIds])];
+
+              if (allNewIds.length > 0) {
+                // [NUEVO] Para implementar "irse quitando los más viejos":
+                // 1. Obtener todos los productos que actualmente son 'is_new'
+                // 2. Si el total supera un límite (ej: 100), quitar la marca a los más antiguos
+                const { data: currentNewProducts } = await supabaseClient
+                  .from('products')
+                  .select('id, created_at')
+                  .eq('is_new', true)
+                  .order('created_at', { ascending: false });
+
+                // Marcar los de este lote como nuevos
                 const { error: markError } = await supabaseClient
                   .from('products')
                   .update({ is_new: true })
-                  .in('id', newIds);
+                  .in('id', allNewIds);
 
                 if (markError) console.warn('[UPDATE-PROCESS] Error marcando is_new:', markError);
                 else {
-                  console.log(`[UPDATE-PROCESS] ✅ ${newIds.length} productos marcados como is_new`);
+                  console.log(`[UPDATE-PROCESS] ✅ ${allNewIds.length} productos marcados como is_new`);
+
+                  // [NUEVO] Gestionar lista rotativa (Límite 100)
+                  const totalNewList = [...new Set([...allNewIds, ...(currentNewProducts || []).map(p => p.id)])];
+                  if (totalNewList.length > 100) {
+                      // Obtener IDs de los que sobran (los más viejos en el sistema por created_at)
+                      // Nota: Una implementación más precisa usaría un timestamp de 'marked_new_at',
+                      // pero como no existe, usaremos created_at como proxy para "viejo".
+                      const { data: allNewlyMarked } = await supabaseClient
+                        .from('products')
+                        .select('id')
+                        .eq('is_new', true)
+                        .order('created_at', { ascending: false });
+                      
+                      if (allNewlyMarked && allNewlyMarked.length > 100) {
+                          const idsToRemove = allNewlyMarked.slice(100).map(p => p.id);
+                          await supabaseClient.from('products').update({ is_new: false }).in('id', idsToRemove);
+                          console.log(`[UPDATE-PROCESS] 🔄 Rotación: Se quitó la marca 'nuevo' a ${idsToRemove.length} productos antiguos.`);
+                      }
+                  }
 
                   // Guardar lista limitada localmente para compatibilidad con la UI
                   try {
-                    if (window.saveNewProducts) window.saveNewProducts(newIds.slice(0, 100));
+                    if (window.saveNewProducts) window.saveNewProducts(allNewIds.slice(0, 100));
                   } catch (err) {
                     console.warn('[UPDATE-PROCESS] Error saveNewProducts:', err);
                   }
 
                   // Actualizar cache local y re-renderizar
                   if (window.allProducts && window.renderProducts) {
-                    window.allProducts = window.allProducts.map(p => (newIds.includes(p.id) ? { ...p, is_new: true } : p));
+                    window.allProducts = window.allProducts.map(p => (allNewIds.includes(p.id) ? { ...p, is_new: true } : p));
                     window.renderProducts();
                   }
                 }
