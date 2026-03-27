@@ -2384,6 +2384,8 @@ function loadMoreProducts() {
 function createProductCard(product) {
   const card = document.createElement("div")
   card.className = "product-card"
+  const cleanCode = (product.codigo || '').trim().toUpperCase();
+  card.dataset.productCode = cleanCode;
   
   // [NUEVO] Datos de inventario para este producto
   const pCode = (product.codigo || '').trim().toUpperCase();
@@ -2631,8 +2633,49 @@ window.assignProductDeposit = async function(productId, productCode, deposito) {
         }
         inventoryDataMap.set(pCode, itemData);
 
-        // Refrescar vista actual (eliminará la tarjeta de "Por Asignar")
-        filterByDepartment(currentDepartment);
+        // [MODIFICADO] NO llamar a filterByDepartment para evitar reinicio de scroll
+        // filterByDepartment(currentDepartment);
+        
+        // Buscamos la tarjeta en el DOM
+        const productCard = document.querySelector(`.product-card[data-product-code="${pCode}"]`);
+        
+        if (productCard) {
+            // Verificamos si el producto aún coincide con el filtro actual
+            let matches = true;
+            if (currentDepartment.startsWith('inv_')) {
+                const targetDeposit = currentDepartment.replace('inv_', '');
+                if (targetDeposit === 'unassigned') {
+                    matches = !deposito;
+                } else {
+                    matches = deposito === targetDeposit;
+                }
+            }
+            
+            if (!matches) {
+                // Si ya no coincide, lo removemos con una animación suave
+                productCard.style.transition = 'all 0.4s ease';
+                productCard.style.opacity = '0';
+                productCard.style.transform = 'scale(0.8)';
+                
+                setTimeout(() => {
+                    productCard.remove();
+                    // También actualizar filteredProducts en memoria para consistencia
+                    const idx = filteredProducts.findIndex(p => (p.codigo || '').trim().toUpperCase() === pCode);
+                    if (idx > -1) filteredProducts.splice(idx, 1);
+                    
+                    // Si no quedan productos en el grid por el filtrado, mostrar el mensaje de "no hay productos"
+                    const grid = document.getElementById("products-grid");
+                    if (grid && grid.children.length === 0) {
+                        document.getElementById("no-products")?.classList.remove("hidden");
+                    }
+                }, 400);
+            } else {
+                // Si aún coincide (ej: rol admin editando), actualizamos el contenido in-place
+                // Pero en el rol inventario, normalmente desaparecerá porque el botón de su depósito actual está disabled
+                // y los demás lo mueven a otra vista.
+                console.log(`[INVENTARIO] Producto ${pCode} actualizado in-place.`);
+            }
+        }
 
         // Guardar en BD
         const { error } = await window.supabaseClient
