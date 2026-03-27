@@ -2450,6 +2450,11 @@ function createProductCard(product) {
   // El usuario ve stock SOLO si ambas condiciones se cumplen
   const canSeeStock = roleCanSeeStock && userCanSeeStock;
 
+  // LOG PARA DEPURACIÓN (Solo visible en consola)
+  if (stock > 0 && !canSeeStock) {
+    console.log(`[DEBUG-STOCK] Producto ${product.nombre}: Oculto. roleCanSeeStock=${roleCanSeeStock}, userCanSeeStock=${userCanSeeStock}, role=${userRole}`);
+  }
+
   if (stock === 0) {
     // Siempre mostrar AGOTADO independientemente del rol
     stockBadge = '<span class="absolute bottom-3 right-3 z-20 bg-red-600 text-white text-xs font-extrabold px-3 py-2 rounded-lg animate-pulse">AGOTADO</span>';
