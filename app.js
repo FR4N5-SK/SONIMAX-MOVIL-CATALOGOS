@@ -2545,9 +2545,10 @@ function createProductCard(product) {
       }
   } else {
       // VISTA NORMAL (Botón Carrito)
+      const isAgotado = product.stock === 0;
       actionButtonsHTML = `
-        <button class="add-to-cart-btn relative z-0 w-full bg-gradient-to-r from-red-600 via-orange-500 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
-            Agregar al Carrito
+        <button class="add-to-cart-btn relative z-0 w-full ${isAgotado ? 'bg-gray-400 cursor-not-allowed text-gray-200' : 'bg-gradient-to-r from-red-600 via-orange-500 to-red-700 text-white hover:from-red-700 hover:to-red-800'} font-bold py-3 rounded-xl transition-all shadow-lg" ${isAgotado ? 'disabled' : ''}>
+            ${isAgotado ? 'Agotado' : 'Agregar al Carrito'}
         </button>
       `;
   }
@@ -2611,6 +2612,10 @@ function createProductCard(product) {
   const addToCartBtn = card.querySelector(".add-to-cart-btn");
   if (addToCartBtn) {
       addToCartBtn.addEventListener("click", () => {
+        if (product.stock === 0) {
+          alert("Este producto está agotado y no se puede agregar al carrito.");
+          return;
+        }
         openQuantityModal(product)
       })
   }
@@ -2867,6 +2872,11 @@ async function clearCart() {
 }
 
 function openQuantityModal(product) {
+  if (product.stock === 0) {
+    alert("Este producto está agotado y no se puede agregar al carrito.");
+    return;
+  }
+
   selectedProductForQuantity = product
   const modal = document.getElementById("quantity-modal")
   const productInfo = document.getElementById("quantity-product-info")
@@ -2946,7 +2956,12 @@ async function confirmQuantity() {
     return
   }
 
-  if (selectedProductForQuantity.stock !== 0 && quantity > selectedProductForQuantity.stock) {
+  if (selectedProductForQuantity.stock === 0) {
+    alert("Este producto está agotado y no se puede agregar al carrito.");
+    return;
+  }
+
+  if (quantity > selectedProductForQuantity.stock) {
     alert(`Cantidad no disponible. Stock máximo: ${selectedProductForQuantity.stock}`)
     return
   }
