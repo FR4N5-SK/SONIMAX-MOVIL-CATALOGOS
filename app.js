@@ -1814,6 +1814,12 @@ function setupEventListeners() {
     document.getElementById("cart-modal").classList.add("hidden")
   })
 
+  document.getElementById("clear-cart-btn")?.addEventListener("click", async () => {
+    if (confirm("¿Estás seguro de que deseas vaciar todo el carrito?")) {
+      await clearCart()
+    }
+  })
+
   document.getElementById("global-search")?.addEventListener("input", handleGlobalSearch)
   document.getElementById("dept-search")?.addEventListener("input", handleDeptSearch)
 
@@ -3408,7 +3414,15 @@ async function sendWhatsAppOrderFallback(responsables, sitio) {
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
-  await clearCart()
+
+  const onFocus = async () => {
+    window.removeEventListener("focus", onFocus)
+    if (confirm("Pedido enviado, ¿Desea vaciar el carrito?")) {
+      await clearCart()
+      document.getElementById("cart-modal").classList.add("hidden")
+    }
+  }
+  setTimeout(() => window.addEventListener("focus", onFocus), 500)
 }
 
 async function sendWhatsAppOrder() {
@@ -3477,11 +3491,14 @@ async function sendWhatsAppOrder() {
   console.log("Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
 
-  await clearCart()
-
-  document.getElementById("cart-modal").classList.add("hidden")
-
-  alert("Pedido enviado por WhatsApp. El carrito ha sido limpiado.")
+  const onFocus = async () => {
+    window.removeEventListener("focus", onFocus)
+    if (confirm("Pedido enviado, ¿Desea vaciar el carrito?")) {
+      await clearCart()
+      document.getElementById("cart-modal").classList.add("hidden")
+    }
+  }
+  setTimeout(() => window.addEventListener("focus", onFocus), 500)
 }
 
 function normalizeText(text) {
