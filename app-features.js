@@ -32,19 +32,17 @@
         return;
       }
 
-      // Filtrar productos sin imagen URL desde la memoria local
       const productsWithoutPhoto = allProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
-
       console.log('[NO-PHOTO] Encontrados:', productsWithoutPhoto.length, 'productos sin foto');
 
       const modalDiv = document.createElement('div');
       modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
       modalDiv.innerHTML = `
         <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
-          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between">
+          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between rounded-t-2xl">
             <div>
               <h2 class="text-2xl font-bold">Productos sin Foto</h2>
-              <p class="text-amber-100 mt-1">Total encontrados: ${productsWithoutPhoto.length}</p>
+              <p class="text-amber-100 mt-1">Total encontrados: ${productsWithoutPhoto.length} — Haz clic en un producto para agregar su foto</p>
             </div>
             <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
           </div>
@@ -53,25 +51,37 @@
             <input type="text" id="no-photo-search" placeholder="Busca por código o nombre..." 
               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent transition-all">
             
-            <div id="no-photo-results" class="space-y-3 max-h-96 overflow-y-auto">
-              ${productsWithoutPhoto.length === 0 ? '<p class="text-gray-500 text-center py-8">¡Todos los productos tienen foto!</p>' : 
-                productsWithoutPhoto.map(p => `
-                <div class="p-4 bg-gray-50 rounded-lg border-l-4 border-amber-500 hover:bg-gray-100 transition cursor-pointer no-photo-item" 
-                  data-codigo="${p.codigo || ''}" data-nombre="${p.nombre || ''}" data-id="${p.id}">
-                  <p class="font-semibold text-gray-800">${p.codigo || 'SIN CODE'}</p>
-                  <p class="text-sm text-gray-600 mt-1">${p.nombre || 'Sin nombre'}</p>
-                  <p class="text-xs text-gray-500 mt-2">${p.descripcion || 'Sin descripción'}</p>
-                  <p class="text-xs text-amber-600 mt-2">Stock: ${p.stock || 0}</p>
+            <div id="no-photo-results" class="space-y-2 max-h-[60vh] overflow-y-auto">
+              ${productsWithoutPhoto.length === 0 
+                ? '<p class="text-gray-500 text-center py-8">¡Todos los productos tienen foto!</p>' 
+                : productsWithoutPhoto.map(p => `
+                <div class="no-photo-item border-l-4 border-amber-500 rounded-lg overflow-hidden"
+                  data-codigo="${(p.codigo || '').replace(/"/g,'&quot;')}" 
+                  data-nombre="${(p.nombre || '').replace(/"/g,'&quot;')}" 
+                  data-id="${p.id}">
+                  <div class="p-4 bg-gray-50 hover:bg-amber-50 transition cursor-pointer flex items-center justify-between no-photo-header">
+                    <div>
+                      <p class="font-semibold text-gray-800">${p.codigo || 'SIN CÓDIGO'}</p>
+                      <p class="text-sm text-gray-600 mt-0.5">${p.nombre || 'Sin nombre'}</p>
+                      <p class="text-xs text-amber-600 mt-1">Stock: ${p.stock || 0}</p>
+                    </div>
+                    <span class="text-amber-500 text-xl font-bold ml-3">📷</span>
+                  </div>
+                  <div class="no-photo-form hidden px-4 pb-4 bg-amber-50 border-t border-amber-200">
+                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">URL de la Foto:</label>
+                    <input type="url" class="photo-url-input w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="https://i.ibb.co/...">
+                    <p class="text-xs text-gray-500 mt-1">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
+                    <div class="flex gap-2 mt-3">
+                      <button class="save-photo-btn flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg font-semibold text-sm hover:bg-amber-700 transition" data-id="${p.id}">Guardar Foto</button>
+                      <button class="cancel-photo-btn flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition">Cancelar</button>
+                    </div>
+                  </div>
                 </div>
               `).join('')}
             </div>
           </div>
           
           <div class="p-6 border-t flex gap-3">
-            <button class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition" 
-              onclick="window.showAddMerchandiseModal()">
-              Agregar Fotos
-            </button>
             <button class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition" 
               onclick="this.closest('.fixed').remove()">
               Cerrar
@@ -81,38 +91,230 @@
       `;
       document.body.appendChild(modalDiv);
 
-      // Agregar funcionalidad de búsqueda
+      // Búsqueda
       const searchInput = document.getElementById('no-photo-search');
-      const resultsDiv = document.getElementById('no-photo-results');
-      const items = modalDiv.querySelectorAll('.no-photo-item');
-
       searchInput.addEventListener('input', () => {
-        const searchTerm = searchInput.value.toLowerCase().trim();
-        let visibleCount = 0;
-
-        items.forEach(item => {
-          const codigo = item.dataset.codigo.toLowerCase();
-          const nombre = item.dataset.nombre.toLowerCase();
-          
-          if (codigo.includes(searchTerm) || nombre.includes(searchTerm)) {
-            item.style.display = 'block';
-            visibleCount++;
-          } else {
-            item.style.display = 'none';
-          }
+        const term = searchInput.value.toLowerCase().trim();
+        modalDiv.querySelectorAll('.no-photo-item').forEach(item => {
+          const match = item.dataset.codigo.toLowerCase().includes(term) || item.dataset.nombre.toLowerCase().includes(term);
+          item.style.display = match ? '' : 'none';
         });
+      });
+      searchInput.focus();
 
-        if (visibleCount === 0 && searchTerm.length > 0) {
-          resultsDiv.innerHTML = '<p class="text-gray-500 text-center py-8">No se encontraron productos</p>';
+      // Toggle inline del formulario al hacer clic en el header
+      modalDiv.addEventListener('click', async (e) => {
+        // Abrir/cerrar formulario inline
+        const header = e.target.closest('.no-photo-header');
+        if (header) {
+          const item = header.closest('.no-photo-item');
+          const form = item.querySelector('.no-photo-form');
+          const isOpen = !form.classList.contains('hidden');
+          // Cerrar todos los demás
+          modalDiv.querySelectorAll('.no-photo-form').forEach(f => f.classList.add('hidden'));
+          if (!isOpen) {
+            form.classList.remove('hidden');
+            form.querySelector('.photo-url-input').focus();
+          }
+          return;
+        }
+
+        // Cancelar
+        if (e.target.classList.contains('cancel-photo-btn')) {
+          e.target.closest('.no-photo-form').classList.add('hidden');
+          return;
+        }
+
+        // Guardar foto
+        if (e.target.classList.contains('save-photo-btn')) {
+          const btn = e.target;
+          const productId = btn.dataset.id;
+          const form = btn.closest('.no-photo-form');
+          const urlInput = form.querySelector('.photo-url-input');
+          const url = urlInput.value.trim();
+
+          if (!url) { alert('Por favor ingresa una URL de foto válida.'); return; }
+
+          const { supabaseClient } = getGlobalState();
+          btn.textContent = 'Guardando...';
+          btn.disabled = true;
+
+          try {
+            const { error } = await supabaseClient.from('products').update({ imagen_url: url }).eq('id', productId);
+            if (error) throw error;
+
+            // Actualizar en memoria
+            if (window.allProducts) {
+              const idx = window.allProducts.findIndex(p => p.id === productId);
+              if (idx !== -1) window.allProducts[idx].imagen_url = url;
+            }
+
+            // Remover el ítem de la lista
+            form.closest('.no-photo-item').remove();
+            if (window.renderProducts) window.renderProducts();
+
+            // Actualizar contador
+            const remaining = modalDiv.querySelectorAll('.no-photo-item').length;
+            modalDiv.querySelector('.text-amber-100').textContent = `Total encontrados: ${remaining} — Haz clic en un producto para agregar su foto`;
+
+          } catch (err) {
+            console.error('[NO-PHOTO] Error guardando:', err);
+            alert('Error al guardar: ' + err.message);
+            btn.textContent = 'Guardar Foto';
+            btn.disabled = false;
+          }
         }
       });
 
-      searchInput.focus();
     } catch (error) {
       console.error('[NO-PHOTO] Error inesperado:', error);
       alert('Error: ' + error.message);
     }
   };
+
+  // ============================================
+  // BAJO STOCK (1-5) - VISIBILIDAD EN CATÁLOGO
+  // ============================================
+
+  window.showLowStockModal = async function() {
+    try {
+      const { allProducts, currentUserRole, supabaseClient } = getGlobalState();
+
+      if (currentUserRole !== 'admin') {
+        alert('Solo administradores pueden acceder a esta función.');
+        return;
+      }
+
+      if (!allProducts || allProducts.length === 0) {
+        alert('Cargando productos... Por favor espera unos segundos.');
+        return;
+      }
+
+      // Filtrar productos con stock entre 1 y 5
+      const lowStockProducts = allProducts.filter(p => {
+        const s = p.stock || 0;
+        return s >= 1 && s <= 5;
+      });
+
+      console.log('[LOW-STOCK] Productos con stock 1-5:', lowStockProducts.length);
+
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
+      modalDiv.innerHTML = `
+        <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
+          <div class="bg-gradient-to-r from-red-600 to-red-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between rounded-t-2xl">
+            <div>
+              <h2 class="text-2xl font-bold">⚠️ Productos con Bajo Stock (1-5)</h2>
+              <p class="text-red-100 mt-1" id="low-stock-subtitle">Total: ${lowStockProducts.length} productos — Activa/desactiva su visibilidad en el catálogo</p>
+            </div>
+            <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-red-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <input type="text" id="low-stock-search" placeholder="Busca por código o nombre..." 
+              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-all">
+            
+            <div id="low-stock-list" class="space-y-2 max-h-[60vh] overflow-y-auto">
+              ${lowStockProducts.length === 0
+                ? '<p class="text-gray-500 text-center py-8">No hay productos con stock entre 1 y 5.</p>'
+                : lowStockProducts.map(p => {
+                    const isVisible = p.visible_in_catalog !== false; // default true
+                    const stockColor = p.stock <= 2 ? 'bg-red-100 text-red-700 border-red-300' : 'bg-yellow-100 text-yellow-700 border-yellow-300';
+                    return `
+                    <div class="low-stock-item flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition"
+                      data-codigo="${(p.codigo || '').replace(/"/g,'&quot;')}"
+                      data-nombre="${(p.nombre || '').replace(/"/g,'&quot;')}"
+                      data-id="${p.id}">
+                      <div class="flex-1 min-w-0 mr-4">
+                        <p class="font-semibold text-gray-800 truncate">${p.codigo || 'SIN CÓDIGO'}</p>
+                        <p class="text-sm text-gray-600 truncate">${p.nombre || 'Sin nombre'}</p>
+                        <span class="inline-block mt-1 px-2 py-0.5 text-xs font-bold rounded-full border ${stockColor}">
+                          Stock: ${p.stock}
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-3 flex-shrink-0">
+                        <span class="text-xs font-semibold visibility-label ${isVisible ? 'text-green-600' : 'text-red-500'}">
+                          ${isVisible ? 'Visible' : 'Oculto'}
+                        </span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" class="sr-only peer visibility-toggle" data-id="${p.id}" ${isVisible ? 'checked' : ''}>
+                          <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-400 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                        </label>
+                      </div>
+                    </div>
+                  `}).join('')}
+            </div>
+          </div>
+
+          <div class="p-6 border-t flex gap-3">
+            <button onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition">
+              Cerrar
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+
+      // Búsqueda
+      document.getElementById('low-stock-search').addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase().trim();
+        modalDiv.querySelectorAll('.low-stock-item').forEach(item => {
+          const match = item.dataset.codigo.toLowerCase().includes(term) || item.dataset.nombre.toLowerCase().includes(term);
+          item.style.display = match ? '' : 'none';
+        });
+      });
+      document.getElementById('low-stock-search').focus();
+
+      // Toggle de visibilidad
+      modalDiv.addEventListener('change', async (e) => {
+        if (!e.target.classList.contains('visibility-toggle')) return;
+
+        const toggle = e.target;
+        const productId = toggle.dataset.id;
+        const isVisible = toggle.checked;
+        const item = toggle.closest('.low-stock-item');
+        const label = item.querySelector('.visibility-label');
+
+        // Feedback visual inmediato
+        label.textContent = isVisible ? 'Visible' : 'Oculto';
+        label.className = `text-xs font-semibold visibility-label ${isVisible ? 'text-green-600' : 'text-red-500'}`;
+
+        try {
+          const { error } = await supabaseClient
+            .from('products')
+            .update({ visible_in_catalog: isVisible })
+            .eq('id', productId);
+
+          if (error) throw error;
+
+          // Actualizar en memoria
+          if (window.allProducts) {
+            const idx = window.allProducts.findIndex(p => p.id === productId);
+            if (idx !== -1) window.allProducts[idx].visible_in_catalog = isVisible;
+          }
+
+          console.log(`[LOW-STOCK] Producto ${productId} visible_in_catalog = ${isVisible}`);
+
+          // Re-renderizar catálogo (productos ocultos desaparecen para no-admin)
+          if (window.renderProducts) window.renderProducts();
+
+        } catch (err) {
+          console.error('[LOW-STOCK] Error actualizando visibilidad:', err);
+          // Revertir toggle
+          toggle.checked = !isVisible;
+          label.textContent = !isVisible ? 'Visible' : 'Oculto';
+          label.className = `text-xs font-semibold visibility-label ${!isVisible ? 'text-green-600' : 'text-red-500'}`;
+          alert('Error al actualizar: ' + err.message);
+        }
+      });
+
+    } catch (error) {
+      console.error('[LOW-STOCK] Error inesperado:', error);
+      alert('Error: ' + error.message);
+    }
+  };
+
+
 
   // ============================================
   // AGREGAR MERCANCÍA - BÚSQUEDA Y FORM
