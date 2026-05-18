@@ -2322,7 +2322,13 @@ function renderProducts() {
     grid.innerHTML = ""
   }
 
-  if (filteredProducts.length === 0) {
+  // [NUEVO] Ocultar productos con visible_in_catalog=false para roles que no son admin
+  const isAdmin = (window.currentUserRole || currentUserRole) === 'admin';
+  const visibleProducts = isAdmin
+    ? filteredProducts
+    : filteredProducts.filter(p => p.visible_in_catalog !== false);
+
+  if (visibleProducts.length === 0) {
     noProducts.classList.remove("hidden")
     return
   }
@@ -2331,7 +2337,7 @@ function renderProducts() {
 
   const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE
   const endIndex = startIndex + PRODUCTS_PER_PAGE
-  const productsToRender = filteredProducts.slice(startIndex, endIndex)
+  const productsToRender = visibleProducts.slice(startIndex, endIndex)
 
   const fragment = document.createDocumentFragment()
 
@@ -2346,7 +2352,7 @@ function renderProducts() {
 
   grid.appendChild(fragment)
 
-  updateLoadMoreButton()
+  updateLoadMoreButton(visibleProducts)
 
   console.log("Productos renderizados:", productsToRender.length)
 }
@@ -2354,8 +2360,9 @@ function renderProducts() {
 // EXPORTAR renderProducts AL WINDOW para que app-features.js pueda acceder
 window.renderProducts = renderProducts;
 
-function updateLoadMoreButton() {
-  const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE)
+function updateLoadMoreButton(productList) {
+  const list = productList || filteredProducts;
+  const totalPages = Math.ceil(list.length / PRODUCTS_PER_PAGE)
   let loadMoreBtn = document.getElementById("load-more-btn")
 
   if (!loadMoreBtn) {
@@ -2374,7 +2381,7 @@ function updateLoadMoreButton() {
     loadMoreBtn.classList.add("hidden")
   } else {
     loadMoreBtn.classList.remove("hidden")
-    loadMoreBtn.textContent = `Cargar más productos (${filteredProducts.length - currentPage * PRODUCTS_PER_PAGE} restantes)`
+    loadMoreBtn.textContent = `Cargar más productos (${list.length - currentPage * PRODUCTS_PER_PAGE} restantes)`
   }
 }
 
@@ -4540,6 +4547,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // NUEVO: Evento para el botón de visibilidad de stock en inventario
   document.getElementById("toggle-inventory-stock-visibility-btn")?.addEventListener("click", toggleInventoryStockVisibility);
+
+  // NUEVO: Evento para el botón de Bajo Stock (1-5)
+  document.getElementById("low-stock-button")?.addEventListener("click", () => {
+    if (window.showLowStockModal) window.showLowStockModal();
+  });
 })
 
 // ============================================
