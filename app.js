@@ -42,6 +42,7 @@ const PRODUCTS_HASH_KEY = "sonimax_products_hash"
 const FAVORITES_KEY = "sonimax_favorites" // [NUEVO]
 const NEW_PRODUCTS_KEY = "sonimax_new_products"
 const PRODUCT_SALES_KEY = "sonimax_product_sales"
+const CART_BACKUP_KEY = "sonimax_cart_backup"
 const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot local
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
@@ -282,24 +283,51 @@ async function getBestSellingProducts(limit = 20) {
   try {
     console.log("[SALES-DB] 📊 Obteniendo productos más vendidos...")
 
-    const { data: salesData, error: salesError } = await window.supabaseClient
+    const { data: salesViewData, error: salesViewError } = await window.supabaseClient
       .from("best_selling_products")
       .select("*")
       .order("total_sold", { ascending: false })
       .limit(limit)
 
-    if (salesError) {
-      console.error("[SALES-DB] ❌ Error obteniendo estadísticas:", salesError.message)
+    if (!salesViewError && Array.isArray(salesViewData) && salesViewData.length > 0) {
+      console.log(`[SALES-DB] ✅ ${salesViewData.length} productos más vendidos obtenidos desde vista`)
+      return salesViewData
+    }
+
+    if (salesViewError) {
+      console.warn("[SALES-DB] ⚠️ No existe la vista best_selling_products o falló la consulta, usando fallback a product_sales:", salesViewError.message)
+    } else {
+      console.log("[SALES-DB] ⓘ No hay datos en la vista best_selling_products, usando fallback a product_sales")
+    }
+
+    const { data: rawSales, error: rawSalesError } = await window.supabaseClient
+      .from("product_sales")
+      .select("product_id, quantity_sold")
+
+    if (rawSalesError) {
+      console.error("[SALES-DB] ❌ Error obteniendo ventas para fallback:", rawSalesError.message)
       return []
     }
 
-    if (!salesData || salesData.length === 0) {
-      console.log("[SALES-DB] ⓘ No hay datos de ventas aún")
+    if (!rawSales || rawSales.length === 0) {
+      console.log("[SALES-DB] ⓘ No hay ventas registradas en product_sales")
       return []
     }
 
-    console.log(`[SALES-DB] ✅ ${salesData.length} productos más vendidos obtenidos`)
-    console.log("[SALES-DB] Estructura de datos:", salesData[0])
+    const aggregated = rawSales.reduce((acc, row) => {
+      const productId = row.product_id || row.id
+      const qty = Number(row.quantity_sold) || 0
+      if (!acc[productId]) acc[productId] = 0
+      acc[productId] += qty
+      return acc
+    }, {})
+
+    const salesData = Object.entries(aggregated)
+      .map(([product_id, total_sold]) => ({ product_id, total_sold }))
+      .sort((a, b) => b.total_sold - a.total_sold)
+      .slice(0, limit)
+
+    console.log(`[SALES-DB] ✅ ${salesData.length} productos más vendidos obtenidos desde product_sales`)
     return salesData
   } catch (error) {
     console.error("[SALES-DB] ❌ Error inesperado:", error.message)
@@ -1463,14 +1491,33 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
 
     await new Promise((resolve) => setTimeout(resolve, 500))
 
-    const { error: updateError } = await window.supabaseClient
+    let updateError = null
+    let updateResponse = null
+
+    const updatePayload = {
+      role: role,
+      created_by: currentUser.auth_id,
+      can_see_stock: canSeeStock,
+    }
+
+    updateResponse = await window.supabaseClient
       .from("users")
-      .update({
-        role: role,
-        created_by: currentUser.auth_id,
-        can_see_stock: canSeeStock,
-      })
+      .update(updatePayload)
       .eq("auth_id", data.user.id)
+
+    updateError = updateResponse.error
+
+    if (updateError && updateError.message && updateError.message.includes('can_see_stock')) {
+      console.warn('La columna can_see_stock no existe en la tabla users. Reintentando sin ese campo...')
+      updateResponse = await window.supabaseClient
+        .from("users")
+        .update({
+          role: role,
+          created_by: currentUser.auth_id,
+        })
+        .eq("auth_id", data.user.id)
+      updateError = updateResponse.error
+    }
 
     if (updateError) {
       console.error("Error actualizando rol:", updateError)
@@ -1928,6 +1975,42 @@ async function loadFavorites() {
 // [NUEVO] Guardar favoritos (Ya no se usa localStorage globalmente, se maneja en toggleFavorite)
 function saveFavoritesLocalBackup() { 
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); 
+}
+
+function saveCartBackup() {
+  try {
+    localStorage.setItem(CART_BACKUP_KEY, JSON.stringify(cart))
+    console.log(`[CART-LOCAL] ✅ Carrito local guardado: ${cart.length} items`)
+  } catch (error) {
+    console.error('[CART-LOCAL] ❌ Error guardando carrito local:', error)
+  }
+}
+
+function loadCartBackup() {
+  try {
+    const saved = localStorage.getItem(CART_BACKUP_KEY)
+    return saved ? JSON.parse(saved) : []
+  } catch (error) {
+    console.error('[CART-LOCAL] ❌ Error cargando carrito local:', error)
+    return []
+  }
+}
+
+function mergeCartItems(cartA, cartB) {
+  const merged = new Map()
+  const addItem = (item) => {
+    const key = `${item.id}|${item.price}|${item.observation || ''}`
+    if (merged.has(key)) {
+      merged.get(key).quantity += item.quantity
+    } else {
+      merged.set(key, { ...item })
+    }
+  }
+
+  cartA.forEach(addItem)
+  cartB.forEach(addItem)
+
+  return Array.from(merged.values())
 }
 
 async function loadProducts() {
@@ -2854,21 +2937,41 @@ async function loadCartFromSupabase() {
       .from('user_carts')
       .select('cart_data')
       .eq('user_id', currentUser.auth_id)
-      .single();
+      .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found, no es un error
       console.error('[CARRITO-NUBE] ❌ Error cargando carrito desde la nube:', error);
       cart = []
-    } else if (data && data.cart_data) {
-      cart = data.cart_data;
-      console.log(`[CARRITO-NUBE] ✅ Carrito cargado desde la nube: ${cart.length} items.`);
     } else {
-      cart = [];
-      console.log('[CARRITO-NUBE] ⓘ No se encontró carrito en la nube, iniciando uno nuevo.');
+      const localBackup = loadCartBackup()
+
+      if (data && data.cart_data && Array.isArray(data.cart_data) && data.cart_data.length > 0) {
+        if (localBackup.length > 0) {
+          const mergedCart = mergeCartItems(data.cart_data, localBackup)
+          cart = mergedCart
+          if (JSON.stringify(mergedCart) !== JSON.stringify(data.cart_data)) {
+            console.log('[CARRITO-NUBE] 🔀 Fusionando carrito local y carrito de la nube')
+            await saveCartToSupabase()
+          }
+        } else {
+          cart = data.cart_data
+        }
+        console.log(`[CARRITO-NUBE] ✅ Carrito cargado desde la nube: ${cart.length} items.`)
+      } else if (localBackup.length > 0) {
+        cart = localBackup
+        console.log(`[CARRITO-NUBE] ✅ Carrito cargado desde respaldo local: ${cart.length} items.`)
+        await saveCartToSupabase()
+      } else {
+        cart = [];
+        console.log('[CARRITO-NUBE] ⓘ No se encontró carrito en la nube, iniciando uno nuevo.');
+      }
     }
   } catch (error) {
     console.error('[CARRITO-NUBE] ❌ Error inesperado al cargar desde la nube:', error);
-    cart = [];
+    cart = loadCartBackup() || [];
+    if (cart.length > 0) {
+      console.log(`[CARRITO-NUBE] ✅ Carrito local cargado tras error de red: ${cart.length} items.`)
+    }
   }
   updateCartCount();
 }
@@ -2877,6 +2980,7 @@ async function clearCart() {
   cart = []
   updateCartCount()
   renderCart()
+  localStorage.removeItem(CART_BACKUP_KEY)
   console.log("🗑️ Carrito limpiado, actualizando la nube...")
 
   if (currentUser) {
@@ -3014,6 +3118,8 @@ async function addToCart(product, quantity, price, observation = "") {
       observation: observation,
     })
   }
+
+  saveCartBackup()
 
   // Registrar venta para estadísticas con el precio
   await recordSaleToDatabase(product.id, quantity, price)
@@ -4998,7 +5104,7 @@ async function fetchInventoryConfig() {
       .from("inventory_config")
       .select("edit_enabled, show_stock_enabled, role_visibility")
       .eq("id", 1)
-      .single()
+      .maybeSingle()
 
     // [CORREGIDO] Manejar el caso donde la consulta no devuelve datos (data es null),
     // lo que puede ocurrir por RLS o porque la fila no existe.
