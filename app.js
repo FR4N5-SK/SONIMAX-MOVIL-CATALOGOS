@@ -150,6 +150,7 @@ async function getPreviousCSVSnapshot() {
       .single()
 
     if (error) {
+      console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
       console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
       // Fallback a localStorage
       const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
@@ -2936,7 +2937,7 @@ async function loadCartFromSupabase() {
       .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found, no es un error
-      console.error('[CARRITO-NUBE] ❌ Error cargando carrito desde la nube:', error);
+      console.error('[CARRITO-NUBE] ❌ Error cargando carrito desde la nube:', error, JSON.stringify(error));
       cart = []
     } else {
       const localBackup = loadCartBackup()
