@@ -1336,12 +1336,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     showApp()
     loadBanners()
   } else {
-    // [NUEVO] Limpiar datos de sesión anterior al cerrar sesión
-    Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('sonimax_')) {
-            localStorage.removeItem(key);
-        }
-    });
+    // [NUEVO] No borramos el respaldo local del carrito aquí.
+    // El carrito debe poder persistir localmente incluso si no hay sesión activa.
     console.log("ℹ️ No hay sesión activa")
     showLogin()
   }
@@ -3278,6 +3274,7 @@ async function updateCartItemQuantityByIndex(index, change) {
   if (cart[index].quantity <= 0) {
     await removeFromCartByIndex(index)
   } else {
+    saveCartBackup()
     await saveCartToSupabase()
     updateCartCount()
     renderCart()
@@ -3288,6 +3285,7 @@ async function removeFromCartByIndex(index) {
   if (index < 0 || index >= cart.length) return
 
   cart.splice(index, 1)
+  saveCartBackup()
   await saveCartToSupabase()
   updateCartCount()
   renderCart()
