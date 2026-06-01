@@ -147,7 +147,7 @@ async function getPreviousCSVSnapshot() {
       .select("snapshot_data, created_at")
       .order("created_at", { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
@@ -2911,7 +2911,7 @@ async function saveCartToSupabase() {
         cart_data: cart,
         updated_at: new Date().toISOString()
       }, {
-        onConflict: 'user_id' // Asume que user_id es UNIQUE o PK
+        onConflict: ['user_id'] // Asume que user_id es UNIQUE o PK
       });
 
     if (error) {
