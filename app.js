@@ -44,6 +44,7 @@ const NEW_PRODUCTS_KEY = "sonimax_new_products"
 const PRODUCT_SALES_KEY = "sonimax_product_sales"
 const CART_BACKUP_KEY = "sonimax_cart_backup"
 const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot local
+const STOCK_VISIBILITY_CONFIG_KEY = "sonimax_stock_visibility_config"
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
 
@@ -136,6 +137,25 @@ async function saveCSVSnapshot(products) {
     }
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error guardando snapshot:", error)
+  }
+}
+
+function saveStockVisibilityConfigLocalBackup(config) {
+  try {
+    localStorage.setItem(STOCK_VISIBILITY_CONFIG_KEY, JSON.stringify(config))
+  } catch (error) {
+    console.warn("[CONFIG] No se pudo guardar respaldo local de visibilidad de stock:", error)
+  }
+}
+
+function loadStockVisibilityConfigLocalBackup() {
+  try {
+    const saved = localStorage.getItem(STOCK_VISIBILITY_CONFIG_KEY)
+    if (!saved) return null
+    return JSON.parse(saved)
+  } catch (error) {
+    console.warn("[CONFIG] No se pudo cargar respaldo local de visibilidad de stock:", error)
+    return null
   }
 }
 
@@ -5111,22 +5131,38 @@ async function fetchInventoryConfig() {
       console.error("[CONFIG] Error al obtener la configuración de inventario:", error)
       inventoryEditMode = false
       inventoryShowStockMode = false
+      const backup = loadStockVisibilityConfigLocalBackup()
+      if (backup) {
+        stockVisibilityConfig = backup
+        console.log("[CONFIG] Cargando visibilidad de stock desde respaldo local:", stockVisibilityConfig)
+      }
     } else if (!data) {
       console.warn(
         "[CONFIG] No se encontró la fila de configuración (id=1) en la base de datos. Usando valores por defecto. (Verifica los permisos RLS para la tabla 'inventory_config')",
       )
       inventoryEditMode = false
       inventoryShowStockMode = false
+      const backup = loadStockVisibilityConfigLocalBackup()
+      if (backup) {
+        stockVisibilityConfig = backup
+        console.log("[CONFIG] Cargando visibilidad de stock desde respaldo local:", stockVisibilityConfig)
+      }
     } else {
       // La configuración fue encontrada
       inventoryEditMode = data.edit_enabled
       inventoryShowStockMode = data.show_stock_enabled || false
 
-      if (data.role_visibility) {
+      if (data.role_visibility && typeof data.role_visibility === 'object') {
         stockVisibilityConfig = data.role_visibility
+        saveStockVisibilityConfigLocalBackup(stockVisibilityConfig)
         console.log("✅ Configuración de visibilidad de stock cargada desde la BD:", stockVisibilityConfig)
       } else {
-        console.warn("⚠️ La columna `role_visibility` es nula en la BD. Se usarán los valores por defecto.")
+        console.warn("⚠️ La columna `role_visibility` es nula o no existe. Usando valores por defecto / respaldo local.")
+        const backup = loadStockVisibilityConfigLocalBackup()
+        if (backup) {
+          stockVisibilityConfig = backup
+          console.log("[CONFIG] Cargando visibilidad de stock desde respaldo local:", stockVisibilityConfig)
+        }
       }
     }
     updateInventoryLockButtonUI()
@@ -5196,14 +5232,19 @@ function showStockVisibilityModal() {
       stockVisibilityConfig = newConfig;
       
       try {
-        // Intentar guardar en Supabase (si existe la columna role_visibility)
-        await window.supabaseClient.from('inventory_config').update({ role_visibility: newConfig }).eq('id', 1);
-        
-        // Si estamos en rol inventario y cambiamos su configuración, actualizar legacy también para consistencia
-        if (typeof newConfig.inventario !== 'undefined') {
-             await window.supabaseClient.from('inventory_config').update({ show_stock_enabled: newConfig.inventario }).eq('id', 1);
-             inventoryShowStockMode = newConfig.inventario;
-        }
+        const { error } = await window.supabaseClient
+          .from('inventory_config')
+          .upsert({
+            id: 1,
+            role_visibility: newConfig,
+            show_stock_enabled: typeof newConfig.inventario !== 'undefined' ? newConfig.inventario : inventoryShowStockMode,
+          })
+
+        if (error) throw error
+
+        inventoryShowStockMode = typeof newConfig.inventario !== 'undefined' ? newConfig.inventario : inventoryShowStockMode
+        saveStockVisibilityConfigLocalBackup(newConfig)
+        updateInventoryStockVisibilityButtonUI()
 
         alert('✅ Configuración guardada exitosamente');
         modalDiv.remove();
@@ -5213,7 +5254,8 @@ function showStockVisibilityModal() {
         
       } catch (e) {
         console.error(e);
-        alert('⚠️ Configuración aplicada localmente, pero hubo un error guardando en la nube (Verifica si la tabla inventory_config tiene la columna role_visibility).');
+        saveStockVisibilityConfigLocalBackup(newConfig)
+        alert('⚠️ Configuración aplicada localmente, pero hubo un error guardando en la nube. Se usará respaldo local en el próximo inicio.');
         modalDiv.remove();
         renderProducts();
       }
