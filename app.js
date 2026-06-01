@@ -2018,7 +2018,10 @@ function mergeCartItems(cartA, cartB) {
   const addItem = (item) => {
     const key = `${item.id}|${item.price}|${item.observation || ''}`
     if (merged.has(key)) {
-      merged.get(key).quantity += item.quantity
+      const existing = merged.get(key)
+      if (item.quantity > existing.quantity) {
+        merged.set(key, { ...existing, ...item })
+      }
     } else {
       merged.set(key, { ...item })
     }
