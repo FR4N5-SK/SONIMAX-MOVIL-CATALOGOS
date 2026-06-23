@@ -1,0 +1,28 @@
+# Dependencias de Node.js
+node_modules/
+npm-debug.log*
+
+# Carpeta temporal de Capacitor (se genera al compilar)
+www/
+
+# Proyecto Android nativo (solo necesario para compilar la APK localmente)
+android/
+
+# Scripts de compilación
+generate-icons.js
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Variables de entorno locales
+.env
+.env.local
+
+# Caché
+.cache/
+dist/
+
+# Logs
+*.log
