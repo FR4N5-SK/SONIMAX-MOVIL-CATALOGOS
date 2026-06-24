@@ -197,20 +197,29 @@ body {
   transform: scale(1);
 }
 
-/* Grid de Productos */
+/* Grid de Productos - 2 columnas en móvil para ver más productos */
 .product-grid-container {
   display: grid;
-  grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 25px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* 2 columnas en móvil */
+  gap: 12px;
 }
 @media (min-width: 640px) {
-  .product-grid-container { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-grid-container { 
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
 }
 @media (min-width: 1024px) {
-  .product-grid-container { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .product-grid-container { 
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 25px;
+  }
 }
 @media (min-width: 1280px) {
-  .product-grid-container { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .product-grid-container { 
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 25px;
+  }
 }
 
 /* [NUEVO] Skeleton para tarjetas de producto */
@@ -620,15 +629,148 @@ body {
 /* Responsive */
 @media (max-width: 640px) {
   .product-card {
-    margin-bottom: 1rem;
+    margin-bottom: 0;
+    border-radius: 12px;
   }
 
+  /* En 2 columnas, las imágenes deben ser más pequeñas */
   .product-image {
-    height: 200px;
+    height: 125px;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+  }
+
+  .product-image-container {
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+  }
+
+  /* Texto más compacto en las tarjetas de 2 columnas */
+  .product-card .p-5 {
+    padding: 0.5rem !important;
+  }
+
+  /* Título de producto más pequeño en móvil */
+  .product-card h3 {
+    font-size: 0.85rem !important;
+    line-height: 1.15rem !important;
+    margin-bottom: 0.15rem !important;
+  }
+
+  /* Código de producto más pequeño en móvil */
+  .product-card p.text-xs {
+    font-size: 0.65rem !important;
+    margin-bottom: 0.15rem !important;
+  }
+
+  /* Precios más pequeños en móvil */
+  .product-card .main-price {
+    font-size: 1.05rem !important;
+  }
+
+  .product-card .price-pill {
+    font-size: 0.7rem !important;
+    padding: 0.15rem 0.4rem !important;
+  }
+
+  .product-card .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.25rem !important;
+  }
+
+  /* Badge de departamento más pequeño */
+  .product-card span.text-xs {
+    font-size: 0.65rem !important;
+    padding: 0.1rem 0.3rem !important;
+    margin-bottom: 0.35rem !important;
+  }
+
+  /* Botón agregar al carrito más pequeño */
+  .product-card .add-to-cart-btn {
+    padding-top: 0.4rem !important;
+    padding-bottom: 0.4rem !important;
+    font-size: 0.75rem !important;
+    border-radius: 8px !important;
+  }
+
+  /* Badges de agotado / nuevo más pequeños y posicionados */
+  .product-image-container span.absolute {
+    font-size: 0.65rem !important;
+    padding: 0.15rem 0.35rem !important;
+    bottom: 2px !important;
+    right: 2px !important;
+    border-radius: 4px !important;
+  }
+
+  /* Badge de ¡NUEVO! y ¡BAJÓ DE PRECIO! más pequeños */
+  .product-image-container .price-drop-badge,
+  .product-image-container span.bg-red-500 {
+    font-size: 0.6rem !important;
+    padding: 0.1rem 0.3rem !important;
+    top: 2px !important;
+    border-radius: 4px !important;
+  }
+  
+  .product-image-container .price-drop-badge {
+    left: 2px !important;
+  }
+  
+  .product-image-container span.bg-red-500 {
+    right: 2px !important;
+  }
+
+  /* Botón de favorito en móvil */
+  .product-card .favorite-btn {
+    top: 2px !important;
+    left: 2px !important;
+    padding: 0.2rem !important;
+  }
+  .product-card .favorite-btn svg {
+    width: 1.1rem !important;
+    height: 1.1rem !important;
   }
 
   h1 {
     font-size: 1.25rem;
+  }
+
+  /* Logo del header más compacto en móvil */
+  .header-logo {
+    height: 44px !important;
+  }
+
+  /* Botones de admin: ancho completo en móvil para que no se junten */
+  .admin-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.65rem 1rem;
+    font-size: 0.875rem;
+  }
+
+  /* Banner más alto en móvil para que se vea bien */
+  .banner-container {
+    min-height: 180px;
+    max-height: 220px;
+    border-radius: 0.75rem;
+  }
+
+  /* Padding de la sección banner */
+  section.banner-section {
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0;
+  }
+}
+
+/* Tablet y pantallas medianas */
+@media (min-width: 641px) {
+  .header-logo {
+    height: 64px;
+  }
+}
+
+/* Pantallas grandes */
+@media (min-width: 1024px) {
+  .header-logo {
+    height: 80px;
   }
 }
 
