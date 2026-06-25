@@ -495,6 +495,44 @@
             </div>
         </section>
 
+        <div class="container mx-auto px-4 pt-4">
+            <div class="flex justify-end">
+                <button id="toggle-help-section" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">
+                    Ayuda
+                </button>
+            </div>
+        </div>
+
+        <section id="help-section" class="py-4 px-4 hidden">
+            <div class="container mx-auto">
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-4 sm:p-5">
+                    <div class="flex flex-col gap-3">
+                        <div>
+                            <p class="text-sm font-semibold uppercase tracking-[0.2em] text-red-600">Ayuda</p>
+                            <h2 class="text-xl sm:text-2xl font-black mt-1 text-gray-800 dark:text-white">¿Necesitas ayuda con la página o la APK?</h2>
+                            <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">Escribe tu duda, sugerencia o problema y lo enviamos de forma rápida.</p>
+                        </div>
+
+                        <form id="help-form" class="flex flex-col gap-3">
+                            <select id="help-topic" class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-red-500">
+                                <option value="Necesito ayuda con la página">Ayuda con la página</option>
+                                <option value="Necesito ayuda con la APK">Ayuda con la APK</option>
+                                <option value="Tengo una sugerencia para mejorar">Sugerencia para mejorar</option>
+                                <option value="Tengo un problema con los productos">Problema con productos</option>
+                                <option value="Otro">Otro</option>
+                            </select>
+
+                            <textarea id="help-message" rows="3" placeholder="Escribe aquí lo que necesitas..." class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-red-500"></textarea>
+
+                            <button type="submit" class="self-start px-5 py-2.5 bg-gradient-to-r from-red-600 to-orange-500 text-white font-semibold rounded-xl hover:from-red-700 hover:to-orange-600 transition-all shadow-sm">
+                                Enviar
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Modal para Gestionar Banners -->
         <div id="banners-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
             <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
@@ -1322,6 +1360,28 @@
                     });
         
                     appObserver.observe(appScreen, { attributes: true });
+                }
+
+                const helpForm = document.getElementById('help-form');
+                if (helpForm) {
+                    helpForm.addEventListener('submit', (event) => {
+                        event.preventDefault();
+
+                        const topic = document.getElementById('help-topic')?.value || 'Ayuda';
+                        const details = document.getElementById('help-message')?.value?.trim() || 'Sin detalles';
+                        const message = `Hola, necesito ayuda. ${topic}. Detalles: ${details}`;
+                        const whatsappUrl = `https://wa.me/584145446258?text=${encodeURIComponent(message)}`;
+
+                        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+                    });
+                }
+
+                const toggleHelpButton = document.getElementById('toggle-help-section');
+                const helpSection = document.getElementById('help-section');
+                if (toggleHelpButton && helpSection) {
+                    toggleHelpButton.addEventListener('click', () => {
+                        helpSection.classList.toggle('hidden');
+                    });
                 }
             });
         </script>
