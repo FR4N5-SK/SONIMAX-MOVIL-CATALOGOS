@@ -127,3 +127,21 @@ SELECT COUNT(*) as total_products FROM products;
 -- distribuidor: Ve precio_cliente (detal) Y precio_mayor (mayor)
 -- gestor: Ve precio_cliente (detal) Y precio_mayor (mayor) + puede crear usuarios
 -- admin: Ve precio_gmayor + puede subir CSV, exportar PDF y crear usuarios
+
+-- ============================================
+-- [NUEVO] FUNCIÓN RPC: Cambiar contraseña de usuario (para panel Admin)
+-- IMPORTANTE: Ejecuta esto en Supabase SQL Editor para habilitar el cambio de
+-- contraseña desde el panel de Gestión de Usuarios del Admin.
+-- ============================================
+CREATE OR REPLACE FUNCTION admin_change_user_password(target_auth_id UUID, new_password TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE auth.users
+  SET encrypted_password = crypt(new_password, gen_salt('bf'))
+  WHERE id = target_auth_id;
+END;
+$$;
+
+-- Dar permiso solo a usuarios autenticados (el control real lo hace la app)
+GRANT EXECUTE ON FUNCTION admin_change_user_password(UUID, TEXT) TO authenticated;
+

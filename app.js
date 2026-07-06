@@ -5650,3 +5650,422 @@ function updateInventoryStockVisibilityButtonUI() {
         span.textContent = '👁️ Ver Stock (Inv): BLOQUEADO';
     }
 }
+
+// ============================================================
+// GESTIÓN GLOBAL DE USUARIOS - PANEL ADMIN
+// ============================================================
+
+let allUsersCache = []         // Cache de todos los usuarios cargados
+let userSearchTerm = ''        // Término de búsqueda actual
+let userRoleFilter = 'all'     // Filtro de rol activo
+
+/**
+ * Normaliza un string eliminando acentos y llevándolo a minúsculas
+ * para búsqueda global sin importar cómo esté escrito.
+ */
+function normalizeText(str) {
+  if (!str) return ''
+  return str
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Elimina diacríticos (acentos, tildes, ñ→n, etc.)
+    .trim()
+}
+
+/**
+ * Carga todos los usuarios desde Supabase
+ */
+async function loadAllUsers() {
+  const loadingEl = document.getElementById('manage-users-loading')
+  const listEl    = document.getElementById('manage-users-list')
+  const emptyEl   = document.getElementById('manage-users-empty')
+  const countEl   = document.getElementById('manage-users-count')
+
+  if (loadingEl) { loadingEl.classList.remove('hidden'); loadingEl.style.display = '' }
+  if (listEl)    listEl.innerHTML = ''
+  if (emptyEl)   emptyEl.classList.add('hidden')
+
+  try {
+    const { data, error } = await window.supabaseClient
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    allUsersCache = data || []
+    if (countEl) countEl.textContent = `${allUsersCache.length} usuario${allUsersCache.length !== 1 ? 's' : ''} en total`
+
+    renderUsersList()
+  } catch (err) {
+    console.error('❌ Error al cargar usuarios:', err)
+    if (loadingEl) loadingEl.style.display = 'none'
+    if (listEl) listEl.innerHTML = `
+      <div class="text-center py-10 text-red-500">
+        <p class="font-bold">Error al cargar usuarios</p>
+        <p class="text-sm mt-1">${err.message || 'Intenta recargar'}</p>
+      </div>`
+  }
+}
+
+/**
+ * Filtra y renderiza la lista de usuarios según el término de búsqueda y el filtro de rol.
+ * La búsqueda es global: busca en nombre, username, email, rol y id.
+ * Tolera tildes, mayúsculas, minúsculas, etc.
+ */
+function renderUsersList() {
+  const loadingEl = document.getElementById('manage-users-loading')
+  const listEl    = document.getElementById('manage-users-list')
+  const emptyEl   = document.getElementById('manage-users-empty')
+  const countEl   = document.getElementById('manage-users-count')
+
+  if (loadingEl) loadingEl.style.display = 'none'
+  if (!listEl) return
+
+  const searchNorm = normalizeText(userSearchTerm)
+
+  const filtered = allUsersCache.filter(u => {
+    // Filtro por rol
+    if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false
+
+    // Sin búsqueda → todos pasan
+    if (!searchNorm) return true
+
+    // Buscar en todos los campos relevantes
+    const fields = [
+      u.name,
+      u.username,
+      u.email,
+      u.role,
+      u.id,
+      u.auth_id,
+      u.created_at
+    ]
+    return fields.some(f => normalizeText(f).includes(searchNorm))
+  })
+
+  if (countEl) {
+    const total = allUsersCache.length
+    countEl.textContent = searchNorm || userRoleFilter !== 'all'
+      ? `${filtered.length} de ${total} usuario${total !== 1 ? 's' : ''}`
+      : `${total} usuario${total !== 1 ? 's' : ''} en total`
+  }
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = ''
+    if (emptyEl) emptyEl.classList.remove('hidden')
+    return
+  }
+  if (emptyEl) emptyEl.classList.add('hidden')
+
+  listEl.innerHTML = filtered.map(u => buildUserCard(u, searchNorm)).join('')
+}
+
+/**
+ * Construye el HTML de una tarjeta de usuario
+ */
+function buildUserCard(user, searchTerm) {
+  const roleColors = {
+    admin:       'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+    gestor:      'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+    distribuidor:'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+    cliente:     'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  }
+  const roleIcons = {
+    admin: '👑', gestor: '🔧', distribuidor: '🏪', cliente: '👤'
+  }
+  const roleBadge = roleColors[user.role] || roleColors.cliente
+  const roleIcon  = roleIcons[user.role] || '👤'
+
+  // Función para resaltar texto si hay búsqueda
+  const hl = (text) => {
+    if (!text) return '<span class="text-gray-300">—</span>'
+    if (!searchTerm) return escapeHtml(text)
+    const norm = normalizeText(text)
+    const idx  = norm.indexOf(searchTerm)
+    if (idx === -1) return escapeHtml(text)
+    return escapeHtml(text.slice(0, idx))
+      + `<mark class="bg-yellow-200 dark:bg-yellow-700 rounded px-0.5">${escapeHtml(text.slice(idx, idx + searchTerm.length))}</mark>`
+      + escapeHtml(text.slice(idx + searchTerm.length))
+  }
+
+  const createdDate = user.created_at
+    ? new Date(user.created_at).toLocaleDateString('es-VE', { year:'numeric', month:'short', day:'numeric' })
+    : '—'
+
+  return `
+    <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center gap-3" data-user-id="${user.id}">
+      <!-- Avatar -->
+      <div class="flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black ${roleBadge}">
+        ${roleIcon}
+      </div>
+
+      <!-- Info principal -->
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-black text-gray-800 dark:text-white text-sm">${hl(user.name)}</span>
+          <span class="px-2 py-0.5 rounded-lg text-xs font-bold ${roleBadge}">${hl(user.role || 'cliente')}</span>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+          <span class="text-xs text-gray-500 dark:text-gray-400">
+            <span class="font-semibold text-gray-600 dark:text-gray-300">@</span>${hl(user.username)}
+          </span>
+          <span class="text-xs text-gray-500 dark:text-gray-400 truncate">
+            ✉️ ${hl(user.email)}
+          </span>
+          <span class="text-xs text-gray-400 dark:text-gray-500">
+            📅 ${createdDate}
+          </span>
+        </div>
+      </div>
+
+      <!-- Botón Editar -->
+      <button class="edit-user-btn flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl font-semibold text-xs transition-all shadow"
+              data-user='${JSON.stringify(user).replace(/'/g, "&#39;")}'>
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+        </svg>
+        Editar
+      </button>
+    </div>`
+}
+
+function escapeHtml(str) {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Abre el modal de edición con los datos del usuario seleccionado
+ */
+function openEditUserModal(user) {
+  document.getElementById('edit-user-id').value       = user.id       || ''
+  document.getElementById('edit-user-auth-id').value  = user.auth_id  || ''
+  document.getElementById('edit-user-name').value     = user.name     || ''
+  document.getElementById('edit-user-username').value = user.username || ''
+  document.getElementById('edit-user-email').value    = user.email    || ''
+  document.getElementById('edit-user-role').value     = user.role     || 'cliente'
+  document.getElementById('edit-user-password').value = ''
+  document.getElementById('edit-user-subtitle').textContent = `Editando: @${user.username}`
+
+  const statusEl = document.getElementById('edit-user-status')
+  if (statusEl) { statusEl.classList.add('hidden'); statusEl.textContent = '' }
+
+  document.getElementById('edit-user-modal').classList.remove('hidden')
+}
+
+/**
+ * Muestra un mensaje de estado en el modal de edición
+ */
+function showEditUserStatus(msg, type) {
+  const el = document.getElementById('edit-user-status')
+  if (!el) return
+  el.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700', 'bg-blue-100', 'text-blue-700')
+  if (type === 'error')   el.classList.add('bg-red-100',   'text-red-700')
+  if (type === 'success') el.classList.add('bg-green-100', 'text-green-700')
+  if (type === 'info')    el.classList.add('bg-blue-100',  'text-blue-700')
+  el.textContent = msg
+}
+
+/**
+ * Guarda los cambios del usuario editado en Supabase
+ */
+async function saveUserChanges() {
+  const userId   = document.getElementById('edit-user-id').value
+  const authId   = document.getElementById('edit-user-auth-id').value
+  const name     = document.getElementById('edit-user-name').value.trim()
+  const username = document.getElementById('edit-user-username').value.trim().toLowerCase()
+  const email    = document.getElementById('edit-user-email').value.trim()
+  const role     = document.getElementById('edit-user-role').value
+  const password = document.getElementById('edit-user-password').value
+
+  if (!name || !username) {
+    showEditUserStatus('El nombre y el nombre de usuario son obligatorios.', 'error')
+    return
+  }
+
+  showEditUserStatus('Guardando cambios...', 'info')
+
+  const saveBtn = document.getElementById('save-edit-user')
+  if (saveBtn) saveBtn.disabled = true
+
+  try {
+    // 1. Verificar si el username ya está en uso por OTRO usuario
+    if (username) {
+      const { data: existing } = await window.supabaseClient
+        .from('users')
+        .select('id')
+        .eq('username', username)
+        .neq('id', userId)
+        .maybeSingle()
+
+      if (existing) {
+        throw new Error('Ese nombre de usuario ya está en uso por otro usuario.')
+      }
+    }
+
+    // 2. Actualizar datos en la tabla users
+    const updatePayload = { name, username, role }
+    if (email) updatePayload.email = email
+
+    const { error: updateError } = await window.supabaseClient
+      .from('users')
+      .update(updatePayload)
+      .eq('id', userId)
+
+    if (updateError) throw updateError
+
+    // 3. Cambiar contraseña si se proporcionó (usando Supabase Admin API via RPC si está disponible)
+    if (password && password.length >= 6 && authId) {
+      // Intentar cambiar contraseña (requiere permisos de admin en Supabase)
+      try {
+        const { error: pwError } = await window.supabaseClient.rpc('admin_change_user_password', {
+          target_auth_id: authId,
+          new_password: password
+        })
+        if (pwError) {
+          console.warn('RPC admin_change_user_password no disponible:', pwError.message)
+          showEditUserStatus('✅ Datos actualizados. La contraseña requiere la función RPC en Supabase (ver instrucciones en la consola).', 'success')
+          console.info(
+            '📌 Para habilitar el cambio de contraseña, crea esta función en Supabase SQL Editor:\n' +
+            'CREATE OR REPLACE FUNCTION admin_change_user_password(target_auth_id UUID, new_password TEXT)\n' +
+            'RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$\n' +
+            'BEGIN\n  UPDATE auth.users SET encrypted_password = crypt(new_password, gen_salt(\'bf\')) WHERE id = target_auth_id;\n' +
+            'END;\n$$;'
+          )
+        } else {
+          showEditUserStatus('✅ Usuario y contraseña actualizados correctamente.', 'success')
+        }
+      } catch (e) {
+        showEditUserStatus('✅ Datos actualizados. No se pudo cambiar la contraseña (función RPC no disponible).', 'success')
+      }
+    } else {
+      showEditUserStatus('✅ Usuario actualizado correctamente.', 'success')
+    }
+
+    // 4. Actualizar caché local
+    const idx = allUsersCache.findIndex(u => u.id === userId)
+    if (idx !== -1) {
+      allUsersCache[idx] = { ...allUsersCache[idx], name, username, role, email: email || allUsersCache[idx].email }
+    }
+
+    // 5. Re-renderizar la lista
+    renderUsersList()
+
+    // 6. Cerrar modal después de 1.5s
+    setTimeout(() => {
+      document.getElementById('edit-user-modal').classList.add('hidden')
+    }, 1500)
+
+  } catch (err) {
+    console.error('❌ Error al guardar usuario:', err)
+    showEditUserStatus(err.message || 'Error al guardar los cambios.', 'error')
+  } finally {
+    if (saveBtn) saveBtn.disabled = false
+  }
+}
+
+// ─── INICIALIZACIÓN DEL PANEL DE GESTIÓN DE USUARIOS ─────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+
+  // Botón para abrir el modal
+  document.getElementById('manage-all-users-button')?.addEventListener('click', () => {
+    document.getElementById('manage-users-modal').classList.remove('hidden')
+    userSearchTerm  = ''
+    userRoleFilter  = 'all'
+    const searchInput = document.getElementById('user-global-search')
+    if (searchInput) searchInput.value = ''
+    // Restablecer filtros visuales
+    document.querySelectorAll('.user-role-filter-btn').forEach(b => {
+      b.classList.toggle('bg-purple-600', b.dataset.role === 'all')
+      b.classList.toggle('text-white',    b.dataset.role === 'all')
+      b.classList.toggle('bg-gray-200',   b.dataset.role !== 'all')
+      b.classList.toggle('dark:bg-gray-700', b.dataset.role !== 'all')
+      b.classList.toggle('text-gray-700', b.dataset.role !== 'all')
+    })
+    loadAllUsers()
+  })
+
+  // Cerrar modal principal
+  document.getElementById('close-manage-users-modal')?.addEventListener('click', () => {
+    document.getElementById('manage-users-modal').classList.add('hidden')
+  })
+  document.getElementById('manage-users-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('manage-users-modal'))
+      document.getElementById('manage-users-modal').classList.add('hidden')
+  })
+
+  // Recargar lista
+  document.getElementById('refresh-manage-users-btn')?.addEventListener('click', loadAllUsers)
+
+  // Buscador global con debounce instantáneo (≤300ms)
+  let searchTimeout = null
+  document.getElementById('user-global-search')?.addEventListener('input', (e) => {
+    clearTimeout(searchTimeout)
+    const spinner = document.getElementById('user-search-spinner')
+    if (spinner) spinner.classList.remove('hidden')
+    searchTimeout = setTimeout(() => {
+      userSearchTerm = e.target.value
+      renderUsersList()
+      if (spinner) spinner.classList.add('hidden')
+    }, 250)
+  })
+
+  // Filtros por rol
+  document.querySelectorAll('.user-role-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      userRoleFilter = btn.dataset.role
+      document.querySelectorAll('.user-role-filter-btn').forEach(b => {
+        const isActive = b.dataset.role === userRoleFilter
+        b.classList.toggle('bg-purple-600',      isActive)
+        b.classList.toggle('text-white',         isActive)
+        b.classList.toggle('bg-gray-200',        !isActive)
+        b.classList.toggle('dark:bg-gray-700',   !isActive)
+        b.classList.toggle('text-gray-700',      !isActive)
+        b.classList.toggle('dark:text-gray-200', !isActive)
+      })
+      renderUsersList()
+    })
+  })
+
+  // Delegación de eventos para botones de editar usuario
+  document.getElementById('manage-users-list')?.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('.edit-user-btn')
+    if (editBtn) {
+      try {
+        const userData = JSON.parse(editBtn.dataset.user.replace(/&#39;/g, "'"))
+        openEditUserModal(userData)
+      } catch (err) {
+        console.error('Error al parsear datos del usuario:', err)
+      }
+    }
+  })
+
+  // Cerrar modal de edición
+  document.getElementById('close-edit-user-modal')?.addEventListener('click', () => {
+    document.getElementById('edit-user-modal').classList.add('hidden')
+  })
+  document.getElementById('cancel-edit-user')?.addEventListener('click', () => {
+    document.getElementById('edit-user-modal').classList.add('hidden')
+  })
+  document.getElementById('edit-user-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('edit-user-modal'))
+      document.getElementById('edit-user-modal').classList.add('hidden')
+  })
+
+  // Guardar cambios
+  document.getElementById('save-edit-user')?.addEventListener('click', saveUserChanges)
+
+  // Toggle de visibilidad de contraseña en el formulario de edición
+  document.getElementById('toggle-edit-password')?.addEventListener('click', () => {
+    const input = document.getElementById('edit-user-password')
+    if (input) input.type = input.type === 'password' ? 'text' : 'password'
+  })
+})
+
