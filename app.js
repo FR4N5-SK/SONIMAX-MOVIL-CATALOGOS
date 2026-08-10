@@ -950,6 +950,46 @@ function createImagePlaceholder(url) {
   return url
 }
 
+// ============================================
+// SUBIDA DIRECTA DE ARCHIVOS A SUPABASE STORAGE
+// ============================================
+async function uploadImageFileToSupabase(file, prefix = 'prod') {
+  if (!file) throw new Error("No se seleccionó ningún archivo");
+  if (!window.supabaseClient) throw new Error("Cliente de Supabase no inicializado");
+
+  if (!file.type.startsWith('image/')) {
+    throw new Error("El archivo seleccionado debe ser una imagen (JPG, PNG, WEBP, etc.)");
+  }
+
+  const fileExt = file.name.split('.').pop() || 'jpg';
+  const cleanPrefix = String(prefix || 'prod').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filePath = `products/${Date.now()}_${cleanPrefix}.${fileExt}`;
+
+  console.log(`[STORAGE] 📤 Subiendo archivo ${file.name} a ${filePath}...`);
+
+  const { data, error } = await window.supabaseClient.storage
+    .from('product-images')
+    .upload(filePath, file, {
+      upsert: true,
+      cacheControl: '31536000',
+      contentType: file.type || 'image/jpeg'
+    });
+
+  if (error) {
+    console.error("[STORAGE] ❌ Error al subir imagen:", error);
+    throw new Error("Error al subir a Supabase Storage: " + error.message);
+  }
+
+  const { data: publicUrlData } = window.supabaseClient.storage
+    .from('product-images')
+    .getPublicUrl(filePath);
+
+  console.log(`[STORAGE] ✅ Imagen subida exitosamente: ${publicUrlData.publicUrl}`);
+  return publicUrlData.publicUrl;
+}
+
+window.uploadImageFileToSupabase = uploadImageFileToSupabase;
+
 function initImageObserver() {
   if ("IntersectionObserver" in window) {
     imageObserver = new IntersectionObserver(
@@ -4955,6 +4995,56 @@ document.addEventListener("DOMContentLoaded", () => {
   if (addProductForm) {
     addProductForm.addEventListener("submit", handleAddProduct)
   }
+
+  // Subida directa de foto en Agregar Producto
+  document.getElementById("product-file-input")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = document.getElementById("product-file-status");
+    if (status) {
+      status.textContent = "⏳ Subiendo foto a Supabase...";
+      status.classList.remove("hidden");
+      status.className = "text-xs text-blue-600 mt-1 font-semibold";
+    }
+    try {
+      const url = await uploadImageFileToSupabase(file, 'producto');
+      document.getElementById("product-url").value = url;
+      if (status) {
+        status.textContent = "✅ ¡Foto subida exitosamente a Supabase Storage!";
+        status.className = "text-xs text-green-600 mt-1 font-semibold";
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = "❌ " + err.message;
+        status.className = "text-xs text-red-600 mt-1 font-semibold";
+      }
+    }
+  });
+
+  // Subida directa de foto en Banners
+  document.getElementById("banner-file-input")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = document.getElementById("banner-file-status");
+    if (status) {
+      status.textContent = "⏳ Subiendo banner a Supabase...";
+      status.classList.remove("hidden");
+      status.className = "text-xs text-blue-600 mt-1 font-semibold";
+    }
+    try {
+      const url = await uploadImageFileToSupabase(file, 'banner');
+      document.getElementById("banner-url-input").value = url;
+      if (status) {
+        status.textContent = "✅ ¡Banner subido exitosamente a Supabase Storage!";
+        status.className = "text-xs text-green-600 mt-1 font-semibold";
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = "❌ " + err.message;
+        status.className = "text-xs text-red-600 mt-1 font-semibold";
+      }
+    }
+  });
 
   if (deleteProductBtn) {
     deleteProductBtn.addEventListener("click", () => {
