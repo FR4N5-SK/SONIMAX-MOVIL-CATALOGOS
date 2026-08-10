@@ -1,0 +1,55 @@
+﻿# =====================================================
+# SONIMAX MOVIL — Cloudflare Pages Headers
+# Reglas de caché y seguridad para máximo rendimiento
+# =====================================================
+
+# ── App Shell (HTML) ──────────────────────────────
+# No cachear el HTML para que siempre cargue el último
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+# ── JavaScript y CSS ──────────────────────────────
+# Cachear por 1 año (tienen nombres únicos al deployar)
+/*.js
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: application/javascript; charset=utf-8
+
+/*.css
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: text/css; charset=utf-8
+
+# ── Service Worker ────────────────────────────────
+# El SW NUNCA debe cachearse — debe actualizarse siempre
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: application/javascript; charset=utf-8
+
+# ── Imágenes locales ──────────────────────────────
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+  Vary: Accept
+
+/*.png
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.jpg
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.webp
+  Cache-Control: public, max-age=31536000, immutable
+
+*.ico
+  Cache-Control: public, max-age=86400
+
+# ── Fuentes ───────────────────────────────────────
+/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *

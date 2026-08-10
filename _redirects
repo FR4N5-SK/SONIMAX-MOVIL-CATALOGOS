@@ -1,0 +1,7 @@
+﻿# =====================================================
+# SONIMAX MOVIL — Cloudflare Pages Redirects
+# =====================================================
+
+# SPA fallback: cualquier ruta que no sea un archivo
+# real redirige al index.html (necesario para PWA)
+/* /index.html 200

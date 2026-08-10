@@ -116,25 +116,10 @@ async function saveCSVSnapshot(products) {
       precio_gmayor: p.precio_gmayor || 0,
     }))
 
-    // Guardar en Supabase
-    const { data, error } = await window.supabaseClient
-      .from("csv_snapshot")
-      .insert({
-        snapshot_data: snapshot,
-        uploaded_by: currentUser?.id || null,
-      })
-      .select()
-
-    if (error) {
-      console.error("[CSV-SNAPSHOT] Error guardando en Supabase:", error)
-      // Fallback a localStorage si falla Supabase
-      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
-      console.log(`[CSV-SNAPSHOT] Snapshot guardado en localStorage (fallback) con ${snapshot.length} productos`)
-    } else {
-      console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en Supabase con ${snapshot.length} productos`)
-      // También guardar en localStorage como backup
-      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
-    }
+    // [OPTIMIZACIÓN] Solo guardar en localStorage para evitar consumo de egress en Supabase
+    // La base de datos ya NO se usa para csv_snapshot (era la mayor fuente de egress)
+    localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+    console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en localStorage con ${snapshot.length} productos`)
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error guardando snapshot:", error)
   }
@@ -161,35 +146,15 @@ function loadStockVisibilityConfigLocalBackup() {
 
 async function getPreviousCSVSnapshot() {
   try {
-    // Intentar obtener el snapshot más reciente de Supabase
-    const { data, error } = await window.supabaseClient
-      .from("csv_snapshot")
-      .select("snapshot_data, created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (error) {
-      console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
-      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
-      // Fallback a localStorage
-      const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
-      if (saved) {
-        return JSON.parse(saved)
-      }
-      return []
+    // [OPTIMIZACIÓN] Solo leer desde localStorage para evitar consumo de egress en Supabase
+    // Ya no consultamos la tabla csv_snapshot en la BD (generaba megas de egress por consulta)
+    const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde localStorage: ${parsed.length} productos`)
+      return parsed
     }
-
-    if (data && data.snapshot_data) {
-      console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde Supabase: ${data.snapshot_data.length} productos`)
-      try {
-        localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(data.snapshot_data))
-      } catch (e) {
-        console.warn("No se pudo guardar snapshot de precios en caché local:", e)
-      }
-      return data.snapshot_data
-    }
-
+    console.log("[CSV-SNAPSHOT] No hay snapshot en localStorage")
     return []
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error cargando snapshot anterior:", error)
@@ -1631,7 +1596,12 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
+    // [OPTIMIZACIÓN] Solo los campos necesarios del usuario
+    const { data, error } = await window.supabaseClient
+      .from("users")
+      .select("id, auth_id, username, role, can_see_stock, created_by")
+      .eq("auth_id", userId)
+      .single()
 
     if (error) {
       console.error("Error obteniendo datos:", error)
@@ -2300,9 +2270,10 @@ async function _loadInventoryData() {
     let invHasMore = true
 
     while (invHasMore) {
+      // [OPTIMIZACIÓN] Solo los campos necesarios para el mapa de inventario
       const { data: invData, error: invError } = await window.supabaseClient
         .from('inventory_products')
-        .select('*')
+        .select('id, codigo, descripcion, existencia_actual, cantidad_fisica, deposito, departamento')
         .range(invStart, invStart + invBatchSize - 1)
 
       if (invError) {
@@ -2337,15 +2308,45 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
 
   try {
+    // [OPTIMIZACIÓN] Verificar timestamp ANTES de descargar todos los productos.
+    // Solo hacemos la descarga completa si realmente hubo cambios en la BD.
+    // Esto ahorra ~95% del egress en visitas donde no hay cambios.
+    if (!isFirstLoad) {
+      const { data: latestRow, error: tsError } = await window.supabaseClient
+        .from("products")
+        .select("updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!tsError && latestRow && latestRow.updated_at) {
+        const savedTs = localStorage.getItem("sonimax_products_updated_at")
+        if (savedTs === latestRow.updated_at && allProducts.length > 0) {
+          console.log("✅ [NET] Sin cambios en productos (timestamp igual) - caché vigente, omitiendo descarga")
+          const now = new Date()
+          const formattedTime = now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
+          localStorage.setItem("sonimax_last_update", formattedTime)
+          const indicator = document.getElementById("last-update-time")
+          if (indicator) indicator.textContent = formattedTime
+          return
+        }
+        // Hay cambios: guardar el nuevo timestamp para la próxima vez
+        localStorage.setItem("sonimax_products_updated_at", latestRow.updated_at)
+        console.log(`🆕 [NET] Cambios detectados (nuevo ts: ${latestRow.updated_at}), descargando productos...`)
+      }
+    }
+
     let freshProducts = []
     let start = 0
     const batchSize = 500
     let hasMore = true
 
     while (hasMore) {
+      // [OPTIMIZACIÓN] Seleccionar solo los campos necesarios para el catálogo
+      // Esto reduce el tamaño de cada respuesta significativamente
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, nombre, descripcion, codigo, precio_cliente, precio_mayor, precio_gmayor, imagen_url, stock, departamento, is_new, updated_at")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -5074,13 +5075,14 @@ function initInventoryRole() {
 
         searchTimeout = setTimeout(async () => {
             try {
+                // [OPTIMIZACIÓN] Solo campos necesarios para la búsqueda de inventario
                 const { data, error } = await window.supabaseClient
                     .from('inventory_products')
-                    .select('*')
+                    .select('id, codigo, descripcion, existencia_actual, deposito, departamento')
                     .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
                     .not('existencia_actual', 'is', null)
                     .gt('existencia_actual', 0) // Solo productos en stock
-                    .limit(50); // Traer más para filtrar en cliente
+                    .limit(50);
 
                 if (error) throw error;
 
@@ -5190,11 +5192,12 @@ async function loadInventoryForAssignment() {
         let hasMore = true;
 
         while(hasMore) {
+            // [OPTIMIZACIÓN] Solo campos para la asignación de depósitos
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('*')
+                .select('id, codigo, descripcion, departamento, existencia_actual, deposito')
                 .is('deposito', null)
-                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
+                .gt('existencia_actual', 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -5276,11 +5279,12 @@ async function loadInventoryForCounting(deposito) {
         let hasMore = true;
 
         while(hasMore) {
+            // [OPTIMIZACIÓN] Solo campos necesarios para el conteo físico
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('*')
+                .select('id, codigo, descripcion, existencia_actual, cantidad_fisica, deposito')
                 .eq('deposito', deposito)
-                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
+                .gt('existencia_actual', 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
