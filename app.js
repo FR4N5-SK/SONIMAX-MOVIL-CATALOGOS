@@ -1636,10 +1636,10 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    // [OPTIMIZACIÓN] Solo los campos necesarios del usuario
+    // [OPTIMIZACIÓN] Solo los campos necesarios del usuario (incluyendo name y username)
     const { data, error } = await window.supabaseClient
       .from("users")
-      .select("id, auth_id, username, role, can_see_stock, created_by")
+      .select("id, auth_id, username, name, role, can_see_stock, created_by")
       .eq("auth_id", userId)
       .single()
 
@@ -1724,7 +1724,8 @@ async function updateUIForRole() {
   if (roleBadge) {
     // Mostrar "MAYORISTA" si el rol es distribuidor
     const displayRole = currentUserRole === 'distribuidor' ? 'MAYORISTA' : currentUserRole;
-    roleBadge.textContent = `${currentUser.name} (${displayRole})`
+    const userName = currentUser?.name || currentUser?.username || 'Usuario';
+    roleBadge.textContent = `${userName} (${displayRole})`
     roleBadge.className = `role-badge-${currentUserRole}`
     roleBadge.classList.remove("hidden")
   }
