@@ -459,6 +459,11 @@ async function registerServiceWorker() {
       serviceWorkerRegistration = await navigator.serviceWorker.register("sw.js")
       console.log("✅ Service Worker registrado para caché de imágenes")
 
+      // Forzar verificación de actualización en la app instalada
+      if (serviceWorkerRegistration) {
+        serviceWorkerRegistration.update()
+      }
+
       navigator.serviceWorker.addEventListener("message", (event) => {
         if (event.data && event.data.type === "PRELOAD_PROGRESS") {
           console.log(
