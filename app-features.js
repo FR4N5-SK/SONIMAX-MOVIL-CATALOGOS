@@ -1002,7 +1002,8 @@
       let imagesLoaded = 0;
       for (const product of filtered) {
         if (product.imagen_url) {
-          assets[product.id] = await imageUrlToBase64(product.imagen_url);
+          const optUrl = window.optimizeImageUrl ? window.optimizeImageUrl(product.imagen_url, 300) : product.imagen_url;
+          assets[product.id] = await imageUrlToBase64(optUrl);
         }
         imagesLoaded++;
         updateProgress(imagesLoaded, totalResources, `Cargando imagen ${imagesLoaded} de ${filtered.length}...`);

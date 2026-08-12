@@ -513,14 +513,45 @@ function resumeBackgroundDownloads() {
   }
 }
 
-function pauseBackgroundDownloads() {}
-function resumeBackgroundDownloads() {}
-async function loadPriorityImages(urls) {}
-async function processBackgroundQueue() {}
-async function preloadAllImages() {}
-async function loadImagesWithRetry(urls) {}
-async function processBatch(cache, batch, batchNum, totalBatches) {}
-async function retryFailedImages(cache) {}
+// ============================================
+// OPTIMIZACIÓN Y PLACEHOLDERS DE IMÁGENES
+// ============================================
+
+function optimizeImageUrl(url, width = 400) {
+  if (!url || url.trim() === "" || url === "/images/ProductImages.jpg") {
+    return "/images/ProductImages.jpg"
+  }
+  // Transformación al vuelo de Supabase Storage para WebP comprimido y redimensionado
+  if (url.includes("/storage/v1/object/public/")) {
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + `?width=${width}&quality=75&format=webp`
+  }
+  return url
+}
+window.optimizeImageUrl = optimizeImageUrl
+
+function createImagePlaceholder(url) {
+  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f3f4f6'/%3E%3Cpath d='M30 65 L45 45 L60 60 L70 50 L85 65 Z' fill='%23e5e7eb'/%3E%3Ccircle cx='40' cy='35' r='6' fill='%23e5e7eb'/%3E%3C/svg%3E"
+}
+window.createImagePlaceholder = createImagePlaceholder
+
+async function preloadAllImages() {
+  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return
+  if (!allProducts || allProducts.length === 0) return
+
+  console.log("[SW-PRELOAD] 🚀 Enviando imágenes al Service Worker para precarga en segundo plano...")
+  const urls = allProducts
+    .map((p) => optimizeImageUrl(p.imagen_url))
+    .filter((url) => url && url !== "/images/ProductImages.jpg")
+
+  urls.forEach((url) => {
+    navigator.serviceWorker.controller.postMessage({
+      type: "DOWNLOAD_IMAGE",
+      url: url,
+    })
+  })
+}
+window.preloadAllImages = preloadAllImages
+
 
 function initImageObserver() {
   if ("IntersectionObserver" in window) {
