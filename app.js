@@ -2137,7 +2137,17 @@ async function loadProducts() {
 
     // ── PASO 2: Actualizar en segundo plano si hay conexión ─────────────────
     if (navigator.onLine) {
-      setTimeout(() => _refreshProductsFromNetwork(false), 800)
+      // [OPTIMIZACIÓN EGRESS] TTL de 30 minutos: si el caché tiene menos de 30 min, no consultar Supabase
+      const CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutos
+      const lastFetch = parseInt(localStorage.getItem("sonimax_cache_ts") || "0")
+      const cacheAge = Date.now() - lastFetch
+      if (cacheAge < CACHE_TTL_MS) {
+        console.log(`✅ [CACHE-TTL] Caché vigente (${Math.round(cacheAge / 60000)} min < 30 min) — sin consulta a Supabase`)
+        setTimeout(() => { preloadAllImages() }, 2000)
+      } else {
+        console.log(`🔄 [CACHE-TTL] Caché expirado (${Math.round(cacheAge / 60000)} min) — actualizando desde Supabase...`)
+        setTimeout(() => _refreshProductsFromNetwork(false), 800)
+      }
     } else {
       console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
       setTimeout(() => { preloadAllImages() }, 2000)
@@ -2186,7 +2196,7 @@ async function _loadInventoryData() {
     while (invHasMore) {
       const { data: invData, error: invError } = await window.supabaseClient
         .from('inventory_products')
-        .select('*')
+        .select('codigo, deposito') // [OPTIMIZACIÓN EGRESS] Solo campos necesarios (ahorro ~70% de datos)
         .range(invStart, invStart + invBatchSize - 1)
 
       if (invError) {
@@ -2315,6 +2325,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     localStorage.setItem(PRODUCTS_HASH_KEY, freshHash)
     localStorage.setItem("sonimax_product_count", allProducts.length)
     localStorage.setItem("sonimax_last_update", formattedTime)
+    localStorage.setItem("sonimax_cache_ts", Date.now().toString()) // [OPTIMIZACIÓN EGRESS] Timestamp para TTL de 30 min
 
     setTimeout(() => { preloadAllImages() }, 2000)
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
