@@ -358,8 +358,9 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, nombre, descripcion, codigo, precio_cliente, precio_mayor, precio_gmayor, imagen_url, stock, departamento, is_new, updated_at")
         .range(start, start + batchSize - 1);
+
 
       if (error) {
         console.error("[PRODUCTS-DB] Error obteniendo productos:", error);
