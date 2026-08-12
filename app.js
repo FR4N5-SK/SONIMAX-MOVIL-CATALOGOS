@@ -373,7 +373,7 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, existencia_actual, imagen_url, departamento, is_new, is_bestseller")
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -688,52 +688,10 @@ async function processBackgroundQueue() {
 }
 
 async function preloadAllImages() {
-  if (!("caches" in window)) {
-    console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
-    return
-  }
-
-  loadImageLoadState()
-
-  const { changed, newUrls } = checkProductsChanged(allProducts)
-
-  const allImageUrls = allProducts
-    .map((p) => p.imagen_url)
-    .filter((url) => url && url !== "/images/ProductImages.jpg")
-    .map((url) => optimizeImageUrl(url))
-
-  let urlsToLoad = []
-
-  if (changed && newUrls.length > 0) {
-    urlsToLoad = newUrls
-    console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
-  } else {
-    urlsToLoad = allImageUrls.filter(
-      (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
-    )
-
-    if (urlsToLoad.length === 0) {
-      console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
-      return
-    }
-
-    console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
-  }
-
-  if (imageLoadState.inProgress) {
-    console.log("[IMG-LOAD] ⚠️ Carga ya en progreso, omitiendo...")
-    return
-  }
-
-  imageLoadState.inProgress = true
-
-  imageLoadState.backgroundQueue = [...urlsToLoad]
-  console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
-
-  await processBackgroundQueue()
-
-  imageLoadState.inProgress = false
-  saveImageLoadState()
+  // [MODIFICADO] Desactivado para ahorrar consumo de Egress en Supabase.
+  // Las imágenes se cargarán nativamente a medida que el usuario haga scroll (Lazy Loading).
+  console.log("[IMG-LOAD] 🛑 Precarga masiva desactivada para ahorrar ancho de banda.");
+  return;
 }
 
 async function loadImagesWithRetry(urls) {
@@ -2345,7 +2303,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, existencia_actual, imagen_url, departamento, is_new, is_bestseller, creado_en")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -4629,7 +4587,9 @@ async function handleAddProduct(e) {
   const mayor = Number.parseFloat(document.getElementById("product-mayor").value)
   const gmayor = Number.parseFloat(document.getElementById("product-gmayor").value)
   const departamento = document.getElementById("product-departamento").value.trim()
-  const url = document.getElementById("product-url").value.trim() || null
+  let url = document.getElementById("product-url").value.trim() || null
+  const fileInput = document.getElementById("product-file-input")
+  const file = fileInput && fileInput.files.length > 0 ? fileInput.files[0] : null
 
   if (!descripcion || !departamento || isNaN(detal) || isNaN(mayor) || isNaN(gmayor)) {
     showAddProductStatus("Por favor completa todos los campos requeridos", "error")
@@ -4641,9 +4601,28 @@ async function handleAddProduct(e) {
     return
   }
 
-  showAddProductStatus("Agregando producto...", "info")
+  showAddProductStatus(file ? "Subiendo imagen y agregando producto..." : "Agregando producto...", "info")
 
   try {
+    // Si hay un archivo, lo subimos a Supabase Storage primero
+    if (file) {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `products/${fileName}`;
+
+      const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
+        .from("products")
+        .upload(filePath, file, { cacheControl: "31536000", upsert: false });
+
+      if (uploadError) {
+        throw new Error("Error al subir la imagen a Supabase: " + uploadError.message);
+      }
+
+      // Obtener la URL pública de la imagen recién subida
+      const { data: publicUrlData } = window.supabaseClient.storage.from("products").getPublicUrl(filePath);
+      url = publicUrlData.publicUrl;
+    }
+
     const newProduct = {
       nombre: descripcion,
       descripcion: codigo || "",
@@ -4953,6 +4932,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (addProductForm) {
     addProductForm.addEventListener("submit", handleAddProduct)
+  }
+
+  const productFileInput = document.getElementById("product-file-input")
+  const productFileName = document.getElementById("product-file-name")
+  if (productFileInput && productFileName) {
+    productFileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        productFileName.textContent = e.target.files[0].name
+        productFileName.classList.remove("text-gray-600")
+        productFileName.classList.add("text-green-600")
+      } else {
+        productFileName.textContent = "Seleccionar imagen (recomendado)"
+        productFileName.classList.remove("text-green-600")
+        productFileName.classList.add("text-gray-600")
+      }
+    })
   }
 
   if (deleteProductBtn) {
