@@ -30,9 +30,28 @@ let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
 let selectedProductForQuantity = null
 
-let currentPage = 1
-const PRODUCTS_PER_PAGE = 50
 let isLoadingMore = false
+
+// ============================================
+// OPTIMIZACIÓN Y PLACEHOLDERS DE IMÁGENES (GLOBAL)
+// ============================================
+function optimizeImageUrl(url, width = 400) {
+  if (!url || url.trim() === "" || url === "/images/ProductImages.jpg") {
+    return "/images/ProductImages.jpg"
+  }
+  // Transformación al vuelo de Supabase Storage para WebP comprimido y redimensionado
+  if (url.includes("/storage/v1/object/public/")) {
+    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + `?width=${width}&quality=75&format=webp`
+  }
+  return url
+}
+window.optimizeImageUrl = optimizeImageUrl
+
+function createImagePlaceholder(url) {
+  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f3f4f6'/%3E%3Cpath d='M30 65 L45 45 L60 60 L70 50 L85 65 Z' fill='%23e5e7eb'/%3E%3Ccircle cx='40' cy='35' r='6' fill='%23e5e7eb'/%3E%3C/svg%3E"
+}
+window.createImagePlaceholder = createImagePlaceholder
+
 
 let imageObserver = null
 let serviceWorkerRegistration = null
