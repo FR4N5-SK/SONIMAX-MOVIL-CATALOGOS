@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v5"
+const CACHE_VERSION = "v6"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -22,7 +22,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v4 instalándose...")
+  console.log("[SW] ✅ Service Worker v6 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -46,7 +46,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v4 activado")
+  console.log("[SW] 🚀 Service Worker v6 activado")
   event.waitUntil(
     caches
       .keys()
@@ -75,9 +75,13 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES DE ibb.co ─────────────────────────────────
+  // ── 1. IMÁGENES (ibb.co o Supabase Storage CDN) ───────────
   //    Estrategia: Cache First (si está en caché, usa caché; si no, descarga y guarda)
-  if (url.hostname.includes("ibb.co") || url.hostname.includes("i.ibb.co")) {
+  if (
+    url.hostname.includes("ibb.co") ||
+    url.hostname.includes("i.ibb.co") ||
+    url.pathname.includes("/storage/v1/object/public/")
+  ) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then((cache) => {
         return cache.match(event.request).then((cachedResponse) => {
@@ -88,7 +92,7 @@ self.addEventListener("fetch", (event) => {
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200) {
                 cache.put(event.request, networkResponse.clone())
-                console.log("[SW] 💾 Imagen guardada:", url.pathname)
+                console.log("[SW] 💾 Imagen guardada en caché:", url.pathname)
               }
               return networkResponse
             })
@@ -103,11 +107,11 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 2. API DE SUPABASE ─────────────────────────────────────
+  // ── 2. API DE SUPABASE (REST / Consultas - NO imágenes) ─────
   //    Estrategia: Network First con Cache de respuestas API (para offline)
   if (
-    url.hostname.includes("supabase.co") ||
-    url.hostname.includes("supabase.io")
+    (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) &&
+    !url.pathname.includes("/storage/v1/object/public/")
   ) {
     event.respondWith(
       fetch(event.request.clone())

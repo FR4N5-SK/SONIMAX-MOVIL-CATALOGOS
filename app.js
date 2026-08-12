@@ -658,52 +658,10 @@ async function processBackgroundQueue() {
 }
 
 async function preloadAllImages() {
-  if (!("caches" in window)) {
-    console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
-    return
-  }
-
-  loadImageLoadState()
-
-  const { changed, newUrls } = checkProductsChanged(allProducts)
-
-  const allImageUrls = allProducts
-    .map((p) => p.imagen_url)
-    .filter((url) => url && url !== "/images/ProductImages.jpg")
-    .map((url) => optimizeImageUrl(url))
-
-  let urlsToLoad = []
-
-  if (changed && newUrls.length > 0) {
-    urlsToLoad = newUrls
-    console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
-  } else {
-    urlsToLoad = allImageUrls.filter(
-      (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
-    )
-
-    if (urlsToLoad.length === 0) {
-      console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
-      return
-    }
-
-    console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
-  }
-
-  if (imageLoadState.inProgress) {
-    console.log("[IMG-LOAD] ⚠️ Carga ya en progreso, omitiendo...")
-    return
-  }
-
-  imageLoadState.inProgress = true
-
-  imageLoadState.backgroundQueue = [...urlsToLoad]
-  console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
-
-  await processBackgroundQueue()
-
-  imageLoadState.inProgress = false
-  saveImageLoadState()
+  // [OPTIMIZACIÓN CRÍTICA] Descarga masiva de 7,000 fotos desactivada.
+  // Las imágenes se cargan bajo demanda (Lazy Loading) cuando el usuario se desplaza por la pantalla.
+  // Esto evita consumir gigabytes de ancho de banda en segundo plano.
+  console.log("[IMG-LOAD] ℹ️ Carga inteligente (Lazy Loading) activa. Omitiendo descarga masiva en segundo plano.");
 }
 
 async function loadImagesWithRetry(urls) {
