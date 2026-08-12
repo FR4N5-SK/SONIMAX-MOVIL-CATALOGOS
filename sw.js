@@ -37,7 +37,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v6 instalándose...")
+  console.log(`[SW] ✅ Service Worker ${CACHE_VERSION} instalándose...`)
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -61,7 +61,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v6 activado")
+  console.log(`[SW] 🚀 Service Worker ${CACHE_VERSION} activado`)
   event.waitUntil(
     caches
       .keys()

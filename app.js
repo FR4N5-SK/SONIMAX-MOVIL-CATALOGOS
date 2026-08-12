@@ -66,6 +66,7 @@ const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot loc
 const STOCK_VISIBILITY_CONFIG_KEY = "sonimax_stock_visibility_config"
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
+const PRODUCTS_PER_PAGE = 48 // Productos por página en el catálogo
 
 let banners = []
 let currentBannerIndex = 0
@@ -1831,9 +1832,10 @@ async function loadProducts() {
     if (navigator.onLine) {
       setTimeout(() => _refreshProductsFromNetwork(false), 800)
     } else {
-      console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
-      setTimeout(() => { preloadAllImages() }, 2000)
+      // [OPTIMIZACIÓN] preloadAllImages() masivo DESHABILITADO — evita egress excesivo en Supabase.
+      // setTimeout(() => { preloadAllImages() }, 2000)
     }
+
 
   } else {
     // Sin caché: primera vez o caché borrado → carga bloqueante con loading
@@ -2039,7 +2041,10 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     localStorage.setItem("sonimax_product_count", allProducts.length)
     localStorage.setItem("sonimax_last_update", formattedTime)
 
-    setTimeout(() => { preloadAllImages() }, 2000)
+    // [OPTIMIZACIÓN] preloadAllImages() masivo DESHABILITADO para eliminar egress excesivo en Supabase.
+    // Las imágenes se cargan únicamente bajo demanda vía IntersectionObserver (lazy loading).
+    // setTimeout(() => { preloadAllImages() }, 2000)
+
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
 
   } catch (error) {
