@@ -2,25 +2,10 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v7"
+const CACHE_VERSION = "v4"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
-
-// Función para limitar el tamaño de una caché (LRU Eviction)
-async function trimCache(cacheName, maxItems) {
-  try {
-    const cache = await caches.open(cacheName)
-    const keys = await cache.keys()
-    if (keys.length > maxItems) {
-      await cache.delete(keys[0])
-      trimCache(cacheName, maxItems)
-    }
-  } catch (err) {
-    console.warn("[SW] Error en trimCache:", err)
-  }
-}
-
 
 // Recursos del "App Shell" que siempre deben estar disponibles offline
 const APP_SHELL = [
@@ -37,7 +22,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log(`[SW] ✅ Service Worker ${CACHE_VERSION} instalándose...`)
+  console.log("[SW] ✅ Service Worker v4 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -61,7 +46,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log(`[SW] 🚀 Service Worker ${CACHE_VERSION} activado`)
+  console.log("[SW] 🚀 Service Worker v4 activado")
   event.waitUntil(
     caches
       .keys()
@@ -90,15 +75,9 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES (ibb.co o Supabase Storage CDN / Render API) ───────────
+  // ── 1. IMÁGENES DE ibb.co ─────────────────────────────────
   //    Estrategia: Cache First (si está en caché, usa caché; si no, descarga y guarda)
-  if (
-    url.hostname.includes("ibb.co") ||
-    url.hostname.includes("i.ibb.co") ||
-    url.pathname.includes("/storage/v1/object/public/") ||
-    url.pathname.includes("/storage/v1/render/image/public/") ||
-    url.pathname.includes("/storage/v1/object/sign/")
-  ) {
+  if (url.hostname.includes("ibb.co") || url.hostname.includes("i.ibb.co")) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then((cache) => {
         return cache.match(event.request).then((cachedResponse) => {
@@ -107,16 +86,15 @@ self.addEventListener("fetch", (event) => {
           }
           return fetch(event.request)
             .then((networkResponse) => {
-              // Aceptar respuestas HTTP 200 y respuestas opaque de CORS
-              if (networkResponse && (networkResponse.status === 200 || networkResponse.type === "opaque")) {
+              if (networkResponse && networkResponse.status === 200) {
                 cache.put(event.request, networkResponse.clone())
-                // Limitar tamaño de caché para evitar cuota excedida en móviles
-                trimCache(IMAGE_CACHE, 300)
+                console.log("[SW] 💾 Imagen guardada:", url.pathname)
               }
               return networkResponse
             })
             .catch(() => {
               console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
+              // Devolver respuesta vacía si no hay red
               return new Response("", { status: 503 })
             })
         })
@@ -125,13 +103,11 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 2. API DE SUPABASE (REST / Consultas - NO imágenes) ─────
+  // ── 2. API DE SUPABASE ─────────────────────────────────────
   //    Estrategia: Network First con Cache de respuestas API (para offline)
   if (
-    (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) &&
-    !url.pathname.includes("/storage/v1/object/public/") &&
-    !url.pathname.includes("/storage/v1/render/image/public/") &&
-    !url.pathname.includes("/storage/v1/object/sign/")
+    url.hostname.includes("supabase.co") ||
+    url.hostname.includes("supabase.io")
   ) {
     event.respondWith(
       fetch(event.request.clone())

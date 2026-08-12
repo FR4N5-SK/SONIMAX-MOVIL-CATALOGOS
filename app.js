@@ -30,28 +30,9 @@ let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
 let selectedProductForQuantity = null
 
+let currentPage = 1
+const PRODUCTS_PER_PAGE = 50
 let isLoadingMore = false
-
-// ============================================
-// OPTIMIZACIÓN Y PLACEHOLDERS DE IMÁGENES (GLOBAL)
-// ============================================
-function optimizeImageUrl(url, width = 400) {
-  if (!url || url.trim() === "" || url === "/images/ProductImages.jpg") {
-    return "/images/ProductImages.jpg"
-  }
-  // Transformación al vuelo de Supabase Storage para WebP comprimido y redimensionado
-  if (url.includes("/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + `?width=${width}&quality=75&format=webp`
-  }
-  return url
-}
-window.optimizeImageUrl = optimizeImageUrl
-
-function createImagePlaceholder(url) {
-  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f3f4f6'/%3E%3Cpath d='M30 65 L45 45 L60 60 L70 50 L85 65 Z' fill='%23e5e7eb'/%3E%3Ccircle cx='40' cy='35' r='6' fill='%23e5e7eb'/%3E%3C/svg%3E"
-}
-window.createImagePlaceholder = createImagePlaceholder
-
 
 let imageObserver = null
 let serviceWorkerRegistration = null
@@ -66,7 +47,6 @@ const CSV_SNAPSHOT_KEY = "sonimax_csv_snapshot" // Nueva clave para snapshot loc
 const STOCK_VISIBILITY_CONFIG_KEY = "sonimax_stock_visibility_config"
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 1500 // 1.5 segundos entre reintentos
-const PRODUCTS_PER_PAGE = 48 // Productos por página en el catálogo
 
 let banners = []
 let currentBannerIndex = 0
@@ -136,10 +116,25 @@ async function saveCSVSnapshot(products) {
       precio_gmayor: p.precio_gmayor || 0,
     }))
 
-    // [OPTIMIZACIÓN] Solo guardar en localStorage para evitar consumo de egress en Supabase
-    // La base de datos ya NO se usa para csv_snapshot (era la mayor fuente de egress)
-    localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
-    console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en localStorage con ${snapshot.length} productos`)
+    // Guardar en Supabase
+    const { data, error } = await window.supabaseClient
+      .from("csv_snapshot")
+      .insert({
+        snapshot_data: snapshot,
+        uploaded_by: currentUser?.id || null,
+      })
+      .select()
+
+    if (error) {
+      console.error("[CSV-SNAPSHOT] Error guardando en Supabase:", error)
+      // Fallback a localStorage si falla Supabase
+      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+      console.log(`[CSV-SNAPSHOT] Snapshot guardado en localStorage (fallback) con ${snapshot.length} productos`)
+    } else {
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot guardado en Supabase con ${snapshot.length} productos`)
+      // También guardar en localStorage como backup
+      localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(snapshot))
+    }
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error guardando snapshot:", error)
   }
@@ -166,15 +161,35 @@ function loadStockVisibilityConfigLocalBackup() {
 
 async function getPreviousCSVSnapshot() {
   try {
-    // [OPTIMIZACIÓN] Solo leer desde localStorage para evitar consumo de egress en Supabase
-    // Ya no consultamos la tabla csv_snapshot en la BD (generaba megas de egress por consulta)
-    const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde localStorage: ${parsed.length} productos`)
-      return parsed
+    // Intentar obtener el snapshot más reciente de Supabase
+    const { data, error } = await window.supabaseClient
+      .from("csv_snapshot")
+      .select("snapshot_data, created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
+      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
+      // Fallback a localStorage
+      const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
+      if (saved) {
+        return JSON.parse(saved)
+      }
+      return []
     }
-    console.log("[CSV-SNAPSHOT] No hay snapshot en localStorage")
+
+    if (data && data.snapshot_data) {
+      console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde Supabase: ${data.snapshot_data.length} productos`)
+      try {
+        localStorage.setItem(CSV_SNAPSHOT_KEY, JSON.stringify(data.snapshot_data))
+      } catch (e) {
+        console.warn("No se pudo guardar snapshot de precios en caché local:", e)
+      }
+      return data.snapshot_data
+    }
+
     return []
   } catch (error) {
     console.error("[CSV-SNAPSHOT] Error cargando snapshot anterior:", error)
@@ -358,9 +373,8 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, nombre, descripcion, codigo, precio_cliente, precio_mayor, precio_gmayor, imagen_url, stock, departamento, is_new, updated_at")
+        .select("*")
         .range(start, start + batchSize - 1);
-
 
       if (error) {
         console.error("[PRODUCTS-DB] Error obteniendo productos:", error);
@@ -480,11 +494,6 @@ async function registerServiceWorker() {
       serviceWorkerRegistration = await navigator.serviceWorker.register("sw.js")
       console.log("✅ Service Worker registrado para caché de imágenes")
 
-      // Forzar verificación de actualización en la app instalada
-      if (serviceWorkerRegistration) {
-        serviceWorkerRegistration.update()
-      }
-
       navigator.serviceWorker.addEventListener("message", (event) => {
         if (event.data && event.data.type === "PRELOAD_PROGRESS") {
           console.log(
@@ -534,45 +543,447 @@ function resumeBackgroundDownloads() {
   }
 }
 
-// ============================================
-// OPTIMIZACIÓN Y PLACEHOLDERS DE IMÁGENES
-// ============================================
-
-function optimizeImageUrl(url, width = 400) {
-  if (!url || url.trim() === "" || url === "/images/ProductImages.jpg") {
-    return "/images/ProductImages.jpg"
+async function loadPriorityImages(urls) {
+  if (urls.length === 0) {
+    console.log("[IMG-PRIORITY] ⚠️ No hay imágenes prioritarias para cargar")
+    return
   }
-  // Transformación al vuelo de Supabase Storage para WebP comprimido y redimensionado
-  if (url.includes("/storage/v1/object/public/")) {
-    return url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + `?width=${width}&quality=75&format=webp`
-  }
-  return url
-}
-window.optimizeImageUrl = optimizeImageUrl
 
-function createImagePlaceholder(url) {
-  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f3f4f6'/%3E%3Cpath d='M30 65 L45 45 L60 60 L70 50 L85 65 Z' fill='%23e5e7eb'/%3E%3Ccircle cx='40' cy='35' r='6' fill='%23e5e7eb'/%3E%3C/svg%3E"
+  console.log(`[IMG-PRIORITY] 🚀 Cargando ${urls.length} imágenes PRIORITARIAS`)
+
+  // Pausar descargas en segundo plano
+  pauseBackgroundDownloads()
+
+  const cache = await caches.open("sonimax-images-store")
+
+  // Filtrar solo las que no están cargadas
+  const urlsToLoad = urls.filter((url) => !imageLoadState.loadedImages.has(url))
+
+  console.log(`[IMG-PRIORITY] 📊 ${urlsToLoad.length} imágenes prioritarias necesitan descarga`)
+
+  const priorityPromises = urlsToLoad.map(async (url) => {
+    try {
+      // Verificar si ya está en caché
+      const cachedResponse = await cache.match(url)
+      if (cachedResponse) {
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-PRIORITY] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        return
+      }
+
+      // Descargar con alta prioridad
+      console.log(`[IMG-PRIORITY] ⬇️ Descargando PRIORITARIA: ${url.substring(url.lastIndexOf("/") + 1)}`)
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+      const response = await fetch(url, {
+        mode: "no-cors",
+        cache: "force-cache",
+        signal: controller.signal,
+        priority: "high", // Alta prioridad
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(url, response)
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-PRIORITY] ✅ PRIORITARIA descargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+      }
+    } catch (error) {
+      console.log(
+        `[IMG-PRIORITY] ❌ Error en prioritaria: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+      )
+      const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+      imageLoadState.failedImages.set(url, attemptCount)
+    }
+  })
+
+  await Promise.allSettled(priorityPromises)
+
+  saveImageLoadState()
+
+  setTimeout(() => {
+    console.log("[IMG-PRIORITY] ⏱️ Reanudando descargas en segundo plano...")
+    resumeBackgroundDownloads()
+  }, 500)
 }
-window.createImagePlaceholder = createImagePlaceholder
+
+async function processBackgroundQueue() {
+  if (imageLoadState.isPaused) {
+    console.log("[IMG-PRIORITY] ⏸️ Proceso pausado, esperando...")
+    return
+  }
+
+  if (imageLoadState.backgroundQueue.length === 0) {
+    console.log("[IMG-PRIORITY] ✅ Cola de segundo plano vacía")
+    return
+  }
+
+  const cache = await caches.open("sonimax-images-store")
+  const BATCH_SIZE = 10
+
+  while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
+    const batch = imageLoadState.backgroundQueue.splice(0, BATCH_SIZE)
+
+    console.log(
+      `[IMG-PRIORITY] 📦 Procesando lote de ${batch.length} imágenes (${imageLoadState.backgroundQueue.length} restantes)`,
+    )
+
+    for (const url of batch) {
+      if (imageLoadState.isPaused) {
+        console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
+        imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
+        return
+      }
+
+      try {
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) {
+          imageLoadState.loadedImages.add(url)
+          continue
+        }
+
+        const controller = new AbortController()
+        imageLoadState.currentAbortController = controller
+
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response) {
+          await cache.put(url, response)
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          console.log(`[IMG-PRIORITY] ✅ Segundo plano: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        }
+      } catch (error) {
+        if (error.name === "AbortError") {
+          console.log(`[IMG-PRIORITY] ⏸️ Descarga cancelada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          imageLoadState.backgroundQueue.unshift(url) // Devolver a la cola
+        } else {
+          console.log(`[IMG-PRIORITY] ❌ Error: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`)
+          const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+          imageLoadState.failedImages.set(url, attemptCount)
+        }
+      }
+
+      imageLoadState.currentAbortController = null
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    saveImageLoadState()
+  }
+
+  console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
+}
 
 async function preloadAllImages() {
-  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return
-  if (!allProducts || allProducts.length === 0) return
+  if (!("caches" in window)) {
+    console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
+    return
+  }
 
-  console.log("[SW-PRELOAD] 🚀 Enviando imágenes al Service Worker para precarga en segundo plano...")
-  const urls = allProducts
-    .map((p) => optimizeImageUrl(p.imagen_url))
+  loadImageLoadState()
+
+  const { changed, newUrls } = checkProductsChanged(allProducts)
+
+  const allImageUrls = allProducts
+    .map((p) => p.imagen_url)
     .filter((url) => url && url !== "/images/ProductImages.jpg")
+    .map((url) => optimizeImageUrl(url))
 
-  urls.forEach((url) => {
-    navigator.serviceWorker.controller.postMessage({
-      type: "DOWNLOAD_IMAGE",
-      url: url,
-    })
-  })
+  let urlsToLoad = []
+
+  if (changed && newUrls.length > 0) {
+    urlsToLoad = newUrls
+    console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
+  } else {
+    urlsToLoad = allImageUrls.filter(
+      (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
+    )
+
+    if (urlsToLoad.length === 0) {
+      console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
+      return
+    }
+
+    console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
+  }
+
+  if (imageLoadState.inProgress) {
+    console.log("[IMG-LOAD] ⚠️ Carga ya en progreso, omitiendo...")
+    return
+  }
+
+  imageLoadState.inProgress = true
+
+  imageLoadState.backgroundQueue = [...urlsToLoad]
+  console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
+
+  await processBackgroundQueue()
+
+  imageLoadState.inProgress = false
+  saveImageLoadState()
 }
-window.preloadAllImages = preloadAllImages
 
+async function loadImagesWithRetry(urls) {
+  const cache = await caches.open("sonimax-images-store")
+  const BATCH_SIZE = 10
+  const CONCURRENT_BATCHES = 4
+
+  console.log(`[IMG-LOAD] 🚀 Iniciando carga de ${urls.length} imágenes...`)
+  console.log(`[IMG-LOAD] 📊 Ya cargadas: ${imageLoadState.loadedImages.size}`)
+  console.log(`[IMG-LOAD] 📊 Con errores previos: ${imageLoadState.failedImages.size}`)
+  console.log(`[IMG-LOAD] 📊 Por cargar ahora: ${urls.length}`)
+
+  const batches = []
+  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+    batches.push(urls.slice(i, i + BATCH_SIZE))
+  }
+
+  let totalLoaded = 0
+  let totalFailed = 0
+
+  for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
+    const batchGroup = []
+
+    for (let j = 0; j < CONCURRENT_BATCHES && i + j < batches.length; j++) {
+      const batchIndex = i + j
+      batchGroup.push(processBatch(cache, batches[batchIndex], batchIndex + 1, batches.length))
+    }
+
+    const results = await Promise.allSettled(batchGroup)
+
+    results.forEach((result) => {
+      if (result.status === "fulfilled") {
+        totalLoaded += result.value.loaded
+        totalFailed += result.value.failed
+      }
+    })
+
+    const remaining = urls.length - (totalLoaded + totalFailed)
+    console.log(
+      `[IMG-LOAD] 📊 Progreso: ${totalLoaded} exitosas, ${totalFailed} fallidas, ${remaining} restantes de ${urls.length} totales`,
+    )
+
+    saveImageLoadState()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  console.log(`[IMG-LOAD] ✅ Carga inicial completada`)
+  console.log(`[IMG-LOAD] 📊 Resultado: ${totalLoaded} exitosas, ${totalFailed} fallidas de ${urls.length} totales`)
+  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas en total`)
+
+  if (totalFailed > 0) {
+    console.log(`[IMG-LOAD] 🔄 Iniciando proceso de reintentos para ${totalFailed} imágenes fallidas...`)
+    await retryFailedImages(cache)
+  }
+}
+
+async function processBatch(cache, batch, batchNum, totalBatches) {
+  let loaded = 0
+  let failed = 0
+
+  const promises = batch.map(async (url) => {
+    try {
+      const cachedResponse = await cache.match(url)
+      if (cachedResponse) {
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-LOAD] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        return { success: true, cached: true }
+      }
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(url, {
+        mode: "no-cors",
+        cache: "force-cache",
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (response) {
+        await cache.put(url, response)
+        imageLoadState.loadedImages.add(url)
+        imageLoadState.failedImages.delete(url)
+        console.log(`[IMG-LOAD] ✅ Descargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        return { success: true, cached: false }
+      }
+
+      console.log(`[IMG-LOAD] ❌ Sin respuesta: ${url.substring(url.lastIndexOf("/") + 1)}`)
+      return { success: false, error: "No response" }
+    } catch (error) {
+      const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+      imageLoadState.failedImages.set(url, attemptCount)
+      console.log(
+        `[IMG-LOAD] ❌ Error (intento ${attemptCount}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+      )
+      return { success: false, error: error.message }
+    }
+  })
+
+  const results = await Promise.allSettled(promises)
+
+  results.forEach((result) => {
+    if (result.status === "fulfilled" && result.value.success) {
+      loaded++
+    } else {
+      failed++
+    }
+  })
+
+  console.log(`[IMG-LOAD] Lote ${batchNum}/${totalBatches}: ${loaded} exitosas, ${failed} fallidas`)
+
+  return { loaded, failed }
+}
+
+async function retryFailedImages(cache) {
+  const failedUrls = Array.from(imageLoadState.failedImages.entries())
+    .filter(([url, attempts]) => attempts < MAX_RETRY_ATTEMPTS)
+    .map(([url]) => url)
+
+  if (failedUrls.length === 0) {
+    console.log("[IMG-LOAD] ✅ No hay imágenes para reintentar")
+    return
+  }
+
+  console.log(`[IMG-LOAD] 🔄 Reintentando ${failedUrls.length} imágenes fallidas...`)
+  console.log(`[IMG-LOAD] ⏳ Esperando ${RETRY_DELAY / 1000} segundos antes de reintentar...`)
+
+  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY))
+
+  let retrySuccess = 0
+  let retryFailed = 0
+
+  const RETRY_CONCURRENT = 5
+  for (let i = 0; i < failedUrls.length; i += RETRY_CONCURRENT) {
+    const batch = failedUrls.slice(i, i + RETRY_CONCURRENT)
+
+    const retryPromises = batch.map(async (url) => {
+      const currentAttempt = imageLoadState.failedImages.get(url) || 0
+
+      console.log(
+        `[IMG-LOAD] 🔄 Reintentando intento ${currentAttempt + 1}/${MAX_RETRY_ATTEMPTS}: ${url.substring(url.lastIndexOf("/") + 1)}`,
+      )
+
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response) {
+          await cache.put(url, response)
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          retrySuccess++
+          console.log(`[IMG-LOAD] ✅ Reintento exitoso: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          return { success: true }
+        } else {
+          const attempts = imageLoadState.failedImages.get(url) + 1
+          imageLoadState.failedImages.set(url, attempts)
+          retryFailed++
+          console.log(`[IMG-LOAD] ❌ Reintento fallido: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          return { success: false }
+        }
+      } catch (error) {
+        const attempts = imageLoadState.failedImages.get(url) + 1
+        imageLoadState.failedImages.set(url, attempts)
+        retryFailed++
+        console.log(
+          `[IMG-LOAD] ❌ Reintento fallido (intento ${attempts}/${MAX_RETRY_ATTEMPTS}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
+        )
+        return { success: false }
+      }
+    })
+
+    await Promise.allSettled(retryPromises)
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  console.log(`[IMG-LOAD] 📊 Reintentos completados: ${retrySuccess} exitosos, ${retryFailed} fallidas`)
+  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas`)
+
+  saveImageLoadState()
+
+  const stillFailed = Array.from(imageLoadState.failedImages.entries()).filter(
+    ([url, attempts]) => attempts < MAX_RETRY_ATTEMPTS,
+  )
+
+  if (stillFailed.length > 0) {
+    console.log(`[IMG-LOAD] 🔄 Quedan ${stillFailed.length} imágenes por reintentar...`)
+    console.log(`[IMG-LOAD] ⏳ Esperando ${RETRY_DELAY / 1000} segundos antes del próximo ciclo...`)
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY))
+    await retryFailedImages(cache)
+  } else {
+    const permanentlyFailed = Array.from(imageLoadState.failedImages.entries()).filter(
+      ([url, attempts]) => attempts >= MAX_RETRY_ATTEMPTS,
+    )
+
+    if (permanentlyFailed.length > 0) {
+      console.log(
+        `[IMG-LOAD] ⚠️ ${permanentlyFailed.length} imágenes no pudieron cargarse después de ${MAX_RETRY_ATTEMPTS} intentos:`,
+      )
+      permanentlyFailed.forEach(([url, attempts]) => {
+        console.log(`[IMG-LOAD]    ❌ ${url.substring(url.lastIndexOf("/") + 1)} (${attempts} intentos)`)
+      })
+    } else {
+      console.log("[IMG-LOAD] ✅ ¡Todas las imágenes cargadas exitosamente!")
+      console.log(`[IMG-LOAD] 📊 Total final: ${imageLoadState.loadedImages.size} imágenes en caché`)
+    }
+  }
+}
+
+// ============================================
+// OPTIMIZACIÓN DE IMÁGENES
+// ============================================
+
+function optimizeImageUrl(url) {
+  if (!url || url === "/images/ProductImages.jpg") {
+    return url
+  }
+
+  if (url.includes("ibb.co")) {
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=400&quality=70`
+  }
+
+  return url
+}
+
+function createImagePlaceholder(url) {
+  if (!url || url === "/images/ProductImages.jpg") {
+    return url
+  }
+
+  if (url.includes("ibb.co")) {
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=50&quality=30`
+  }
+
+  return url
+}
 
 function initImageObserver() {
   if ("IntersectionObserver" in window) {
@@ -584,18 +995,35 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc) {
-              img.src = fullSrc
-              img.classList.remove("image-loading")
-              img.classList.add("image-loaded")
-              const retryBtn = img.parentElement?.querySelector(".image-retry-btn")
-              if (retryBtn) retryBtn.remove()
+              console.log(
+                `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
+              )
+              loadPriorityImages([fullSrc])
+
+              const tempImg = new Image()
+              tempImg.onload = () => {
+                img.src = fullSrc
+                img.classList.remove("image-loading")
+                img.classList.add("image-loaded")
+                const retryBtn = img.parentElement.querySelector(".image-retry-btn")
+                if (retryBtn) {
+                  retryBtn.remove()
+                }
+              }
+              tempImg.onerror = () => {
+                img.src = "/images/ProductImages.jpg"
+                img.classList.remove("image-loading")
+                addRetryButton(img, fullSrc)
+              }
+              tempImg.src = fullSrc
+
               observer.unobserve(img)
             }
           }
         })
       },
       {
-        rootMargin: "200px",
+        rootMargin: "100px",
         threshold: 0.01,
       },
     )
@@ -1203,12 +1631,7 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    // [OPTIMIZACIÓN] Solo los campos necesarios del usuario (incluyendo name y username)
-    const { data, error } = await window.supabaseClient
-      .from("users")
-      .select("id, auth_id, username, name, role, can_see_stock, created_by")
-      .eq("auth_id", userId)
-      .single()
+    const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
 
     if (error) {
       console.error("Error obteniendo datos:", error)
@@ -1291,8 +1714,7 @@ async function updateUIForRole() {
   if (roleBadge) {
     // Mostrar "MAYORISTA" si el rol es distribuidor
     const displayRole = currentUserRole === 'distribuidor' ? 'MAYORISTA' : currentUserRole;
-    const userName = currentUser?.name || currentUser?.username || 'Usuario';
-    roleBadge.textContent = `${userName} (${displayRole})`
+    roleBadge.textContent = `${currentUser.name} (${displayRole})`
     roleBadge.className = `role-badge-${currentUserRole}`
     roleBadge.classList.remove("hidden")
   }
@@ -1833,10 +2255,9 @@ async function loadProducts() {
     if (navigator.onLine) {
       setTimeout(() => _refreshProductsFromNetwork(false), 800)
     } else {
-      // [OPTIMIZACIÓN] preloadAllImages() masivo DESHABILITADO — evita egress excesivo en Supabase.
-      // setTimeout(() => { preloadAllImages() }, 2000)
+      console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
+      setTimeout(() => { preloadAllImages() }, 2000)
     }
-
 
   } else {
     // Sin caché: primera vez o caché borrado → carga bloqueante con loading
@@ -1879,10 +2300,9 @@ async function _loadInventoryData() {
     let invHasMore = true
 
     while (invHasMore) {
-      // [OPTIMIZACIÓN] Solo los campos necesarios para el mapa de inventario
       const { data: invData, error: invError } = await window.supabaseClient
         .from('inventory_products')
-        .select('id, codigo, descripcion, existencia_actual, cantidad_fisica, deposito, departamento')
+        .select('*')
         .range(invStart, invStart + invBatchSize - 1)
 
       if (invError) {
@@ -1917,45 +2337,15 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
 
   try {
-    // [OPTIMIZACIÓN] Verificar timestamp ANTES de descargar todos los productos.
-    // Solo hacemos la descarga completa si realmente hubo cambios en la BD.
-    // Esto ahorra ~95% del egress en visitas donde no hay cambios.
-    if (!isFirstLoad) {
-      const { data: latestRow, error: tsError } = await window.supabaseClient
-        .from("products")
-        .select("updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (!tsError && latestRow && latestRow.updated_at) {
-        const savedTs = localStorage.getItem("sonimax_products_updated_at")
-        if (savedTs === latestRow.updated_at && allProducts.length > 0) {
-          console.log("✅ [NET] Sin cambios en productos (timestamp igual) - caché vigente, omitiendo descarga")
-          const now = new Date()
-          const formattedTime = now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
-          localStorage.setItem("sonimax_last_update", formattedTime)
-          const indicator = document.getElementById("last-update-time")
-          if (indicator) indicator.textContent = formattedTime
-          return
-        }
-        // Hay cambios: guardar el nuevo timestamp para la próxima vez
-        localStorage.setItem("sonimax_products_updated_at", latestRow.updated_at)
-        console.log(`🆕 [NET] Cambios detectados (nuevo ts: ${latestRow.updated_at}), descargando productos...`)
-      }
-    }
-
     let freshProducts = []
     let start = 0
     const batchSize = 500
     let hasMore = true
 
     while (hasMore) {
-      // [OPTIMIZACIÓN] Seleccionar solo los campos necesarios para el catálogo
-      // Esto reduce el tamaño de cada respuesta significativamente
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, nombre, descripcion, codigo, precio_cliente, precio_mayor, precio_gmayor, imagen_url, stock, departamento, is_new, updated_at")
+        .select("*")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -2042,10 +2432,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     localStorage.setItem("sonimax_product_count", allProducts.length)
     localStorage.setItem("sonimax_last_update", formattedTime)
 
-    // [OPTIMIZACIÓN] preloadAllImages() masivo DESHABILITADO para eliminar egress excesivo en Supabase.
-    // Las imágenes se cargan únicamente bajo demanda vía IntersectionObserver (lazy loading).
-    // setTimeout(() => { preloadAllImages() }, 2000)
-
+    setTimeout(() => { preloadAllImages() }, 2000)
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
 
   } catch (error) {
@@ -4568,56 +4955,6 @@ document.addEventListener("DOMContentLoaded", () => {
     addProductForm.addEventListener("submit", handleAddProduct)
   }
 
-  // Subida directa de foto en Agregar Producto
-  document.getElementById("product-file-input")?.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const status = document.getElementById("product-file-status");
-    if (status) {
-      status.textContent = "⏳ Subiendo foto a Supabase...";
-      status.classList.remove("hidden");
-      status.className = "text-xs text-blue-600 mt-1 font-semibold";
-    }
-    try {
-      const url = await uploadImageFileToSupabase(file, 'producto');
-      document.getElementById("product-url").value = url;
-      if (status) {
-        status.textContent = "✅ ¡Foto subida exitosamente a Supabase Storage!";
-        status.className = "text-xs text-green-600 mt-1 font-semibold";
-      }
-    } catch (err) {
-      if (status) {
-        status.textContent = "❌ " + err.message;
-        status.className = "text-xs text-red-600 mt-1 font-semibold";
-      }
-    }
-  });
-
-  // Subida directa de foto en Banners
-  document.getElementById("banner-file-input")?.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const status = document.getElementById("banner-file-status");
-    if (status) {
-      status.textContent = "⏳ Subiendo banner a Supabase...";
-      status.classList.remove("hidden");
-      status.className = "text-xs text-blue-600 mt-1 font-semibold";
-    }
-    try {
-      const url = await uploadImageFileToSupabase(file, 'banner');
-      document.getElementById("banner-url-input").value = url;
-      if (status) {
-        status.textContent = "✅ ¡Banner subido exitosamente a Supabase Storage!";
-        status.className = "text-xs text-green-600 mt-1 font-semibold";
-      }
-    } catch (err) {
-      if (status) {
-        status.textContent = "❌ " + err.message;
-        status.className = "text-xs text-red-600 mt-1 font-semibold";
-      }
-    }
-  });
-
   if (deleteProductBtn) {
     deleteProductBtn.addEventListener("click", () => {
       deleteProductSearch.value = ""
@@ -4737,14 +5074,13 @@ function initInventoryRole() {
 
         searchTimeout = setTimeout(async () => {
             try {
-                // [OPTIMIZACIÓN] Solo campos necesarios para la búsqueda de inventario
                 const { data, error } = await window.supabaseClient
                     .from('inventory_products')
-                    .select('id, codigo, descripcion, existencia_actual, deposito, departamento')
+                    .select('*')
                     .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
                     .not('existencia_actual', 'is', null)
                     .gt('existencia_actual', 0) // Solo productos en stock
-                    .limit(50);
+                    .limit(50); // Traer más para filtrar en cliente
 
                 if (error) throw error;
 
@@ -4854,12 +5190,11 @@ async function loadInventoryForAssignment() {
         let hasMore = true;
 
         while(hasMore) {
-            // [OPTIMIZACIÓN] Solo campos para la asignación de depósitos
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('id, codigo, descripcion, departamento, existencia_actual, deposito')
+                .select('*')
                 .is('deposito', null)
-                .gt('existencia_actual', 0)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -4941,12 +5276,11 @@ async function loadInventoryForCounting(deposito) {
         let hasMore = true;
 
         while(hasMore) {
-            // [OPTIMIZACIÓN] Solo campos necesarios para el conteo físico
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('id, codigo, descripcion, existencia_actual, cantidad_fisica, deposito')
+                .select('*')
                 .eq('deposito', deposito)
-                .gt('existencia_actual', 0)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 

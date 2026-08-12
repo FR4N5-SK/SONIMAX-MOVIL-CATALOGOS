@@ -645,8 +645,6 @@ body {
     border-top-right-radius: 12px;
   }
 
-
-
   /* Texto más compacto en las tarjetas de 2 columnas */
   .product-card .p-5 {
     padding: 0.5rem !important;

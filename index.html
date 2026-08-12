@@ -556,17 +556,10 @@
                                 placeholder="Ej: Promoción de Navidad">
                         </div>
                         <div>
-                            <label class="block text-gray-700 font-bold mb-2">Imagen del Banner</label>
-                            <div class="flex gap-2">
-                                <input type="url" id="banner-url-input" 
-                                    class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
-                                    placeholder="Enlace de imagen o sube un archivo directamente">
-                                <label class="px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl cursor-pointer transition-all flex items-center gap-2 whitespace-nowrap shadow-sm">
-                                    <span>📁 Subir Foto</span>
-                                    <input type="file" id="banner-file-input" accept="image/*" class="hidden">
-                                </label>
-                            </div>
-                            <p id="banner-file-status" class="text-xs text-green-600 mt-1 font-semibold hidden"></p>
+                            <label class="block text-gray-700 font-bold mb-2">URL de la Imagen</label>
+                            <input type="url" id="banner-url-input" 
+                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
+                                placeholder="/images/highqualityimage.jpg">
                             <p class="text-sm text-gray-600 mt-2">💡 <strong>RECOMENDACIÓN:</strong> Para mejor visualización en todos los dispositivos, usa imágenes de <strong>mínimo 1920x600px</strong> en formato PNG o JPG de alta calidad. La imagen se adaptará automáticamente a cada tamaño de pantalla sin perder calidad.</p>
                         </div>
                         <button id="add-banner-btn" class="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
@@ -1188,15 +1181,8 @@
                     </div>
 
                     <div>
-                        <label class="block text-gray-700 font-semibold mb-2">Imagen del Producto</label>
-                        <div class="flex gap-2">
-                            <input type="url" id="product-url" placeholder="https://... o sube una imagen" class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 transition-all">
-                            <label class="px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl cursor-pointer transition-all flex items-center gap-2 whitespace-nowrap shadow-sm">
-                                <span>📁 Subir Foto</span>
-                                <input type="file" id="product-file-input" accept="image/*" class="hidden">
-                            </label>
-                        </div>
-                        <p id="product-file-status" class="text-xs text-green-600 mt-1 font-semibold hidden"></p>
+                        <label class="block text-gray-700 font-semibold mb-2">URL de Imagen</label>
+                        <input type="url" id="product-url" placeholder="https://i.ibb.co/..." class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 transition-all">
                     </div>
 
                     <button type="submit" class="w-full bg-gradient-to-r from-green-600 to-green-700 text-white font-bold py-3 rounded-xl hover:from-green-700 hover:to-green-800 transition-all shadow-lg">
@@ -1410,10 +1396,10 @@
             </div>
         </div>
 
-        <script src="supabase-config.js?v=7"></script>
-        <script src="app.js?v=7"></script>
-        <script src="app-features.js?v=7"></script>
-        <script src="app-update-products.js?v=7"></script>
+        <script src="supabase-config.js"></script>
+        <script src="app.js"></script>
+        <script src="app-features.js"></script>
+        <script src="app-update-products.js"></script>
 
         <script>
             document.addEventListener('DOMContentLoaded', () => {

@@ -68,15 +68,9 @@
                     <span class="text-amber-500 text-xl font-bold ml-3">📷</span>
                   </div>
                   <div class="no-photo-form hidden px-4 pb-4 bg-amber-50 border-t border-amber-200">
-                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">Foto del Producto:</label>
-                    <div class="flex gap-2">
-                      <input type="url" class="photo-url-input flex-1 px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="Enlace de foto o sube un archivo">
-                      <label class="px-3 py-2 bg-amber-600 text-white rounded-lg font-semibold text-xs hover:bg-amber-700 transition cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-sm">
-                        <span>📷 Subir Foto</span>
-                        <input type="file" accept="image/*" class="photo-file-input hidden" data-id="${p.id}">
-                      </label>
-                    </div>
-                    <p class="photo-file-status text-xs text-amber-700 font-semibold mt-1 hidden"></p>
+                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">URL de la Foto:</label>
+                    <input type="url" class="photo-url-input w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="https://i.ibb.co/...">
+                    <p class="text-xs text-gray-500 mt-1">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
                     <div class="flex gap-2 mt-3">
                       <button class="save-photo-btn flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg font-semibold text-sm hover:bg-amber-700 transition" data-id="${p.id}">Guardar Foto</button>
                       <button class="cancel-photo-btn flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition">Cancelar</button>
@@ -106,37 +100,7 @@
           item.style.display = match ? '' : 'none';
         });
       });
-      // Manejar subida de archivo directa a Supabase Storage
-      modalDiv.addEventListener('change', async (e) => {
-        if (e.target.classList.contains('photo-file-input')) {
-          const fileInput = e.target;
-          const file = fileInput.files[0];
-          if (!file) return;
-          const form = fileInput.closest('.no-photo-form');
-          const urlInput = form.querySelector('.photo-url-input');
-          const status = form.querySelector('.photo-file-status');
-          
-          if (status) {
-            status.textContent = '⏳ Subiendo foto a Supabase...';
-            status.classList.remove('hidden');
-            status.className = 'photo-file-status text-xs text-amber-700 font-semibold mt-1';
-          }
-          
-          try {
-            const url = await window.uploadImageFileToSupabase(file, 'producto');
-            urlInput.value = url;
-            if (status) {
-              status.textContent = '✅ ¡Foto subida exitosamente a Supabase Storage!';
-              status.className = 'photo-file-status text-xs text-green-600 font-semibold mt-1';
-            }
-          } catch (err) {
-            if (status) {
-              status.textContent = '❌ ' + err.message;
-              status.className = 'photo-file-status text-xs text-red-600 font-semibold mt-1';
-            }
-          }
-        }
-      });
+      searchInput.focus();
 
       // Toggle inline del formulario al hacer clic en el header
       modalDiv.addEventListener('click', async (e) => {
@@ -720,15 +684,8 @@
             <input type="number" id="edit-stock" value="${product.stock || 0}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
           </div>
           <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">Foto del Producto:</label>
-            <div class="flex gap-2">
-              <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="flex-1 px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" placeholder="URL o sube un archivo">
-              <label class="px-3 py-2 bg-indigo-600 text-white rounded-lg font-semibold text-xs hover:bg-indigo-700 transition cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-sm">
-                <span>📁 Subir Foto</span>
-                <input type="file" id="edit-file-input" accept="image/*" class="hidden">
-              </label>
-            </div>
-            <p id="edit-file-status" class="text-xs text-indigo-600 font-semibold mt-1 hidden"></p>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">URL Foto:</label>
+            <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-700 mb-1">Depósito (Inventario):</label>
@@ -759,31 +716,6 @@
     `;
     document.body.appendChild(formDiv);
     document.getElementById('edit-deposito').value = currentDeposito; // Ahora currentDeposito tiene el valor correcto
-
-    // Escuchar subida de archivo directa
-    document.getElementById('edit-file-input')?.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const status = document.getElementById('edit-file-status');
-      if (status) {
-        status.textContent = '⏳ Subiendo foto a Supabase...';
-        status.classList.remove('hidden');
-        status.className = 'text-xs text-indigo-600 font-semibold mt-1';
-      }
-      try {
-        const url = await window.uploadImageFileToSupabase(file, 'producto');
-        document.getElementById('edit-url').value = url;
-        if (status) {
-          status.textContent = '✅ ¡Foto subida exitosamente a Supabase Storage!';
-          status.className = 'text-xs text-green-600 font-semibold mt-1';
-        }
-      } catch (err) {
-        if (status) {
-          status.textContent = '❌ ' + err.message;
-          status.className = 'text-xs text-red-600 font-semibold mt-1';
-        }
-      }
-    });
   }
 
   window.saveProductEdit = async function(productId, productCode) {
@@ -1002,8 +934,7 @@
       let imagesLoaded = 0;
       for (const product of filtered) {
         if (product.imagen_url) {
-          const optUrl = window.optimizeImageUrl ? window.optimizeImageUrl(product.imagen_url, 300) : product.imagen_url;
-          assets[product.id] = await imageUrlToBase64(optUrl);
+          assets[product.id] = await imageUrlToBase64(product.imagen_url);
         }
         imagesLoaded++;
         updateProgress(imagesLoaded, totalResources, `Cargando imagen ${imagesLoaded} de ${filtered.length}...`);
