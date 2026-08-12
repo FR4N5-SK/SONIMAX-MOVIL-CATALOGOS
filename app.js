@@ -373,7 +373,7 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, existencia_actual, imagen_url, departamento, is_new, is_bestseller")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, is_bestseller")
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -613,76 +613,10 @@ async function loadPriorityImages(urls) {
 }
 
 async function processBackgroundQueue() {
-  if (imageLoadState.isPaused) {
-    console.log("[IMG-PRIORITY] ⏸️ Proceso pausado, esperando...")
-    return
-  }
+  // [MODIFICADO] Totalmente desactivado para que no haga peticiones de fondo (Ahorro Egress Supabase)
+  return
+}
 
-  if (imageLoadState.backgroundQueue.length === 0) {
-    console.log("[IMG-PRIORITY] ✅ Cola de segundo plano vacía")
-    return
-  }
-
-  const cache = await caches.open("sonimax-images-store")
-  const BATCH_SIZE = 10
-
-  while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
-    const batch = imageLoadState.backgroundQueue.splice(0, BATCH_SIZE)
-
-    console.log(
-      `[IMG-PRIORITY] 📦 Procesando lote de ${batch.length} imágenes (${imageLoadState.backgroundQueue.length} restantes)`,
-    )
-
-    for (const url of batch) {
-      if (imageLoadState.isPaused) {
-        console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
-        imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
-        return
-      }
-
-      try {
-        const cachedResponse = await cache.match(url)
-        if (cachedResponse) {
-          imageLoadState.loadedImages.add(url)
-          continue
-        }
-
-        const controller = new AbortController()
-        imageLoadState.currentAbortController = controller
-
-        const timeoutId = setTimeout(() => controller.abort(), 10000)
-
-        const response = await fetch(url, {
-          mode: "no-cors",
-          cache: "force-cache",
-          signal: controller.signal,
-        })
-
-        clearTimeout(timeoutId)
-
-        if (response) {
-          await cache.put(url, response)
-          imageLoadState.loadedImages.add(url)
-          imageLoadState.failedImages.delete(url)
-          console.log(`[IMG-PRIORITY] ✅ Segundo plano: ${url.substring(url.lastIndexOf("/") + 1)}`)
-        }
-      } catch (error) {
-        if (error.name === "AbortError") {
-          console.log(`[IMG-PRIORITY] ⏸️ Descarga cancelada: ${url.substring(url.lastIndexOf("/") + 1)}`)
-          imageLoadState.backgroundQueue.unshift(url) // Devolver a la cola
-        } else {
-          console.log(`[IMG-PRIORITY] ❌ Error: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`)
-          const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
-          imageLoadState.failedImages.set(url, attemptCount)
-        }
-      }
-
-      imageLoadState.currentAbortController = null
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    saveImageLoadState()
-  }
 
   console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
 }
@@ -953,11 +887,6 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc) {
-              console.log(
-                `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
-              )
-              loadPriorityImages([fullSrc])
-
               const tempImg = new Image()
               tempImg.onload = () => {
                 img.src = fullSrc
@@ -2303,7 +2232,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, existencia_actual, imagen_url, departamento, is_new, is_bestseller, creado_en")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, is_bestseller, creado_en")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
