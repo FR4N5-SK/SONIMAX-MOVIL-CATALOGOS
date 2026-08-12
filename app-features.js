@@ -68,9 +68,12 @@
                     <span class="text-amber-500 text-xl font-bold ml-3">📷</span>
                   </div>
                   <div class="no-photo-form hidden px-4 pb-4 bg-amber-50 border-t border-amber-200">
-                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">URL de la Foto:</label>
-                    <input type="url" class="photo-url-input w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="https://i.ibb.co/...">
-                    <p class="text-xs text-gray-500 mt-1">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
+                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">Foto del Producto:</label>
+                    <input type="file" class="photo-file-input hidden" accept="image/*">
+                    <label class="photo-file-label flex items-center gap-2 w-full px-3 py-2 border-2 border-dashed border-amber-400 rounded-lg text-sm cursor-pointer hover:bg-amber-100 transition">
+                      <span>📁</span><span class="photo-file-name">Seleccionar imagen...</span>
+                    </label>
+                    <p class="text-xs text-gray-400 mt-1">La foto se sube directamente a Supabase</p>
                     <div class="flex gap-2 mt-3">
                       <button class="save-photo-btn flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg font-semibold text-sm hover:bg-amber-700 transition" data-id="${p.id}">Guardar Foto</button>
                       <button class="cancel-photo-btn flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition">Cancelar</button>
@@ -114,7 +117,17 @@
           modalDiv.querySelectorAll('.no-photo-form').forEach(f => f.classList.add('hidden'));
           if (!isOpen) {
             form.classList.remove('hidden');
-            form.querySelector('.photo-url-input').focus();
+            // Conectar el label con el input de archivo
+            const fileLabel = form.querySelector('.photo-file-label');
+            const fileInput = form.querySelector('.photo-file-input');
+            const fileName = form.querySelector('.photo-file-name');
+            if (fileLabel && fileInput && !fileInput._connected) {
+              fileInput._connected = true;
+              fileLabel.addEventListener('click', () => fileInput.click());
+              fileInput.addEventListener('change', () => {
+                fileName.textContent = fileInput.files.length > 0 ? fileInput.files[0].name : 'Seleccionar imagen...';
+              });
+            }
           }
           return;
         }
@@ -130,16 +143,31 @@
           const btn = e.target;
           const productId = btn.dataset.id;
           const form = btn.closest('.no-photo-form');
-          const urlInput = form.querySelector('.photo-url-input');
-          const url = urlInput.value.trim();
+          const fileInput = form.querySelector('.photo-file-input');
+          const file = fileInput && fileInput.files.length > 0 ? fileInput.files[0] : null;
 
-          if (!url) { alert('Por favor ingresa una URL de foto válida.'); return; }
+          if (!file) { alert('Por favor selecciona una imagen para subir.'); return; }
 
           const { supabaseClient } = getGlobalState();
-          btn.textContent = 'Guardando...';
+          btn.textContent = 'Subiendo...';
           btn.disabled = true;
 
           try {
+            // Subir imagen a Supabase Storage
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+            const filePath = `products/${fileName}`;
+
+            const { error: uploadError } = await supabaseClient.storage
+              .from('products')
+              .upload(filePath, file, { cacheControl: '31536000', upsert: false });
+
+            if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
+
+            const { data: publicUrlData } = supabaseClient.storage.from('products').getPublicUrl(filePath);
+            const url = publicUrlData.publicUrl;
+
+            // Guardar URL en la base de datos
             const { error } = await supabaseClient.from('products').update({ imagen_url: url }).eq('id', productId);
             if (error) throw error;
 
@@ -431,10 +459,12 @@
           </div>
 
           <div>
-            <label class="block text-sm font-semibold text-gray-700 mb-2">URL de la Foto:</label>
-            <input type="url" id="form-url" placeholder="https://i.ibb.co/..." 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-600">
-            <p class="text-xs text-gray-500 mt-2">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Foto del Producto:</label>
+            <input type="file" id="form-file" accept="image/*" class="hidden">
+            <label for="form-file" class="flex items-center gap-2 w-full px-4 py-3 border-2 border-dashed border-cyan-400 rounded-xl cursor-pointer hover:bg-cyan-50 transition">
+              <span>📁</span><span id="form-file-name" class="text-sm text-gray-600">Seleccionar imagen...</span>
+            </label>
+            <p class="text-xs text-gray-400 mt-2">La foto se sube directamente a Supabase Storage</p>
           </div>
 
           <div class="flex gap-3 pt-4">
@@ -451,21 +481,42 @@
       </div>
     `;
     document.body.appendChild(formDiv);
-    document.getElementById('form-url').focus();
+    // Mostrar nombre de archivo al seleccionar
+    document.getElementById('form-file').addEventListener('change', (e) => {
+      const label = document.getElementById('form-file-name');
+      if (label) label.textContent = e.target.files.length > 0 ? e.target.files[0].name : 'Seleccionar imagen...';
+    });
   }
 
   window.saveMerchandise = async function(productId, codigo, nombre) {
     const { supabaseClient } = getGlobalState();
     
-    const url = document.getElementById('form-url').value.trim();
+    const fileInput = document.getElementById('form-file');
     const department = document.getElementById('form-department').value.trim();
+    const file = fileInput && fileInput.files.length > 0 ? fileInput.files[0] : null;
 
-    if (!url || !department) {
-      alert('Por favor completa todos los campos');
+    if (!file || !department) {
+      alert('Por favor selecciona una imagen y verifica el departamento');
       return;
     }
 
     try {
+      console.log('[MERCHANDISE] Subiendo imagen para producto:', codigo);
+
+      // Subir imagen a Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `products/${fileName}`;
+
+      const { error: uploadError } = await supabaseClient.storage
+        .from('products')
+        .upload(filePath, file, { cacheControl: '31536000', upsert: false });
+
+      if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
+
+      const { data: publicUrlData } = supabaseClient.storage.from('products').getPublicUrl(filePath);
+      const url = publicUrlData.publicUrl;
+
       console.log('[MERCHANDISE] Guardando URL para producto:', codigo);
       
       const { error } = await supabaseClient

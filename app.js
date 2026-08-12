@@ -373,7 +373,7 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, is_bestseller")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, created_at")
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -617,9 +617,6 @@ async function processBackgroundQueue() {
   return
 }
 
-
-  console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
-}
 
 async function preloadAllImages() {
   // [MODIFICADO] Desactivado para ahorrar consumo de Egress en Supabase.
@@ -2232,7 +2229,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, is_bestseller, creado_en")
+        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, created_at")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -5002,8 +4999,8 @@ function initInventoryRole() {
                     .from('inventory_products')
                     .select('*')
                     .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
-                    .not('existencia_actual', 'is', null)
-                    .gt('existencia_actual', 0) // Solo productos en stock
+                    .not('stock', 'is', null)
+                    .gt('stock', 0) // Solo productos en stock
                     .limit(50); // Traer más para filtrar en cliente
 
                 if (error) throw error;
@@ -5118,7 +5115,7 @@ async function loadInventoryForAssignment() {
                 .from('inventory_products')
                 .select('*')
                 .is('deposito', null)
-                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
+                .gt('stock', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -5204,7 +5201,7 @@ async function loadInventoryForCounting(deposito) {
                 .from('inventory_products')
                 .select('*')
                 .eq('deposito', deposito)
-                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
+                .gt('stock', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -5314,7 +5311,7 @@ async function exportInventoryExcel() {
         while(hasMore) {
             const { data, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('codigo, descripcion, precio_detal, precio_mayor, precio_gmayor, existencia_actual, departamento, deposito, cantidad_fisica')
+                .select('codigo, descripcion, precio_detal, precio_mayor, precio_gmayor, stock, departamento, deposito, cantidad_fisica')
                 .range(page * pageSize, (page + 1) * pageSize - 1);
             
             if(error) throw error;
