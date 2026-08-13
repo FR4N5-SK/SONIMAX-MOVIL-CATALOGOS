@@ -1446,15 +1446,77 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   try {
     const internalEmail = `${username}@sonimax.internal`
 
-    const { data, error } = await window.supabaseClient.auth.signInWithPassword({
+    let loginResult = await window.supabaseClient.auth.signInWithPassword({
       email: internalEmail,
       password: password,
     })
 
-    if (error) {
-      if (error.message.includes("Invalid login credentials")) {
-        throw new Error("Usuario o contraseña incorrectos")
+    let data = loginResult.data
+    let error = loginResult.error
+
+    // Si no se encuentra en el nuevo proyecto, intentamos en el proyecto viejo como puente
+    if (error && (error.message.includes("Invalid login credentials") || error.status === 400)) {
+      console.log("⚠️ Credenciales no válidas en servidor nuevo. Intentando puente de autenticación con el servidor viejo...");
+      
+      const { data: oldData, error: oldError } = await window.supabaseOldClient.auth.signInWithPassword({
+        email: internalEmail,
+        password: password,
+      })
+
+      if (oldError) {
+        if (oldError.message.includes("Invalid login credentials") || oldError.status === 400) {
+          throw new Error("Usuario o contraseña incorrectos")
+        }
+        throw oldError
       }
+
+      // Si el login en el viejo tiene éxito, significa que las credenciales son correctas y procedemos a migrar
+      console.log("✅ Autenticado con éxito en el servidor viejo. Registrando usuario en el servidor nuevo...");
+      showAuthMessage("Migrando tu cuenta al nuevo servidor...", "info")
+
+      // Obtener el nombre para mostrárselo
+      let displayName = "Usuario"
+      try {
+        const { data: profile } = await window.supabaseClient
+          .from('users')
+          .select('name')
+          .eq('username', username)
+          .maybeSingle()
+        if (profile && profile.name) displayName = profile.name
+      } catch (profileErr) {
+        console.warn("No se pudo obtener el nombre desde la tabla users:", profileErr)
+      }
+
+      // Registrar en el nuevo
+      const { data: signUpData, error: signUpError } = await window.supabaseClient.auth.signUp({
+        email: internalEmail,
+        password: password,
+        options: {
+          data: {
+            username: username,
+            name: displayName
+          }
+        }
+      })
+
+      if (signUpError) {
+        console.error("Error al registrar en el nuevo servidor:", signUpError)
+        throw new Error("Error al migrar la cuenta al nuevo servidor: " + signUpError.message)
+      }
+
+      // Iniciar sesión en el nuevo
+      const { data: newLoginData, error: newLoginError } = await window.supabaseClient.auth.signInWithPassword({
+        email: internalEmail,
+        password: password,
+      })
+
+      if (newLoginError) {
+        throw new Error("Error al iniciar sesión tras migración: " + newLoginError.message)
+      }
+
+      data = newLoginData
+      error = null
+    } else if (error) {
       throw error
     }
 

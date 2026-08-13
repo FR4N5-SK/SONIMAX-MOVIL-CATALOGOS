@@ -205,20 +205,40 @@ CREATE TRIGGER trg_user_carts_updated_at
 
 -- ============================================================
 -- FUNCIÓN + TRIGGER: Crear perfil de usuario automáticamente
+-- MEJORADO: Vincula cuentas existentes importadas por CSV al registrarse.
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  target_username TEXT;
+  target_name TEXT;
+  existing_user_id UUID;
 BEGIN
-  INSERT INTO public.users (auth_id, username, name, email, role, can_see_stock)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || substring(NEW.id::text, 1, 8)),
-    COALESCE(NEW.raw_user_meta_data->>'name', 'Usuario'),
-    NEW.email,
-    'cliente',
-    TRUE
-  )
-  ON CONFLICT (auth_id) DO NOTHING;
+  target_username := COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || substring(NEW.id::text, 1, 8));
+  target_name := COALESCE(NEW.raw_user_meta_data->>'name', 'Usuario');
+
+  -- Verificar si el usuario ya existe en public.users (importado desde CSV)
+  SELECT id INTO existing_user_id FROM public.users WHERE username = target_username LIMIT 1;
+
+  IF existing_user_id IS NOT NULL THEN
+    -- Si el perfil existe en la tabla importada, actualizamos su auth_id para vincularlo al nuevo inicio de sesión
+    UPDATE public.users 
+    SET auth_id = NEW.id,
+        email = NEW.email
+    WHERE id = existing_user_id;
+  ELSE
+    -- Si es un usuario nuevo, insertamos su perfil normalmente
+    INSERT INTO public.users (auth_id, username, name, email, role, can_see_stock)
+    VALUES (
+      NEW.id,
+      target_username,
+      target_name,
+      NEW.email,
+      'cliente',
+      TRUE
+    );
+  END IF;
+
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
   RETURN NEW;
