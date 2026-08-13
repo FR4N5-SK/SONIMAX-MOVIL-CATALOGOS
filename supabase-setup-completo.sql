@@ -47,7 +47,7 @@ CREATE INDEX idx_users_role     ON public.users(role);
 -- ============================================================
 CREATE TABLE public.products (
   id             UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-  codigo         TEXT,
+  codigo         TEXT           UNIQUE,
   nombre         TEXT           NOT NULL,
   descripcion    TEXT,
   departamento   TEXT           NOT NULL,

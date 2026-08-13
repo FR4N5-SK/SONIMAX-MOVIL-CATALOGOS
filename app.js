@@ -1444,37 +1444,68 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   showAuthMessage("Iniciando sesión...", "info")
 
   try {
-    const internalEmail = `${username}@sonimax.internal`
+    const emailCom = `${username}@sonimax.com`
+    const emailInternal = `${username}@sonimax.internal`
 
+    let data = null
+    let error = null
+    let authenticatedClient = null
+    let authenticatedEmail = null
+
+    // 1. Intentar iniciar sesión en el servidor PRIMARIO con el dominio nuevo (.com)
     let loginResult = await window.supabaseClient.auth.signInWithPassword({
-      email: internalEmail,
+      email: emailCom,
       password: password,
     })
 
-    let data = loginResult.data
-    let error = loginResult.error
+    if (!loginResult.error) {
+      data = loginResult.data
+    } else {
+      // 2. Intentar en el servidor PRIMARIO con el dominio antiguo (.internal)
+      loginResult = await window.supabaseClient.auth.signInWithPassword({
+        email: emailInternal,
+        password: password,
+      })
+      if (!loginResult.error) {
+        data = loginResult.data
+      }
+    }
 
-    // Si no se encuentra en el nuevo proyecto, intentamos en el proyecto viejo como puente
-    if (error && (error.message.includes("Invalid login credentials") || error.status === 400)) {
-      console.log("⚠️ Credenciales no válidas en servidor nuevo. Intentando puente de autenticación con el servidor viejo...");
+    // 3. Si falló en el servidor primario, intentamos el puente con el servidor secundario
+    if (!data) {
+      console.log("⚠️ Credenciales no válidas en servidor primario. Intentando puente con el servidor secundario...");
       
-      const { data: oldData, error: oldError } = await window.supabaseOldClient.auth.signInWithPassword({
-        email: internalEmail,
+      // Intentar en el secundario con el dominio nuevo (.com)
+      let oldLoginResult = await window.supabaseOldClient.auth.signInWithPassword({
+        email: emailCom,
         password: password,
       })
 
-      if (oldError) {
-        if (oldError.message.includes("Invalid login credentials") || oldError.status === 400) {
-          throw new Error("Usuario o contraseña incorrectos")
+      if (!oldLoginResult.error) {
+        authenticatedClient = window.supabaseOldClient
+        authenticatedEmail = emailCom
+      } else {
+        // Intentar en el secundario con el dominio antiguo (.internal)
+        oldLoginResult = await window.supabaseOldClient.auth.signInWithPassword({
+          email: emailInternal,
+          password: password,
+        })
+        if (!oldLoginResult.error) {
+          authenticatedClient = window.supabaseOldClient
+          authenticatedEmail = emailInternal
         }
-        throw oldError
       }
 
-      // Si el login en el viejo tiene éxito, significa que las credenciales son correctas y procedemos a migrar
-      console.log("✅ Autenticado con éxito en el servidor viejo. Registrando usuario en el servidor nuevo...");
-      showAuthMessage("Migrando tu cuenta al nuevo servidor...", "info")
+      if (!authenticatedClient) {
+        // Si falla en ambos servidores con ambos dominios, la clave es incorrecta
+        throw new Error("Usuario o contraseña incorrectos")
+      }
 
-      // Obtener el nombre para mostrárselo
+      // Si tiene éxito en el secundario, migramos los accesos al primario en caliente
+      console.log("✅ Autenticado con éxito en el servidor secundario. Sincronizando cuenta con el servidor primario...");
+      showAuthMessage("Sincronizando tu cuenta entre servidores...", "info")
+
+      // Obtener el nombre del perfil para mostrárselo
       let displayName = "Usuario"
       try {
         const { data: profile } = await window.supabaseClient
@@ -1487,9 +1518,12 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         console.warn("No se pudo obtener el nombre desde la tabla users:", profileErr)
       }
 
+      // Siempre registrar en el primario con el formato de email .com (que es aceptado por el validador)
+      const primaryEmail = emailCom
+
       // Registrar en el nuevo
       const { data: signUpData, error: signUpError } = await window.supabaseClient.auth.signUp({
-        email: internalEmail,
+        email: primaryEmail,
         password: password,
         options: {
           data: {
@@ -1500,24 +1534,21 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       })
 
       if (signUpError) {
-        console.error("Error al registrar en el nuevo servidor:", signUpError)
-        throw new Error("Error al migrar la cuenta al nuevo servidor: " + signUpError.message)
+        console.error("Error al registrar en el servidor primario:", signUpError)
+        throw new Error("Error al sincronizar la cuenta en el nuevo servidor: " + signUpError.message)
       }
 
-      // Iniciar sesión en el nuevo
+      // Iniciar sesión en el primario
       const { data: newLoginData, error: newLoginError } = await window.supabaseClient.auth.signInWithPassword({
-        email: internalEmail,
+        email: primaryEmail,
         password: password,
       })
 
       if (newLoginError) {
-        throw new Error("Error al iniciar sesión tras migración: " + newLoginError.message)
+        throw new Error("Error al iniciar sesión tras sincronización: " + newLoginError.message)
       }
 
       data = newLoginData
-      error = null
-    } else if (error) {
-      throw error
     }
 
     console.log("✅ Login exitoso")
@@ -1555,7 +1586,7 @@ document.getElementById("register-form").addEventListener("submit", async (e) =>
       throw new Error("El nombre de usuario ya está en uso")
     }
 
-    const internalEmail = `${username}@sonimax.internal`
+    const internalEmail = `${username}@sonimax.com`
 
     const { data, error } = await window.supabaseClient.auth.signUp({
       email: internalEmail,
@@ -1622,7 +1653,7 @@ document.getElementById("create-user-form")?.addEventListener("submit", async (e
       throw new Error("El nombre de usuario ya está en uso")
     }
 
-    const internalEmail = `${username}@sonimax.internal`
+    const internalEmail = `${username}@sonimax.com`
 
     const { data, error } = await window.supabaseClient.auth.signUp({
       email: internalEmail,
