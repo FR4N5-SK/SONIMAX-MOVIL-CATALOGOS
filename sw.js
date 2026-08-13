@@ -104,41 +104,36 @@ self.addEventListener("fetch", (event) => {
   }
 
   // ── 2. API DE SUPABASE ─────────────────────────────────────
-  //    Estrategia: Network First con Cache de respuestas API (para offline)
+  //    Estrategia: Stale-While-Revalidate para GET (Ahorro Egress y Carga Instantánea)
   if (
     url.hostname.includes("supabase.co") ||
     url.hostname.includes("supabase.io")
   ) {
-    event.respondWith(
-      fetch(event.request.clone())
-        .then((networkResponse) => {
-          // Guardar respuesta exitosa de la API en caché
-          if (networkResponse && networkResponse.status === 200) {
-            const clonedResponse = networkResponse.clone()
-            caches.open(API_CACHE).then((cache) => {
-              cache.put(event.request, clonedResponse)
-            })
-          }
-          return networkResponse
-        })
-        .catch(() => {
-          // Sin red: intentar servir desde caché de API
-          return caches.open(API_CACHE).then((cache) => {
-            return cache.match(event.request).then((cachedApiResponse) => {
-              if (cachedApiResponse) {
-                console.log("[SW] 📱 API offline: sirviendo desde caché:", url.pathname)
-                return cachedApiResponse
-              }
-              // Sin caché de API: respuesta de error clara
-              return new Response(JSON.stringify({ error: "Sin conexión a internet" }), {
-                status: 503,
-                headers: { "Content-Type": "application/json" },
+    if (method === "GET") {
+      event.respondWith(
+        caches.open(API_CACHE).then((cache) => {
+          return cache.match(event.request).then((cachedResponse) => {
+            const fetchPromise = fetch(event.request.clone())
+              .then((networkResponse) => {
+                if (networkResponse && networkResponse.status === 200) {
+                  cache.put(event.request, networkResponse.clone())
+                }
+                return networkResponse
               })
-            })
+              .catch(() => {
+                return cachedResponse || new Response(JSON.stringify({ error: "Sin conexión a internet" }), {
+                  status: 503,
+                  headers: { "Content-Type": "application/json" },
+                })
+              })
+
+            // Si existe en caché, devolver de inmediato y actualizar en segundo plano
+            return cachedResponse || fetchPromise
           })
         })
-    )
-    return
+      )
+      return
+    }
   }
 
   // ── 3. CDN (Tailwind, Supabase JS, Chart.js, etc.) ─────────
