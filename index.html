@@ -4,43 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SONIMAX MÓVIL - Catálogo de Productos</title>
-
-    <!-- ══════════════════════════════════════════════════════
-         MODO MANTENIMIENTO
-         Para ACTIVAR:  cambia false → true  (bloquea la app)
-         Para DESACTIVAR: cambia true → false  (app normal)
-         ══════════════════════════════════════════════════════ -->
-    <script>
-        var MAINTENANCE_MODE = false; // ← CAMBIA ESTO
-
-        if (MAINTENANCE_MODE) {
-            document.addEventListener('DOMContentLoaded', function () {
-                document.body.innerHTML = '';
-                document.body.style.cssText = 'margin:0;padding:0;background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:Arial,sans-serif;';
-                document.body.innerHTML = `
-                    <div style="text-align:center;padding:40px;max-width:480px;">
-                        <div style="font-size:72px;margin-bottom:24px;">🔧</div>
-                        <h1 style="color:#f1f5f9;font-size:28px;font-weight:700;margin:0 0 12px;">
-                            En Mantenimiento
-                        </h1>
-                        <p style="color:#94a3b8;font-size:16px;line-height:1.6;margin:0 0 32px;">
-                            Estamos realizando mejoras en el sistema.<br>
-                            Estaremos de vuelta muy pronto.
-                        </p>
-                        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px 24px;display:inline-block;">
-                            <p style="color:#64748b;font-size:13px;margin:0;">
-                                📞 Contacta al administrador para más información
-                            </p>
-                        </div>
-                        <div style="margin-top:40px;width:48px;height:4px;background:linear-gradient(90deg,#ef4444,#f97316);border-radius:999px;margin-left:auto;margin-right:auto;"></div>
-                        <p style="color:#1e3a5f;font-size:11px;margin-top:16px;">SONIMAX MÓVIL</p>
-                    </div>`;
-            });
-            // Bloquea la carga del resto de scripts
-            document.write = function() {};
-        }
-    </script>
-
+    
     <!-- Preconnect a imgbb para carga más rápida de imágenes -->
     <link rel="preconnect" href="https://i.ibb.co">
     <link rel="preconnect" href="https://ibb.co">
@@ -1217,17 +1181,8 @@
                     </div>
 
                     <div>
-                        <label class="block text-gray-700 font-semibold mb-2">URL o Foto del Producto</label>
-                        <div class="space-y-3">
-                            <input type="url" id="product-url" placeholder="https://... o sube una imagen manual" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 transition-all">
-                            <div class="relative">
-                                <input type="file" id="product-file-input" accept="image/*" class="hidden">
-                                <label for="product-file-input" class="w-full flex items-center justify-center px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-red-500 hover:bg-red-50 transition-all">
-                                    <svg class="w-6 h-6 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                                    <span id="product-file-name" class="text-gray-600 font-medium">Seleccionar imagen (recomendado)</span>
-                                </label>
-                            </div>
-                        </div>
+                        <label class="block text-gray-700 font-semibold mb-2">URL de Imagen</label>
+                        <input type="url" id="product-url" placeholder="https://i.ibb.co/..." class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 transition-all">
                     </div>
 
                     <button type="submit" class="w-full bg-gradient-to-r from-green-600 to-green-700 text-white font-bold py-3 rounded-xl hover:from-green-700 hover:to-green-800 transition-all shadow-lg">

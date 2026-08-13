@@ -161,22 +161,7 @@ function loadStockVisibilityConfigLocalBackup() {
 
 async function getPreviousCSVSnapshot() {
   try {
-    // Ahorro Egress: Buscar primero en caché local de localStorage
-    const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          console.log(`[CSV-SNAPSHOT] ✅ Snapshot cargado desde caché local: ${parsed.length} productos (Ahorro Egress)`)
-          return parsed
-        }
-      } catch (e) {
-        console.warn("[CSV-SNAPSHOT] Error leyendo caché local:", e)
-      }
-    }
-
-    // Si no está en caché local, consultar Supabase
-    console.log("[CSV-SNAPSHOT] Consultando Supabase para primer snapshot...")
+    // Intentar obtener el snapshot más reciente de Supabase
     const { data, error } = await window.supabaseClient
       .from("csv_snapshot")
       .select("snapshot_data, created_at")
@@ -186,6 +171,12 @@ async function getPreviousCSVSnapshot() {
 
     if (error) {
       console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
+      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
+      // Fallback a localStorage
+      const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
+      if (saved) {
+        return JSON.parse(saved)
+      }
       return []
     }
 
@@ -338,8 +329,6 @@ async function getBestSellingProducts(limit = 20) {
     const { data: rawSales, error: rawSalesError } = await window.supabaseClient
       .from("product_sales")
       .select("product_id, quantity_sold")
-      .order("id", { ascending: false })
-      .limit(300)
 
     if (rawSalesError) {
       console.error("[SALES-DB] ❌ Error obteniendo ventas para fallback:", rawSalesError.message)
@@ -384,7 +373,7 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, created_at")
+        .select("*")
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -624,16 +613,127 @@ async function loadPriorityImages(urls) {
 }
 
 async function processBackgroundQueue() {
-  // [MODIFICADO] Totalmente desactivado para que no haga peticiones de fondo (Ahorro Egress Supabase)
-  return
+  if (imageLoadState.isPaused) {
+    console.log("[IMG-PRIORITY] ⏸️ Proceso pausado, esperando...")
+    return
+  }
+
+  if (imageLoadState.backgroundQueue.length === 0) {
+    console.log("[IMG-PRIORITY] ✅ Cola de segundo plano vacía")
+    return
+  }
+
+  const cache = await caches.open("sonimax-images-store")
+  const BATCH_SIZE = 10
+
+  while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
+    const batch = imageLoadState.backgroundQueue.splice(0, BATCH_SIZE)
+
+    console.log(
+      `[IMG-PRIORITY] 📦 Procesando lote de ${batch.length} imágenes (${imageLoadState.backgroundQueue.length} restantes)`,
+    )
+
+    for (const url of batch) {
+      if (imageLoadState.isPaused) {
+        console.log("[IMG-PRIORITY] ⏸️ Pausado durante procesamiento")
+        imageLoadState.backgroundQueue.unshift(...batch.slice(batch.indexOf(url)))
+        return
+      }
+
+      try {
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) {
+          imageLoadState.loadedImages.add(url)
+          continue
+        }
+
+        const controller = new AbortController()
+        imageLoadState.currentAbortController = controller
+
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        const response = await fetch(url, {
+          mode: "no-cors",
+          cache: "force-cache",
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response) {
+          await cache.put(url, response)
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          console.log(`[IMG-PRIORITY] ✅ Segundo plano: ${url.substring(url.lastIndexOf("/") + 1)}`)
+        }
+      } catch (error) {
+        if (error.name === "AbortError") {
+          console.log(`[IMG-PRIORITY] ⏸️ Descarga cancelada: ${url.substring(url.lastIndexOf("/") + 1)}`)
+          imageLoadState.backgroundQueue.unshift(url) // Devolver a la cola
+        } else {
+          console.log(`[IMG-PRIORITY] ❌ Error: ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`)
+          const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+          imageLoadState.failedImages.set(url, attemptCount)
+        }
+      }
+
+      imageLoadState.currentAbortController = null
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    saveImageLoadState()
+  }
+
+  console.log("[IMG-PRIORITY] ✅ Cola de segundo plano completada")
 }
 
-
 async function preloadAllImages() {
-  // [MODIFICADO] Desactivado para ahorrar consumo de Egress en Supabase.
-  // Las imágenes se cargarán nativamente a medida que el usuario haga scroll (Lazy Loading).
-  console.log("[IMG-LOAD] 🛑 Precarga masiva desactivada para ahorrar ancho de banda.");
-  return;
+  if (!("caches" in window)) {
+    console.log("[IMG-LOAD] ⚠️ Cache API no disponible")
+    return
+  }
+
+  loadImageLoadState()
+
+  const { changed, newUrls } = checkProductsChanged(allProducts)
+
+  const allImageUrls = allProducts
+    .map((p) => p.imagen_url)
+    .filter((url) => url && url !== "/images/ProductImages.jpg")
+    .map((url) => optimizeImageUrl(url))
+
+  let urlsToLoad = []
+
+  if (changed && newUrls.length > 0) {
+    urlsToLoad = newUrls
+    console.log(`[IMG-LOAD] 🔄 Cargando solo ${urlsToLoad.length} imágenes nuevas`)
+  } else {
+    urlsToLoad = allImageUrls.filter(
+      (url) => !imageLoadState.loadedImages.has(url) || imageLoadState.failedImages.has(url),
+    )
+
+    if (urlsToLoad.length === 0) {
+      console.log("[IMG-LOAD] ✅ Todas las imágenes ya están cargadas")
+      return
+    }
+
+    console.log(`[IMG-LOAD] 🔄 Continuando carga: ${urlsToLoad.length} imágenes pendientes`)
+  }
+
+  if (imageLoadState.inProgress) {
+    console.log("[IMG-LOAD] ⚠️ Carga ya en progreso, omitiendo...")
+    return
+  }
+
+  imageLoadState.inProgress = true
+
+  imageLoadState.backgroundQueue = [...urlsToLoad]
+  console.log(`[IMG-LOAD] 📋 ${urlsToLoad.length} imágenes agregadas a cola de segundo plano`)
+
+  await processBackgroundQueue()
+
+  imageLoadState.inProgress = false
+  saveImageLoadState()
 }
 
 async function loadImagesWithRetry(urls) {
@@ -859,115 +959,14 @@ async function retryFailedImages(cache) {
 // OPTIMIZACIÓN DE IMÁGENES
 // ============================================
 
-/**
- * Compone y comprime una imagen seleccionada por el usuario antes de subirla a Supabase Storage.
- * Reduce el peso de fotos móviles (3-8 MB) a solo ~80-150 KB (ahorro del 98% en Egress).
- */
-async function compressImageFile(file, maxWidth = 1000, maxHeight = 1000, quality = 0.75) {
-  if (!file || !file.type || !file.type.startsWith("image/")) {
-    return file
-  }
-
-  // Si la imagen es menor a 200 KB, no requiere compresión
-  if (file.size < 200 * 1024) {
-    console.log(`[IMG-COMPRESS] ⚡ Imagen liviana (${Math.round(file.size / 1024)} KB), sin compresión necesaria.`)
-    return file
-  }
-
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const img = new Image()
-      img.onload = () => {
-        let width = img.width
-        let height = img.height
-
-        if (width > maxWidth || height > maxHeight) {
-          if (width > height) {
-            height = Math.round((height * maxWidth) / width)
-            width = maxWidth
-          } else {
-            width = Math.round((width * maxHeight) / height)
-            height = maxHeight
-          }
-        }
-
-        const canvas = document.createElement("canvas")
-        canvas.width = width
-        canvas.height = height
-
-        const ctx = canvas.getContext("2d")
-        ctx.drawImage(img, 0, 0, width, height)
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob || blob.size >= file.size) {
-              console.log("[IMG-COMPRESS] ℹ️ La compresión no redujo el peso. Usando archivo original.")
-              resolve(file)
-              return
-            }
-
-            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
-              type: "image/jpeg",
-              lastModified: Date.now(),
-            })
-
-            console.log(
-              `[IMG-COMPRESS] 📉 Imagen optimizada de ${Math.round(file.size / 1024)} KB a ${Math.round(compressedFile.size / 1024)} KB (${Math.round((1 - compressedFile.size / file.size) * 100)}% ahorro en Egress)`
-            )
-
-            resolve(compressedFile)
-          },
-          "image/jpeg",
-          quality
-        )
-      }
-      img.onerror = () => resolve(file)
-      img.src = event.target.result
-    }
-    reader.onerror = () => resolve(file)
-    reader.readAsDataURL(file)
-  })
-}
-
-// Exportar función globalmente para app-features.js
-window.compressImageFile = compressImageFile
-
 function optimizeImageUrl(url) {
   if (!url || url === "/images/ProductImages.jpg") {
     return url
   }
 
   if (url.includes("ibb.co")) {
-    return url
-  }
-
-  if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
-    let fixed = url
-
-    // ── 1. Corregir bucket name en la URL ──────────────────────────────────
-    // "productos" (bucket inexistente) → "product-images/products"
-    if (fixed.includes("/public/productos/")) {
-      fixed = fixed.replace("/public/productos/", "/public/product-images/products/")
-    }
-    // "products" (bucket inexistente) → "product-images/products"
-    else if (fixed.includes("/public/products/") && !fixed.includes("/public/product-images/")) {
-      fixed = fixed.replace("/public/products/", "/public/product-images/products/")
-    }
-
-    // ── 2. Activar Image Transformation (Plan Pro) ─────────────────────────
-    // Convierte /object/public/ → /object/render/image/public/
-    // Esto comprime la imagen de ~55KB a ~8KB (WebP, 400px) → ahorra 85% de Cached Egress
-    if (fixed.includes("/storage/v1/object/public/")) {
-      fixed = fixed.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
-    }
-    // Agregar parámetros de compresión si no los tiene
-    if (!fixed.includes("width=")) {
-      const sep = fixed.includes("?") ? "&" : "?"
-      fixed = `${fixed}${sep}width=400&quality=70&resize=contain`
-    }
-
-    return fixed
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=400&quality=70`
   }
 
   return url
@@ -979,29 +978,8 @@ function createImagePlaceholder(url) {
   }
 
   if (url.includes("ibb.co")) {
-    return url
-  }
-
-  if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
-    let fixed = url
-
-    // Corregir bucket name
-    if (fixed.includes("/public/productos/")) {
-      fixed = fixed.replace("/public/productos/", "/public/product-images/products/")
-    } else if (fixed.includes("/public/products/") && !fixed.includes("/public/product-images/")) {
-      fixed = fixed.replace("/public/products/", "/public/product-images/products/")
-    }
-
-    // Placeholder ultraligero: 50px, quality 20 (≈1-2KB)
-    if (fixed.includes("/storage/v1/object/public/")) {
-      fixed = fixed.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
-    }
-    if (!fixed.includes("width=")) {
-      const sep = fixed.includes("?") ? "&" : "?"
-      fixed = `${fixed}${sep}width=50&quality=20&resize=contain`
-    }
-
-    return fixed
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}w=50&quality=30`
   }
 
   return url
@@ -1017,6 +995,11 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc) {
+              console.log(
+                `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
+              )
+              loadPriorityImages([fullSrc])
+
               const tempImg = new Image()
               tempImg.onload = () => {
                 img.src = fullSrc
@@ -1127,26 +1110,6 @@ function addRetryButton(imgElement, imageUrl) {
 
 async function loadBanners() {
   try {
-    // Ahorro Egress: Usar caché local si no ha expirado (TTL de 1 hora)
-    const cachedBanners = localStorage.getItem("sonimax_banners")
-    const cachedBannersTs = parseInt(localStorage.getItem("sonimax_banners_ts") || "0")
-    const BANNER_TTL_MS = 60 * 60 * 1000 // 1 hora
-    
-    if (cachedBanners && (Date.now() - cachedBannersTs < BANNER_TTL_MS)) {
-      try {
-        banners = JSON.parse(cachedBanners)
-        if (Array.isArray(banners) && banners.length > 0) {
-          console.log(`✅ [CACHE-BANNER] ${banners.length} banners cargados desde caché local (Ahorro Egress)`)
-          displayBanner(0)
-          startBannerAutoPlay()
-          renderBannerIndicators()
-          return
-        }
-      } catch (e) {
-        console.warn("[BANNER] Error parseando caché local:", e)
-      }
-    }
-
     const { data, error } = await window.supabaseClient
       .from("banners")
       .select("*")
@@ -1160,7 +1123,6 @@ async function loadBanners() {
     // Guardar copia local de banners para funcionamiento offline
     try {
       localStorage.setItem("sonimax_banners", JSON.stringify(banners));
-      localStorage.setItem("sonimax_banners_ts", Date.now().toString());
     } catch (e) {
       console.warn("No se pudo guardar banners en caché local:", e);
     }
@@ -1205,7 +1167,7 @@ function displayBanner(index) {
 
   const bannerImage = document.getElementById("banner-image")
   if (bannerImage) {
-    bannerImage.src = optimizeImageUrl(banner.imagen_url)
+    bannerImage.src = banner.imagen_url
     bannerImage.alt = banner.titulo
   }
 
@@ -1296,7 +1258,7 @@ async function loadBannersForModal() {
       item.className = "p-4 border-2 border-gray-200 rounded-xl hover:border-red-400 transition-all"
       item.innerHTML = `
         <div class="flex items-start gap-4">
-          <img src="${optimizeImageUrl(banner.imagen_url)}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
+          <img src="${banner.imagen_url}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
           <div class="flex-1">
             <h4 class="font-bold text-gray-800">${banner.titulo}</h4>
             <p class="text-sm text-gray-600 mt-1 truncate">${banner.imagen_url}</p>
@@ -2291,17 +2253,7 @@ async function loadProducts() {
 
     // ── PASO 2: Actualizar en segundo plano si hay conexión ─────────────────
     if (navigator.onLine) {
-      // [OPTIMIZACIÓN EGRESS] TTL de 30 minutos: si el caché tiene menos de 30 min, no consultar Supabase
-      const CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutos
-      const lastFetch = parseInt(localStorage.getItem("sonimax_cache_ts") || "0")
-      const cacheAge = Date.now() - lastFetch
-      if (cacheAge < CACHE_TTL_MS) {
-        console.log(`✅ [CACHE-TTL] Caché vigente (${Math.round(cacheAge / 60000)} min < 30 min) — sin consulta a Supabase`)
-        setTimeout(() => { preloadAllImages() }, 2000)
-      } else {
-        console.log(`🔄 [CACHE-TTL] Caché expirado (${Math.round(cacheAge / 60000)} min) — actualizando desde Supabase...`)
-        setTimeout(() => _refreshProductsFromNetwork(false), 800)
-      }
+      setTimeout(() => _refreshProductsFromNetwork(false), 800)
     } else {
       console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
       setTimeout(() => { preloadAllImages() }, 2000)
@@ -2350,7 +2302,7 @@ async function _loadInventoryData() {
     while (invHasMore) {
       const { data: invData, error: invError } = await window.supabaseClient
         .from('inventory_products')
-        .select('codigo, deposito') // [OPTIMIZACIÓN EGRESS] Solo campos necesarios (ahorro ~70% de datos)
+        .select('*')
         .range(invStart, invStart + invBatchSize - 1)
 
       if (invError) {
@@ -2385,45 +2337,6 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
 
   try {
-    // [OPTIMIZACIÓN EGRESS] Verificar primero si hubo cambios antes de descargar miles de filas
-    if (!isFirstLoad && allProducts.length > 0) {
-      try {
-        const cachedCount = parseInt(localStorage.getItem("sonimax_product_count") || "0")
-        
-        if (cachedCount > 0) {
-          // 1. Consulta HEAD (0 bytes de cuerpo) para verificar la cantidad total
-          const { count, error: countError } = await window.supabaseClient
-            .from("products")
-            .select("id", { count: "exact", head: true })
-
-          if (!countError && count === cachedCount) {
-            // 2. Verificar el ID del producto más reciente (1 fila lightweight)
-            const { data: latestProduct } = await window.supabaseClient
-              .from("products")
-              .select("id")
-              .order("id", { ascending: false })
-              .limit(1)
-              .maybeSingle()
-
-            const cachedLatestId = parseInt(localStorage.getItem("sonimax_latest_product_id") || "0")
-
-            if (latestProduct && latestProduct.id === cachedLatestId) {
-              console.log(`✅ [NET-EGRESS-SAVE] Sin cambios detectados (${count} productos, ID reciente: ${latestProduct.id}). Se omite descarga masiva.`)
-              const now = new Date()
-              const formattedTime = now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
-              localStorage.setItem("sonimax_last_update", formattedTime)
-              localStorage.setItem("sonimax_cache_ts", Date.now().toString())
-              const indicator = document.getElementById("last-update-time")
-              if (indicator) indicator.textContent = formattedTime
-              return
-            }
-          }
-        }
-      } catch (checkErr) {
-        console.warn("⚠️ [NET-CHECK] No se pudo verificar cambios livianos, procediendo con refresco:", checkErr)
-      }
-    }
-
     let freshProducts = []
     let start = 0
     const batchSize = 500
@@ -2432,7 +2345,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("id, codigo, descripcion, nombre, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, departamento, is_new, created_at")
+        .select("*")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -2446,12 +2359,6 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
       } else {
         hasMore = false
       }
-    }
-
-    // Guardar ID máximo para verificación rápida futura de Egress
-    if (freshProducts.length > 0) {
-      const maxId = Math.max(...freshProducts.map(p => p.id || 0))
-      localStorage.setItem("sonimax_latest_product_id", maxId.toString())
     }
 
     // Comparar hash para detectar cambios reales
@@ -2524,7 +2431,6 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     localStorage.setItem(PRODUCTS_HASH_KEY, freshHash)
     localStorage.setItem("sonimax_product_count", allProducts.length)
     localStorage.setItem("sonimax_last_update", formattedTime)
-    localStorage.setItem("sonimax_cache_ts", Date.now().toString()) // [OPTIMIZACIÓN EGRESS] Timestamp para TTL de 30 min
 
     setTimeout(() => { preloadAllImages() }, 2000)
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
@@ -4723,9 +4629,7 @@ async function handleAddProduct(e) {
   const mayor = Number.parseFloat(document.getElementById("product-mayor").value)
   const gmayor = Number.parseFloat(document.getElementById("product-gmayor").value)
   const departamento = document.getElementById("product-departamento").value.trim()
-  let url = document.getElementById("product-url").value.trim() || null
-  const fileInput = document.getElementById("product-file-input")
-  const file = fileInput && fileInput.files.length > 0 ? fileInput.files[0] : null
+  const url = document.getElementById("product-url").value.trim() || null
 
   if (!descripcion || !departamento || isNaN(detal) || isNaN(mayor) || isNaN(gmayor)) {
     showAddProductStatus("Por favor completa todos los campos requeridos", "error")
@@ -4737,29 +4641,9 @@ async function handleAddProduct(e) {
     return
   }
 
-  showAddProductStatus(file ? "Subiendo imagen y agregando producto..." : "Agregando producto...", "info")
+  showAddProductStatus("Agregando producto...", "info")
 
   try {
-    // Si hay un archivo, lo subimos a Supabase Storage primero previa compresión
-    if (file) {
-      const fileToUpload = await compressImageFile(file, 1000, 1000, 0.75);
-      const fileExt = fileToUpload.name.split('.').pop();
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `products/${fileName}`;
-
-      const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
-        .from("product-images")
-        .upload(filePath, fileToUpload, { cacheControl: "31536000", upsert: false });
-
-      if (uploadError) {
-        throw new Error("Error al subir la imagen a Supabase: " + uploadError.message);
-      }
-
-      // Obtener la URL pública de la imagen recién subida
-      const { data: publicUrlData } = window.supabaseClient.storage.from("product-images").getPublicUrl(filePath);
-      url = publicUrlData.publicUrl;
-    }
-
     const newProduct = {
       nombre: descripcion,
       descripcion: codigo || "",
@@ -4905,7 +4789,7 @@ async function cleanDuplicateProducts() {
       
       const { data, error } = await window.supabaseClient
         .from('products')
-        .select('id, codigo, nombre')
+        .select('*')
         .range(start, start + batchSize - 1)
 
       if (error) {
@@ -5071,22 +4955,6 @@ document.addEventListener("DOMContentLoaded", () => {
     addProductForm.addEventListener("submit", handleAddProduct)
   }
 
-  const productFileInput = document.getElementById("product-file-input")
-  const productFileName = document.getElementById("product-file-name")
-  if (productFileInput && productFileName) {
-    productFileInput.addEventListener("change", (e) => {
-      if (e.target.files.length > 0) {
-        productFileName.textContent = e.target.files[0].name
-        productFileName.classList.remove("text-gray-600")
-        productFileName.classList.add("text-green-600")
-      } else {
-        productFileName.textContent = "Seleccionar imagen (recomendado)"
-        productFileName.classList.remove("text-green-600")
-        productFileName.classList.add("text-gray-600")
-      }
-    })
-  }
-
   if (deleteProductBtn) {
     deleteProductBtn.addEventListener("click", () => {
       deleteProductSearch.value = ""
@@ -5210,8 +5078,8 @@ function initInventoryRole() {
                     .from('inventory_products')
                     .select('*')
                     .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
-                    .not('stock', 'is', null)
-                    .gt('stock', 0) // Solo productos en stock
+                    .not('existencia_actual', 'is', null)
+                    .gt('existencia_actual', 0) // Solo productos en stock
                     .limit(50); // Traer más para filtrar en cliente
 
                 if (error) throw error;
@@ -5326,7 +5194,7 @@ async function loadInventoryForAssignment() {
                 .from('inventory_products')
                 .select('*')
                 .is('deposito', null)
-                .gt('stock', 0) // Filtrar agotados (stock > 0)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -5412,7 +5280,7 @@ async function loadInventoryForCounting(deposito) {
                 .from('inventory_products')
                 .select('*')
                 .eq('deposito', deposito)
-                .gt('stock', 0) // Filtrar agotados (stock > 0)
+                .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
                 .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -5522,7 +5390,7 @@ async function exportInventoryExcel() {
         while(hasMore) {
             const { data, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('codigo, descripcion, precio_detal, precio_mayor, precio_gmayor, stock, departamento, deposito, cantidad_fisica')
+                .select('codigo, descripcion, precio_detal, precio_mayor, precio_gmayor, existencia_actual, departamento, deposito, cantidad_fisica')
                 .range(page * pageSize, (page + 1) * pageSize - 1);
             
             if(error) throw error;
