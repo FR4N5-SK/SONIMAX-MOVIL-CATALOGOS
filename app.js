@@ -859,6 +859,80 @@ async function retryFailedImages(cache) {
 // OPTIMIZACIÓN DE IMÁGENES
 // ============================================
 
+/**
+ * Compone y comprime una imagen seleccionada por el usuario antes de subirla a Supabase Storage.
+ * Reduce el peso de fotos móviles (3-8 MB) a solo ~80-150 KB (ahorro del 98% en Egress).
+ */
+async function compressImageFile(file, maxWidth = 1000, maxHeight = 1000, quality = 0.75) {
+  if (!file || !file.type || !file.type.startsWith("image/")) {
+    return file
+  }
+
+  // Si la imagen es menor a 200 KB, no requiere compresión
+  if (file.size < 200 * 1024) {
+    console.log(`[IMG-COMPRESS] ⚡ Imagen liviana (${Math.round(file.size / 1024)} KB), sin compresión necesaria.`)
+    return file
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const img = new Image()
+      img.onload = () => {
+        let width = img.width
+        let height = img.height
+
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width)
+            width = maxWidth
+          } else {
+            width = Math.round((width * maxHeight) / height)
+            height = maxHeight
+          }
+        }
+
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+
+        const ctx = canvas.getContext("2d")
+        ctx.drawImage(img, 0, 0, width, height)
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || blob.size >= file.size) {
+              console.log("[IMG-COMPRESS] ℹ️ La compresión no redujo el peso. Usando archivo original.")
+              resolve(file)
+              return
+            }
+
+            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            })
+
+            console.log(
+              `[IMG-COMPRESS] 📉 Imagen optimizada de ${Math.round(file.size / 1024)} KB a ${Math.round(compressedFile.size / 1024)} KB (${Math.round((1 - compressedFile.size / file.size) * 100)}% ahorro en Egress)`
+            )
+
+            resolve(compressedFile)
+          },
+          "image/jpeg",
+          quality
+        )
+      }
+      img.onerror = () => resolve(file)
+      img.src = event.target.result
+    }
+    reader.onerror = () => resolve(file)
+    reader.readAsDataURL(file)
+  })
+}
+
+// Exportar función globalmente para app-features.js
+window.compressImageFile = compressImageFile
+
 function optimizeImageUrl(url) {
   if (!url || url === "/images/ProductImages.jpg") {
     return url
@@ -867,6 +941,11 @@ function optimizeImageUrl(url) {
   if (url.includes("ibb.co")) {
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=400&quality=70`
+  }
+
+  if (url.includes("supabase.co") && url.includes("/storage/v1/object/render/image/public/")) {
+    const separator = url.includes("?") ? "&" : "?"
+    return `${url}${separator}width=500&quality=75&resize=contain`
   }
 
   return url
@@ -4618,15 +4697,16 @@ async function handleAddProduct(e) {
   showAddProductStatus(file ? "Subiendo imagen y agregando producto..." : "Agregando producto...", "info")
 
   try {
-    // Si hay un archivo, lo subimos a Supabase Storage primero
+    // Si hay un archivo, lo subimos a Supabase Storage primero previa compresión
     if (file) {
-      const fileExt = file.name.split('.').pop();
+      const fileToUpload = await compressImageFile(file, 1000, 1000, 0.75);
+      const fileExt = fileToUpload.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `products/${fileName}`;
 
       const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
         .from("products")
-        .upload(filePath, file, { cacheControl: "31536000", upsert: false });
+        .upload(filePath, fileToUpload, { cacheControl: "31536000", upsert: false });
 
       if (uploadError) {
         throw new Error("Error al subir la imagen a Supabase: " + uploadError.message);

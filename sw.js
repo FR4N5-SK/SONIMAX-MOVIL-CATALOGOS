@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v8"
+const CACHE_VERSION = "v9"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -22,13 +22,12 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v8 instalándose...")
+  console.log("[SW] ✅ Service Worker v9 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
       .then((cache) => {
         console.log("[SW] 📦 Guardando App Shell en caché...")
-        // Usamos addAll con manejo de errores para no fallar si uno falla
         return Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))
       })
       .then(() => {
@@ -46,14 +45,13 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v4 activado")
+  console.log("[SW] 🚀 Service Worker v9 activado")
   event.waitUntil(
     caches
       .keys()
       .then((cacheNames) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
-            // Eliminar cachés que NO sean de la versión actual
             if (cacheName !== APP_CACHE && cacheName !== IMAGE_CACHE && cacheName !== API_CACHE) {
               console.log("[SW] 🗑️ Eliminando caché antigua:", cacheName)
               return caches.delete(cacheName)
@@ -75,26 +73,32 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES DE ibb.co ─────────────────────────────────
-  //    Estrategia: Cache First (si está en caché, usa caché; si no, descarga y guarda)
-  if (url.hostname.includes("ibb.co") || url.hostname.includes("i.ibb.co")) {
+  // ── 1. IMÁGENES (ibb.co, Supabase Storage y estáticas) ──────
+  //    Estrategia: Cache First Estricto (Cero consumo de Egress en imágenes ya cacheadas)
+  const isImageRequest =
+    url.hostname.includes("ibb.co") ||
+    url.hostname.includes("i.ibb.co") ||
+    url.pathname.includes("/storage/v1/object/") ||
+    /\.(jpg|jpeg|png|gif|webp|svg|ico)(\?.*)?$/i.test(url.pathname)
+
+  if (isImageRequest) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then((cache) => {
         return cache.match(event.request).then((cachedResponse) => {
           if (cachedResponse) {
+            // Devuelve de la caché local inmediatamente SIN consulta a la red (0 bytes Egress)
             return cachedResponse
           }
           return fetch(event.request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200) {
                 cache.put(event.request, networkResponse.clone())
-                console.log("[SW] 💾 Imagen guardada:", url.pathname)
+                console.log("[SW] 💾 Imagen guardada en caché:", url.pathname)
               }
               return networkResponse
             })
             .catch(() => {
               console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
-              // Devolver respuesta vacía si no hay red
               return new Response("", { status: 503 })
             })
         })
@@ -103,8 +107,8 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 2. API DE SUPABASE ─────────────────────────────────────
-  //    Estrategia: Stale-While-Revalidate para GET (Ahorro Egress y Carga Instantánea)
+  // ── 2. API REST DE SUPABASE ─────────────────────────────────
+  //    Estrategia: Network-First con Fallback a Caché (Ahorra Egress de fondo de Stale-While-Revalidate)
   if (
     url.hostname.includes("supabase.co") ||
     url.hostname.includes("supabase.io")
@@ -112,24 +116,25 @@ self.addEventListener("fetch", (event) => {
     if (method === "GET") {
       event.respondWith(
         caches.open(API_CACHE).then((cache) => {
-          return cache.match(event.request).then((cachedResponse) => {
-            const fetchPromise = fetch(event.request.clone())
-              .then((networkResponse) => {
-                if (networkResponse && networkResponse.status === 200) {
-                  cache.put(event.request, networkResponse.clone())
-                }
-                return networkResponse
+          return fetch(event.request.clone())
+            .then((networkResponse) => {
+              if (networkResponse && networkResponse.status === 200) {
+                cache.put(event.request, networkResponse.clone())
+              }
+              return networkResponse
+            })
+            .catch(() => {
+              // Si falla la red (offline), sirve la última respuesta guardada en caché
+              return cache.match(event.request).then((cached) => {
+                return (
+                  cached ||
+                  new Response(JSON.stringify({ error: "Sin conexión a internet" }), {
+                    status: 503,
+                    headers: { "Content-Type": "application/json" },
+                  })
+                )
               })
-              .catch(() => {
-                return cachedResponse || new Response(JSON.stringify({ error: "Sin conexión a internet" }), {
-                  status: 503,
-                  headers: { "Content-Type": "application/json" },
-                })
-              })
-
-            // Si existe en caché, devolver de inmediato y actualizar en segundo plano
-            return cachedResponse || fetchPromise
-          })
+            })
         })
       )
       return

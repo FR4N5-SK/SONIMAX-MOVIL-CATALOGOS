@@ -153,14 +153,16 @@
           btn.disabled = true;
 
           try {
-            // Subir imagen a Supabase Storage
-            const fileExt = file.name.split('.').pop();
+            // Subir imagen a Supabase Storage (con compresión previa)
+            const compressFn = window.compressImageFile || (async (f) => f);
+            const fileToUpload = await compressFn(file, 1000, 1000, 0.75);
+            const fileExt = fileToUpload.name.split('.').pop();
             const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
             const filePath = `products/${fileName}`;
 
             const { error: uploadError } = await supabaseClient.storage
               .from('products')
-              .upload(filePath, file, { cacheControl: '31536000', upsert: false });
+              .upload(filePath, fileToUpload, { cacheControl: '31536000', upsert: false });
 
             if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
 
@@ -503,14 +505,16 @@
     try {
       console.log('[MERCHANDISE] Subiendo imagen para producto:', codigo);
 
-      // Subir imagen a Supabase Storage
-      const fileExt = file.name.split('.').pop();
+      // Subir imagen a Supabase Storage (con compresión previa)
+      const compressFn = window.compressImageFile || (async (f) => f);
+      const fileToUpload = await compressFn(file, 1000, 1000, 0.75);
+      const fileExt = fileToUpload.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `products/${fileName}`;
 
       const { error: uploadError } = await supabaseClient.storage
         .from('products')
-        .upload(filePath, file, { cacheControl: '31536000', upsert: false });
+        .upload(filePath, fileToUpload, { cacheControl: '31536000', upsert: false });
 
       if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
 
