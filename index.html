@@ -4,7 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SONIMAX MÓVIL - Catálogo de Productos</title>
-    
+
+    <!-- ══════════════════════════════════════════════════════
+         MODO MANTENIMIENTO
+         Para ACTIVAR:  cambia false → true  (bloquea la app)
+         Para DESACTIVAR: cambia true → false  (app normal)
+         ══════════════════════════════════════════════════════ -->
+    <script>
+        var MAINTENANCE_MODE = false; // ← CAMBIA ESTO
+
+        if (MAINTENANCE_MODE) {
+            document.addEventListener('DOMContentLoaded', function () {
+                document.body.innerHTML = '';
+                document.body.style.cssText = 'margin:0;padding:0;background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:Arial,sans-serif;';
+                document.body.innerHTML = `
+                    <div style="text-align:center;padding:40px;max-width:480px;">
+                        <div style="font-size:72px;margin-bottom:24px;">🔧</div>
+                        <h1 style="color:#f1f5f9;font-size:28px;font-weight:700;margin:0 0 12px;">
+                            En Mantenimiento
+                        </h1>
+                        <p style="color:#94a3b8;font-size:16px;line-height:1.6;margin:0 0 32px;">
+                            Estamos realizando mejoras en el sistema.<br>
+                            Estaremos de vuelta muy pronto.
+                        </p>
+                        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px 24px;display:inline-block;">
+                            <p style="color:#64748b;font-size:13px;margin:0;">
+                                📞 Contacta al administrador para más información
+                            </p>
+                        </div>
+                        <div style="margin-top:40px;width:48px;height:4px;background:linear-gradient(90deg,#ef4444,#f97316);border-radius:999px;margin-left:auto;margin-right:auto;"></div>
+                        <p style="color:#1e3a5f;font-size:11px;margin-top:16px;">SONIMAX MÓVIL</p>
+                    </div>`;
+            });
+            // Bloquea la carga del resto de scripts
+            document.write = function() {};
+        }
+    </script>
+
     <!-- Preconnect a imgbb para carga más rápida de imágenes -->
     <link rel="preconnect" href="https://i.ibb.co">
     <link rel="preconnect" href="https://ibb.co">

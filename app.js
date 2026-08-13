@@ -939,20 +939,35 @@ function optimizeImageUrl(url) {
   }
 
   if (url.includes("ibb.co")) {
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}w=400&quality=70`
+    return url
   }
 
   if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
-    let optimized = url
-    if (optimized.includes("/storage/v1/object/public/")) {
-      optimized = optimized.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
+    let fixed = url
+
+    // ── 1. Corregir bucket name en la URL ──────────────────────────────────
+    // "productos" (bucket inexistente) → "product-images/products"
+    if (fixed.includes("/public/productos/")) {
+      fixed = fixed.replace("/public/productos/", "/public/product-images/products/")
     }
-    const separator = optimized.includes("?") ? "&" : "?"
-    if (!optimized.includes("width=")) {
-      optimized = `${optimized}${separator}width=400&quality=70&resize=contain`
+    // "products" (bucket inexistente) → "product-images/products"
+    else if (fixed.includes("/public/products/") && !fixed.includes("/public/product-images/")) {
+      fixed = fixed.replace("/public/products/", "/public/product-images/products/")
     }
-    return optimized
+
+    // ── 2. Activar Image Transformation (Plan Pro) ─────────────────────────
+    // Convierte /object/public/ → /object/render/image/public/
+    // Esto comprime la imagen de ~55KB a ~8KB (WebP, 400px) → ahorra 85% de Cached Egress
+    if (fixed.includes("/storage/v1/object/public/")) {
+      fixed = fixed.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
+    }
+    // Agregar parámetros de compresión si no los tiene
+    if (!fixed.includes("width=")) {
+      const sep = fixed.includes("?") ? "&" : "?"
+      fixed = `${fixed}${sep}width=400&quality=70&resize=contain`
+    }
+
+    return fixed
   }
 
   return url
@@ -964,20 +979,29 @@ function createImagePlaceholder(url) {
   }
 
   if (url.includes("ibb.co")) {
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}w=50&quality=30`
+    return url
   }
 
   if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
-    let optimized = url
-    if (optimized.includes("/storage/v1/object/public/")) {
-      optimized = optimized.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
+    let fixed = url
+
+    // Corregir bucket name
+    if (fixed.includes("/public/productos/")) {
+      fixed = fixed.replace("/public/productos/", "/public/product-images/products/")
+    } else if (fixed.includes("/public/products/") && !fixed.includes("/public/product-images/")) {
+      fixed = fixed.replace("/public/products/", "/public/product-images/products/")
     }
-    const separator = optimized.includes("?") ? "&" : "?"
-    if (!optimized.includes("width=")) {
-      optimized = `${optimized}${separator}width=50&quality=30&resize=contain`
+
+    // Placeholder ultraligero: 50px, quality 20 (≈1-2KB)
+    if (fixed.includes("/storage/v1/object/public/")) {
+      fixed = fixed.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
     }
-    return optimized
+    if (!fixed.includes("width=")) {
+      const sep = fixed.includes("?") ? "&" : "?"
+      fixed = `${fixed}${sep}width=50&quality=20&resize=contain`
+    }
+
+    return fixed
   }
 
   return url
@@ -4724,7 +4748,7 @@ async function handleAddProduct(e) {
       const filePath = `products/${fileName}`;
 
       const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
-        .from("products")
+        .from("product-images")
         .upload(filePath, fileToUpload, { cacheControl: "31536000", upsert: false });
 
       if (uploadError) {
@@ -4732,7 +4756,7 @@ async function handleAddProduct(e) {
       }
 
       // Obtener la URL pública de la imagen recién subida
-      const { data: publicUrlData } = window.supabaseClient.storage.from("products").getPublicUrl(filePath);
+      const { data: publicUrlData } = window.supabaseClient.storage.from("product-images").getPublicUrl(filePath);
       url = publicUrlData.publicUrl;
     }
 

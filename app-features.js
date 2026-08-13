@@ -161,12 +161,12 @@
             const filePath = `products/${fileName}`;
 
             const { error: uploadError } = await supabaseClient.storage
-              .from('products')
+              .from('product-images')
               .upload(filePath, fileToUpload, { cacheControl: '31536000', upsert: false });
 
             if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
 
-            const { data: publicUrlData } = supabaseClient.storage.from('products').getPublicUrl(filePath);
+            const { data: publicUrlData } = supabaseClient.storage.from('product-images').getPublicUrl(filePath);
             const url = publicUrlData.publicUrl;
 
             // Guardar URL en la base de datos
@@ -513,12 +513,12 @@
       const filePath = `products/${fileName}`;
 
       const { error: uploadError } = await supabaseClient.storage
-        .from('products')
+        .from('product-images')
         .upload(filePath, fileToUpload, { cacheControl: '31536000', upsert: false });
 
       if (uploadError) throw new Error('Error subiendo imagen: ' + uploadError.message);
 
-      const { data: publicUrlData } = supabaseClient.storage.from('products').getPublicUrl(filePath);
+      const { data: publicUrlData } = supabaseClient.storage.from('product-images').getPublicUrl(filePath);
       const url = publicUrlData.publicUrl;
 
       console.log('[MERCHANDISE] Guardando URL para producto:', codigo);
