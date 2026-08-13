@@ -943,9 +943,16 @@ function optimizeImageUrl(url) {
     return `${url}${separator}w=400&quality=70`
   }
 
-  if (url.includes("supabase.co") && url.includes("/storage/v1/object/render/image/public/")) {
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}width=500&quality=75&resize=contain`
+  if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
+    let optimized = url
+    if (optimized.includes("/storage/v1/object/public/")) {
+      optimized = optimized.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
+    }
+    const separator = optimized.includes("?") ? "&" : "?"
+    if (!optimized.includes("width=")) {
+      optimized = `${optimized}${separator}width=400&quality=70&resize=contain`
+    }
+    return optimized
   }
 
   return url
@@ -959,6 +966,18 @@ function createImagePlaceholder(url) {
   if (url.includes("ibb.co")) {
     const separator = url.includes("?") ? "&" : "?"
     return `${url}${separator}w=50&quality=30`
+  }
+
+  if (url.includes("supabase.co") && url.includes("/storage/v1/object/")) {
+    let optimized = url
+    if (optimized.includes("/storage/v1/object/public/")) {
+      optimized = optimized.replace("/storage/v1/object/public/", "/storage/v1/object/render/image/public/")
+    }
+    const separator = optimized.includes("?") ? "&" : "?"
+    if (!optimized.includes("width=")) {
+      optimized = `${optimized}${separator}width=50&quality=30&resize=contain`
+    }
+    return optimized
   }
 
   return url
@@ -1162,7 +1181,7 @@ function displayBanner(index) {
 
   const bannerImage = document.getElementById("banner-image")
   if (bannerImage) {
-    bannerImage.src = banner.imagen_url
+    bannerImage.src = optimizeImageUrl(banner.imagen_url)
     bannerImage.alt = banner.titulo
   }
 
@@ -1253,7 +1272,7 @@ async function loadBannersForModal() {
       item.className = "p-4 border-2 border-gray-200 rounded-xl hover:border-red-400 transition-all"
       item.innerHTML = `
         <div class="flex items-start gap-4">
-          <img src="${banner.imagen_url}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
+          <img src="${optimizeImageUrl(banner.imagen_url)}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
           <div class="flex-1">
             <h4 class="font-bold text-gray-800">${banner.titulo}</h4>
             <p class="text-sm text-gray-600 mt-1 truncate">${banner.imagen_url}</p>
@@ -4862,7 +4881,7 @@ async function cleanDuplicateProducts() {
       
       const { data, error } = await window.supabaseClient
         .from('products')
-        .select('*')
+        .select('id, codigo, nombre')
         .range(start, start + batchSize - 1)
 
       if (error) {
