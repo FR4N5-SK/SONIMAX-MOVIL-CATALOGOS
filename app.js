@@ -1112,7 +1112,7 @@ async function loadBanners() {
   try {
     const { data, error } = await window.supabaseClient
       .from("banners")
-      .select("*")
+      .select("id, titulo, imagen_url, activo, posicion")
       .eq("activo", true)
       .order("posicion", { ascending: true })
 
@@ -1236,7 +1236,7 @@ async function loadBannersForModal() {
   try {
     const { data, error } = await window.supabaseClient
       .from("banners")
-      .select("*")
+      .select("id, titulo, imagen_url, activo, posicion")
       .order("posicion", { ascending: true })
 
     if (error) throw error
@@ -1724,7 +1724,7 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    const { data, error } = await window.supabaseClient.from("users").select("*").eq("auth_id", userId).single()
+    const { data, error } = await window.supabaseClient.from("users").select("id, username, name, role, can_see_stock").eq("auth_id", userId).single()
 
     if (error) {
       console.error("Error obteniendo datos:", error)
@@ -2395,7 +2395,7 @@ async function _loadInventoryData() {
     while (invHasMore) {
       const { data: invData, error: invError } = await window.supabaseClient
         .from('inventory_products')
-        .select('*')
+        .select('id, codigo, descripcion, deposito, cantidad_fisica, existencia_actual, precio_detal, precio_mayor, precio_gmayor, departamento')
         .range(invStart, invStart + invBatchSize - 1)
 
       if (invError) {
@@ -2429,6 +2429,18 @@ async function _loadInventoryData() {
 async function _refreshProductsFromNetwork(isFirstLoad = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
 
+  if (!isFirstLoad) {
+    const lastSync = localStorage.getItem("sonimax_last_network_sync")
+    if (lastSync) {
+      const diff = Date.now() - parseInt(lastSync)
+      const fifteenMinutes = 15 * 60 * 1000
+      if (diff < fifteenMinutes) {
+        console.log(`⏭️ [NET] Sync omitido: última sincronización hace ${Math.round(diff / 60000)} minutos`)
+        return
+      }
+    }
+  }
+
   try {
     let freshProducts = []
     let start = 0
@@ -2438,7 +2450,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, nombre, codigo, descripcion, stock, precio_cliente, precio_mayor, precio_gmayor, departamento, imagen_url, is_new")
         .order("nombre", { ascending: true })
         .range(start, start + batchSize - 1)
 
@@ -2461,10 +2473,10 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
 
     if (!dataChanged && !isFirstLoad) {
       console.log("✅ [NET] Sin cambios en productos - caché vigente")
-      // Actualizar timestamp de última sincronización exitosa
       const now = new Date()
       const formattedTime = now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
       localStorage.setItem("sonimax_last_update", formattedTime)
+      localStorage.setItem("sonimax_last_network_sync", Date.now().toString())
       const indicator = document.getElementById("last-update-time")
       if (indicator) indicator.textContent = formattedTime
       return
@@ -2493,6 +2505,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
     const formattedTime = now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
     const indicator = document.getElementById("last-update-time")
     if (indicator) indicator.textContent = formattedTime
+    localStorage.setItem("sonimax_last_network_sync", Date.now().toString())
 
     // Notificaciones de cambios
     const lastProductCount = localStorage.getItem("sonimax_product_count")
@@ -4882,7 +4895,7 @@ async function cleanDuplicateProducts() {
       
       const { data, error } = await window.supabaseClient
         .from('products')
-        .select('*')
+        .select('id, codigo, nombre, descripcion, stock')
         .range(start, start + batchSize - 1)
 
       if (error) {
@@ -5169,7 +5182,7 @@ function initInventoryRole() {
             try {
                 const { data, error } = await window.supabaseClient
                     .from('inventory_products')
-                    .select('*')
+                    .select('id, codigo, descripcion, deposito, cantidad_fisica, existencia_actual, precio_detal, precio_mayor, precio_gmayor, departamento')
                     .or(`codigo.ilike.%${query}%,descripcion.ilike.%${query}%`)
                     .not('existencia_actual', 'is', null)
                     .gt('existencia_actual', 0) // Solo productos en stock
@@ -5285,7 +5298,7 @@ async function loadInventoryForAssignment() {
         while(hasMore) {
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('*')
+                .select('id, codigo, descripcion, deposito, cantidad_fisica, existencia_actual, precio_detal, precio_mayor, precio_gmayor, departamento')
                 .is('deposito', null)
                 .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
@@ -5371,7 +5384,7 @@ async function loadInventoryForCounting(deposito) {
         while(hasMore) {
             const { data: batch, error } = await window.supabaseClient
                 .from('inventory_products')
-                .select('*')
+                .select('id, codigo, descripcion, deposito, cantidad_fisica, existencia_actual, precio_detal, precio_mayor, precio_gmayor, departamento')
                 .eq('deposito', deposito)
                 .gt('existencia_actual', 0) // Filtrar agotados (stock > 0)
                 .order('descripcion', { ascending: true })
@@ -5782,7 +5795,7 @@ async function loadAllUsers() {
   try {
     const { data, error } = await window.supabaseClient
       .from('users')
-      .select('*')
+      .select('id, username, name, role, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error
