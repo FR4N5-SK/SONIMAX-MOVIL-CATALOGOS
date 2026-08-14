@@ -554,7 +554,7 @@ async function loadPriorityImages(urls) {
   // Pausar descargas en segundo plano
   pauseBackgroundDownloads()
 
-  const cache = await caches.open("sonimax-images-store")
+  const cache = await caches.open("sonimax-images-v4")
 
   // Filtrar solo las que no están cargadas
   const urlsToLoad = urls.filter((url) => !imageLoadState.loadedImages.has(url))
@@ -623,7 +623,7 @@ async function processBackgroundQueue() {
     return
   }
 
-  const cache = await caches.open("sonimax-images-store")
+  const cache = await caches.open("sonimax-images-v4")
   const BATCH_SIZE = 10
 
   while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
@@ -737,7 +737,7 @@ async function preloadAllImages() {
 }
 
 async function loadImagesWithRetry(urls) {
-  const cache = await caches.open("sonimax-images-store")
+  const cache = await caches.open("sonimax-images-v4")
   const BATCH_SIZE = 10
   const CONCURRENT_BATCHES = 4
 
@@ -1053,7 +1053,7 @@ function addRetryButton(imgElement, imageUrl) {
     retryBtn.classList.add("spinning")
 
     try {
-      const cache = await caches.open("sonimax-images-store")
+      const cache = await caches.open("sonimax-images-v4")
       await cache.delete(imageUrl)
       imageLoadState.loadedImages.delete(imageUrl)
       imageLoadState.failedImages.delete(imageUrl)
@@ -1062,13 +1062,12 @@ function addRetryButton(imgElement, imageUrl) {
 
       const cacheBustUrl = imageUrl.includes("?") ? `${imageUrl}&_t=${Date.now()}` : `${imageUrl}?_t=${Date.now()}`
 
-      // Intentar cargar la imagen con cache busting
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
 
       const response = await fetch(cacheBustUrl, {
         mode: "no-cors",
-        cache: "reload", // Forzar recarga desde servidor
+        cache: "reload",
         signal: controller.signal,
       })
 
@@ -1080,23 +1079,56 @@ function addRetryButton(imgElement, imageUrl) {
         console.log(`[IMG-RETRY] 💾 Imagen guardada en caché`)
       }
 
-      // Cargar la imagen en el elemento
       const tempImg = new Image()
-      tempImg.onload = () => {
+
+      tempImg.onload = async () => {
+        const originalOnError = imgElement.onerror
+        imgElement.onerror = null
+        imgElement.src = ""
+
+        const onImgLoad = () => {
+          imgElement.classList.remove("image-loading")
+          imgElement.classList.add("image-loaded")
+          retryBtn.remove()
+          saveImageLoadState()
+          console.log(`[IMG-RETRY] ✅ Imagen cargada exitosamente`)
+          imgElement.removeEventListener("load", onImgLoad)
+          imgElement.removeEventListener("error", onImgError)
+          imgElement.onerror = originalOnError
+        }
+
+        const onImgError = () => {
+          retryBtn.classList.remove("spinning")
+          imgElement.src = "/images/ProductImages.jpg"
+          imgElement.classList.remove("image-loading")
+          const attempts = (imageLoadState.failedImages.get(imageUrl) || 0) + 1
+          imageLoadState.failedImages.set(imageUrl, attempts)
+          saveImageLoadState()
+          console.log(`[IMG-RETRY] ❌ Error al cargar imagen después de retry (intento ${attempts})`)
+          imgElement.removeEventListener("load", onImgLoad)
+          imgElement.removeEventListener("error", onImgError)
+          imgElement.onerror = originalOnError
+        }
+
+        imgElement.addEventListener("load", onImgLoad, { once: true })
+        imgElement.addEventListener("error", onImgError, { once: true })
         imgElement.src = imageUrl
-        imgElement.classList.remove("image-loading")
-        imgElement.classList.add("image-loaded")
-        retryBtn.remove()
-        saveImageLoadState()
-        console.log(`[IMG-RETRY] ✅ Imagen cargada exitosamente`)
       }
+
       tempImg.onerror = () => {
         retryBtn.classList.remove("spinning")
-        console.log(`[IMG-RETRY] ❌ Error al cargar imagen después de retry`)
+        const attempts = (imageLoadState.failedImages.get(imageUrl) || 0) + 1
+        imageLoadState.failedImages.set(imageUrl, attempts)
+        saveImageLoadState()
+        console.log(`[IMG-RETRY] ❌ Error en tempImg durante retry (intento ${attempts})`)
       }
+
       tempImg.src = imageUrl
     } catch (error) {
       retryBtn.classList.remove("spinning")
+      const attempts = (imageLoadState.failedImages.get(imageUrl) || 0) + 1
+      imageLoadState.failedImages.set(imageUrl, attempts)
+      saveImageLoadState()
       console.log(`[IMG-RETRY] ❌ Error en retry: ${error.message}`)
     }
   })
@@ -2166,7 +2198,7 @@ function setupEventListeners() {
     // 4. Actualizar productos en segundo plano (silencioso - sin resetear la UI)
     try {
       console.log("📶 Actualizando productos en segundo plano al reconectarse...");
-      await _refreshProductsFromNetwork(false); // Actualización silenciosa
+      await _refreshProductsFromNetwork(false, true); // Forzar sincronización al reconectar
       console.log("📶 Sincronización al volver online completada con éxito.");
     } catch (err) {
       console.error("[ONLINE-SYNC] Error actualizando productos:", err);
@@ -2346,7 +2378,7 @@ async function loadProducts() {
 
     // ── PASO 2: Actualizar en segundo plano si hay conexión ─────────────────
     if (navigator.onLine) {
-      setTimeout(() => _refreshProductsFromNetwork(false), 800)
+      setTimeout(() => _refreshProductsFromNetwork(false, true), 800)
     } else {
       console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
       setTimeout(() => { preloadAllImages() }, 2000)
@@ -2426,10 +2458,10 @@ async function _loadInventoryData() {
 }
 
 // ── FUNCIÓN INTERNA: Actualizar desde red (puede ser silencioso) ─────────────
-async function _refreshProductsFromNetwork(isFirstLoad = false) {
+async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
 
-  if (!isFirstLoad) {
+  if (!isFirstLoad && !forceSync) {
     const lastSync = localStorage.getItem("sonimax_last_network_sync")
     if (lastSync) {
       const diff = Date.now() - parseInt(lastSync)
@@ -2560,7 +2592,9 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
           renderProducts()
           const indicator = document.getElementById("last-update-time")
           const cachedLastUpdate = localStorage.getItem("sonimax_last_update") || "Desconocido"
-          if (indicator) indicator.textContent = cachedLastUpdate + " (sin WiFi)"
+          if (indicator) {
+            indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : " (Error de Sinc.)")
+          }
           console.log(`✅ [OFFLINE] ${allProducts.length} productos desde caché de emergencia`)
         } catch (parseErr) {
           console.error("❌ Error al leer caché de emergencia:", parseErr)
@@ -2572,7 +2606,9 @@ async function _refreshProductsFromNetwork(isFirstLoad = false) {
       // Ya hay datos visibles (del caché), solo actualizar indicador
       const indicator = document.getElementById("last-update-time")
       const cachedLastUpdate = localStorage.getItem("sonimax_last_update") || ""
-      if (indicator) indicator.textContent = cachedLastUpdate + " (sin WiFi)"
+      if (indicator) {
+        indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : " (Error de Sinc.)")
+      }
     }
   } finally {
     document.getElementById("products-loading").classList.add("hidden")
@@ -3103,8 +3139,7 @@ function createProductCard(product) {
            data-src="${optimizedUrl}"
            alt="${product.nombre}"
            class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
-           loading="lazy"
-           onerror="this.src='/images/ProductImages.jpg'">
+           loading="lazy">
       <!-- [MODIFICADO] Badges movidos aquí para correcta superposición y visibilidad -->
       ${priceDropBadge}
       ${newBadge}
@@ -3129,6 +3164,12 @@ function createProductCard(product) {
   productImage.addEventListener("click", (e) => {
     e.stopPropagation()
     showImageModal(imageUrl, product.nombre)
+  })
+
+  productImage.addEventListener("error", () => {
+    productImage.src = "/images/ProductImages.jpg"
+    productImage.classList.remove("image-loading")
+    addRetryButton(productImage, optimizedUrl)
   })
 
   // [NUEVO] Lógica de Favoritos
