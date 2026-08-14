@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v4"
+const CACHE_VERSION = "v5"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -22,13 +22,12 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v4 instalándose...")
+  console.log("[SW] ✅ Service Worker v5 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
       .then((cache) => {
         console.log("[SW] 📦 Guardando App Shell en caché...")
-        // Usamos addAll con manejo de errores para no fallar si uno falla
         return Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))
       })
       .then(() => {
@@ -46,7 +45,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v4 activado")
+  console.log("[SW] 🚀 Service Worker v5 activado")
   event.waitUntil(
     caches
       .keys()
@@ -75,61 +74,75 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES DE ibb.co ─────────────────────────────────
-  //    Estrategia: Cache First (si está en caché, usa caché; si no, descarga y guarda)
-  if (url.hostname.includes("ibb.co") || url.hostname.includes("i.ibb.co")) {
+  // ── 1. IMÁGENES (Supabase Storage, ibb.co, o cualquier imagen de producto) ──
+  // Estrategia: Cache First (Ahorra hasta 99% de Supabase Egress)
+  const isImageRequest =
+    event.request.destination === "image" ||
+    url.pathname.match(/\.(jpg|jpeg|png|webp|gif|svg|avif)($|\?)/i) ||
+    url.hostname.includes("ibb.co") ||
+    url.hostname.includes("i.ibb.co") ||
+    ((url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) && url.pathname.includes("/storage/"))
+
+  if (isImageRequest) {
     event.respondWith(
-      caches.open(IMAGE_CACHE).then((cache) => {
-        return cache.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse
+      caches.open(IMAGE_CACHE).then(async (cache) => {
+        // 1. Intentar servir desde caché local
+        const cachedResponse = await cache.match(event.request, { ignoreSearch: false })
+        if (cachedResponse) {
+          return cachedResponse
+        }
+
+        // Si la URL tiene parámetros de timestamp o query, intentar match por URL limpia
+        const cleanUrl = url.origin + url.pathname
+        const cleanMatch = await cache.match(cleanUrl)
+        if (cleanMatch) {
+          return cleanMatch
+        }
+
+        // 2. Si no está en caché, descargar de la red y guardar copia
+        try {
+          const networkResponse = await fetch(event.request)
+          // Aceptar status 200 y respuestas opacas (cross-origin / no-cors)
+          if (networkResponse && (networkResponse.status === 200 || networkResponse.type === "opaque")) {
+            cache.put(event.request, networkResponse.clone()).catch(() => {})
           }
-          return fetch(event.request)
-            .then((networkResponse) => {
-              if (networkResponse && networkResponse.status === 200) {
-                cache.put(event.request, networkResponse.clone())
-                console.log("[SW] 💾 Imagen guardada:", url.pathname)
-              }
-              return networkResponse
-            })
-            .catch(() => {
-              console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
-              // Devolver respuesta vacía si no hay red
-              return new Response("", { status: 503 })
-            })
-        })
+          return networkResponse
+        } catch (fetchErr) {
+          console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
+          // Fallback a imagen por defecto si existe en caché
+          const fallback = await caches.match("/images/ProductImages.jpg")
+          if (fallback) return fallback
+          return new Response("", { status: 503, statusText: "Offline Image" })
+        }
       })
     )
     return
   }
 
-  // ── 2. API DE SUPABASE ─────────────────────────────────────
-  //    Estrategia: Network First con Cache de respuestas API (para offline)
+  // ── 2. API DE SUPABASE (Base de datos / Auth) ────────────────
+  // Estrategia: Network First con fallback a Cache
   if (
-    url.hostname.includes("supabase.co") ||
-    url.hostname.includes("supabase.io")
+    (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) &&
+    !url.pathname.includes("/storage/")
   ) {
     event.respondWith(
       fetch(event.request.clone())
         .then((networkResponse) => {
-          // Guardar respuesta exitosa de la API en caché
           if (networkResponse && networkResponse.status === 200) {
             const clonedResponse = networkResponse.clone()
             caches.open(API_CACHE).then((cache) => {
-              cache.put(event.request, clonedResponse)
+              cache.put(event.request, clonedResponse).catch(() => {})
             })
           }
           return networkResponse
         })
         .catch(() => {
-          // Sin red: intentar servir desde caché de API
           return caches.open(API_CACHE).then((cache) => {
             return cache.match(event.request).then((cachedApiResponse) => {
               if (cachedApiResponse) {
                 console.log("[SW] 📱 API offline: sirviendo desde caché:", url.pathname)
                 return cachedApiResponse
               }
-              // Sin caché de API: respuesta de error clara
               return new Response(JSON.stringify({ error: "Sin conexión a internet" }), {
                 status: 503,
                 headers: { "Content-Type": "application/json" },
@@ -141,8 +154,8 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 3. CDN (Tailwind, Supabase JS, Chart.js, etc.) ─────────
-  //    Estrategia: Cache First
+  // ── 3. CDN (Tailwind, Supabase JS, Chart.js, Fuentes, etc.) ─
+  // Estrategia: Cache First
   if (
     url.hostname.includes("cdn.tailwindcss.com") ||
     url.hostname.includes("cdn.jsdelivr.net") ||
@@ -154,12 +167,14 @@ self.addEventListener("fetch", (event) => {
       caches.open(APP_CACHE).then((cache) => {
         return cache.match(event.request).then((cached) => {
           if (cached) return cached
-          return fetch(event.request).then((response) => {
-            if (response && response.status === 200) {
-              cache.put(event.request, response.clone())
-            }
-            return response
-          }).catch(() => new Response("", { status: 503 }))
+          return fetch(event.request)
+            .then((response) => {
+              if (response && (response.status === 200 || response.type === "opaque")) {
+                cache.put(event.request, response.clone()).catch(() => {})
+              }
+              return response
+            })
+            .catch(() => new Response("", { status: 503 }))
         })
       })
     )
@@ -167,28 +182,25 @@ self.addEventListener("fetch", (event) => {
   }
 
   // ── 4. RECURSOS LOCALES (HTML, CSS, JS) ────────────────────
-  //    Estrategia: Network First con fallback a caché
+  // Estrategia: Network First con fallback a caché
   if (url.origin === self.location.origin) {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
-          // Si la respuesta es buena, actualizar la caché
           if (networkResponse && networkResponse.status === 200) {
             const responseToCache = networkResponse.clone()
             caches.open(APP_CACHE).then((cache) => {
-              cache.put(event.request, responseToCache)
+              cache.put(event.request, responseToCache).catch(() => {})
             })
           }
           return networkResponse
         })
         .catch(() => {
-          // Sin red: usar la versión en caché
           return caches.match(event.request).then((cachedResponse) => {
             if (cachedResponse) {
               console.log("[SW] 📱 Modo offline: sirviendo desde caché:", url.pathname)
               return cachedResponse
             }
-            // Fallback final: index.html (para rutas SPA)
             return caches.match("./index.html")
           })
         })
@@ -198,25 +210,19 @@ self.addEventListener("fetch", (event) => {
 })
 
 // ============================================================
-// MENSAJES: Descargas en segundo plano desde la app
+// MENSAJES: Descargas en segundo plano y limpieza
 // ============================================================
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "DOWNLOAD_IMAGE") {
     const imageUrl = event.data.url
-    console.log("[SW] 📥 Descargando imagen en segundo plano:", imageUrl)
-
     caches.open(IMAGE_CACHE).then((cache) => {
-      // Solo descargar si no está ya en caché
       cache.match(imageUrl).then((cached) => {
-        if (cached) return // Ya está en caché, no descargar de nuevo
+        if (cached) return
 
         fetch(imageUrl)
           .then((response) => {
-            if (response && response.status === 200) {
-              cache.put(imageUrl, response.clone())
-              console.log("[SW] ✅ Imagen guardada en segundo plano:", imageUrl)
-
-              // Notificar a la app
+            if (response && (response.status === 200 || response.type === "opaque")) {
+              cache.put(imageUrl, response.clone()).catch(() => {})
               self.clients.matchAll().then((clients) => {
                 clients.forEach((client) => {
                   client.postMessage({ type: "DOWNLOAD_COMPLETE", url: imageUrl })
@@ -231,7 +237,6 @@ self.addEventListener("message", (event) => {
     })
   }
 
-  // Limpiar caché de imágenes (útil para liberar espacio)
   if (event.data && event.data.type === "CLEAR_IMAGE_CACHE") {
     caches.delete(IMAGE_CACHE).then(() => {
       console.log("[SW] 🗑️ Caché de imágenes limpiado")
