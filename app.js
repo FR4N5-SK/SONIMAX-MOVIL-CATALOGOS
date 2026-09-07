@@ -42,7 +42,36 @@ let isLoadingMore = false
 let imageObserver = null
 let serviceWorkerRegistration = null
 
-const IMAGE_CACHE_NAME = "sonimax-images-v5"
+const IMAGE_CACHE_NAME = "sonimax-images-v6"
+const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
+
+async function safeShowNotification(title, options = {}) {
+  try {
+    if (!("Notification" in window)) return
+    if (Notification.permission !== "granted") return
+
+    // Intentar a través del Service Worker primero (compatible con Android)
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready.catch(() => null)
+      if (reg && typeof reg.showNotification === "function") {
+        await reg.showNotification(title, options)
+        return
+      }
+    }
+
+    // Fallback estándar sólo si Notification es un constructor válido (evita crash en Android Chrome)
+    try {
+      if (typeof Notification === "function") {
+        new Notification(title, options)
+      }
+    } catch (e) {
+      console.warn("[NOTIFICATION] No se pudo instanciar Notification directamente:", e.message)
+    }
+  } catch (err) {
+    console.warn("[NOTIFICATION] Error al mostrar notificación:", err)
+  }
+}
+
 const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
 const FAVORITES_KEY = "sonimax_favorites" // [NUEVO]
@@ -452,21 +481,18 @@ function saveImageLoadState() {
 }
 
 function getProductsHash(products) {
-  // Crear hash simple basado en URLs de imágenes
-  const urls = products
-    .map((p) => p.imagen_url)
-    .filter((url) => url && url !== "/images/ProductImages.jpg")
-    .sort()
-    .join("|")
-
-  // Hash simple
+  if (!products || !products.length) return "0"
+  // Crear hash compuesto basado en campos críticos (precios, stock, imágenes, estados)
   let hash = 0
-  for (let i = 0; i < urls.length; i++) {
-    const char = urls.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash
+  for (let i = 0; i < products.length; i++) {
+    const p = products[i]
+    const str = `${p.id || ''}:${p.codigo || ''}:${p.stock || 0}:${p.precio_cliente || 0}:${p.precio_mayor || 0}:${p.precio_gmayor || 0}:${p.is_new ? 1 : 0}:${p.visible_in_catalog !== false ? 1 : 0}:${p.departamento || ''}:${p.imagen_url || ''}`
+    for (let j = 0; j < str.length; j++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(j)
+      hash |= 0 // Entero de 32 bits
+    }
   }
-  return hash.toString()
+  return `${products.length}_${hash.toString()}`
 }
 
 function checkProductsChanged(products) {
@@ -479,7 +505,9 @@ function checkProductsChanged(products) {
 
     // Obtener solo las URLs nuevas
     const currentUrls = new Set(
-      products.map((p) => optimizeImageUrl(p.imagen_url)).filter((url) => url && url !== "/images/ProductImages.jpg"),
+      products
+        .map((p) => optimizeImageUrl(p.imagen_url))
+        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:")),
     )
 
     const newUrls = Array.from(currentUrls).filter((url) => !imageLoadState.loadedImages.has(url))
@@ -650,52 +678,76 @@ function toggleImageDownload() {
   updateSidebarDownloadProgress()
 }
 
+// Pausar descargas en segundo plano durante scroll para dar 100% de prioridad a lo que el usuario ve
+let isUserScrollingTimer = null
+if (typeof window !== "undefined") {
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!imageLoadState.isPaused && imageLoadState.isProcessingQueue) {
+        if (isUserScrollingTimer) clearTimeout(isUserScrollingTimer)
+        isUserScrollingTimer = setTimeout(() => {
+          if (!imageLoadState.isPaused) {
+            processBackgroundQueue()
+          }
+        }, 350)
+      }
+    },
+    { passive: true },
+  )
+}
+
 async function loadPriorityImages(urls) {
   if (!urls || urls.length === 0) return
+  if (!("caches" in window)) return
 
-  const cache = await caches.open(IMAGE_CACHE_NAME)
-  const urlsToLoad = urls.filter((url) => !imageLoadState.loadedImages.has(url))
-  if (urlsToLoad.length === 0) return
+  try {
+    const cache = await caches.open(IMAGE_CACHE_NAME)
+    const urlsToLoad = urls.filter((url) => url && !url.startsWith("data:") && !imageLoadState.loadedImages.has(url))
+    if (urlsToLoad.length === 0) return
 
-  const priorityPromises = urlsToLoad.map(async (url) => {
-    try {
-      const cachedResponse = await cache.match(url)
-      if (cachedResponse) {
-        imageLoadState.loadedImages.add(url)
-        imageLoadState.failedImages.delete(url)
-        return
+    const priorityPromises = urlsToLoad.map(async (url) => {
+      try {
+        const cachedResponse = await cache.match(url)
+        if (cachedResponse) {
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+          return
+        }
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+        const response = await fetch(url, {
+          cache: "force-cache",
+          signal: controller.signal,
+          priority: "high",
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response && (response.status === 200 || response.type === "opaque")) {
+          await cache.put(url, response.clone()).catch(() => {})
+          imageLoadState.loadedImages.add(url)
+          imageLoadState.failedImages.delete(url)
+        }
+      } catch (error) {
+        const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
+        imageLoadState.failedImages.set(url, attemptCount)
       }
+    })
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 4000)
-
-      const response = await fetch(url, {
-        mode: "no-cors",
-        cache: "force-cache",
-        signal: controller.signal,
-        priority: "high",
-      })
-
-      clearTimeout(timeoutId)
-
-      if (response && (response.status === 200 || response.type === "opaque")) {
-        await cache.put(url, response.clone())
-        imageLoadState.loadedImages.add(url)
-        imageLoadState.failedImages.delete(url)
-      }
-    } catch (error) {
-      const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
-      imageLoadState.failedImages.set(url, attemptCount)
-    }
-  })
-
-  await Promise.allSettled(priorityPromises)
-  saveImageLoadState()
+    await Promise.allSettled(priorityPromises)
+    saveImageLoadState()
+  } catch (err) {
+    console.warn("[IMG-PRIORITY] Error cargando imágenes prioritarias:", err)
+  }
 }
 
 async function processBackgroundQueue() {
   if (imageLoadState.isPaused) return
   if (imageLoadState.isProcessingQueue) return
+  if (!("caches" in window)) return
 
   if (imageLoadState.backgroundQueueTimer) {
     clearTimeout(imageLoadState.backgroundQueueTimer)
@@ -710,20 +762,21 @@ async function processBackgroundQueue() {
       if (!refilled) {
         updateSidebarDownloadProgress()
         imageLoadState.isProcessingQueue = false
-        // Si ya no hay pendientes, chequear periódicamente cada 30 segundos
-        imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 30000)
+        // Chequear periódicamente cada 45 segundos
+        imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 45000)
         return
       }
     }
 
     const cache = await caches.open(IMAGE_CACHE_NAME)
-    const CONCURRENCY = 6 // 6 descargas simultáneas en paralelo para máxima velocidad
+    // Concurrencia suave de 2 en móvil para no saturar ancho de banda ni bloquear Supabase
+    const CONCURRENCY = 2
 
     while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
       const batch = imageLoadState.backgroundQueue.splice(0, CONCURRENCY)
 
       const batchPromises = batch.map(async (url) => {
-        if (imageLoadState.loadedImages.has(url)) return
+        if (!url || url.startsWith("data:") || imageLoadState.loadedImages.has(url)) return
 
         try {
           const cachedResponse = await cache.match(url)
@@ -734,10 +787,9 @@ async function processBackgroundQueue() {
           }
 
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 3500)
+          const timeoutId = setTimeout(() => controller.abort(), 8000)
 
           const response = await fetch(url, {
-            mode: "no-cors",
             cache: "force-cache",
             signal: controller.signal,
           })
@@ -745,7 +797,7 @@ async function processBackgroundQueue() {
           clearTimeout(timeoutId)
 
           if (response && (response.status === 200 || response.type === "opaque")) {
-            await cache.put(url, response.clone())
+            await cache.put(url, response.clone()).catch(() => {})
             imageLoadState.loadedImages.add(url)
             imageLoadState.failedImages.delete(url)
           }
@@ -758,14 +810,14 @@ async function processBackgroundQueue() {
       await Promise.allSettled(batchPromises)
       updateSidebarDownloadProgress()
       saveImageLoadState()
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      await new Promise((resolve) => setTimeout(resolve, 60))
     }
   } catch (err) {
     console.warn("[IMG-LOAD] Error procesando cola de fondo:", err)
   } finally {
     imageLoadState.isProcessingQueue = false
     if (!imageLoadState.isPaused && imageLoadState.backgroundQueue.length > 0) {
-      imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 400)
+      imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 500)
     }
   }
 }
@@ -775,7 +827,7 @@ async function refillBackgroundQueue() {
     new Set(
       allProducts
         .map((p) => p.imagen_url)
-        .filter((url) => url && url !== "/images/ProductImages.jpg")
+        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
         .map((url) => optimizeImageUrl(url))
     )
   )
@@ -806,7 +858,7 @@ async function preloadAllImages() {
     new Set(
       allProducts
         .map((p) => p.imagen_url)
-        .filter((url) => url && url !== "/images/ProductImages.jpg")
+        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
         .map((url) => optimizeImageUrl(url))
     )
   )
@@ -831,14 +883,12 @@ async function preloadAllImages() {
 }
 
 async function loadImagesWithRetry(urls) {
+  if (!("caches" in window)) return
   const cache = await caches.open(IMAGE_CACHE_NAME)
-  const BATCH_SIZE = 25
-  const CONCURRENT_BATCHES = 8
+  const BATCH_SIZE = 10
+  const CONCURRENT_BATCHES = 2
 
-  console.log(`[IMG-LOAD] 🚀 Iniciando carga de ${urls.length} imágenes...`)
-  console.log(`[IMG-LOAD] 📊 Ya cargadas: ${imageLoadState.loadedImages.size}`)
-  console.log(`[IMG-LOAD] 📊 Con errores previos: ${imageLoadState.failedImages.size}`)
-  console.log(`[IMG-LOAD] 📊 Por cargar ahora: ${urls.length}`)
+  console.log(`[IMG-LOAD] 🚀 Iniciando carga suave de ${urls.length} imágenes...`)
 
   const batches = []
   for (let i = 0; i < urls.length; i += BATCH_SIZE) {
@@ -865,23 +915,13 @@ async function loadImagesWithRetry(urls) {
       }
     })
 
-    const remaining = urls.length - (totalLoaded + totalFailed)
-    console.log(
-      `[IMG-LOAD] 📊 Progreso: ${totalLoaded} exitosas, ${totalFailed} fallidas, ${remaining} restantes de ${urls.length} totales`,
-    )
-
     saveImageLoadState()
-
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
 
-  console.log(`[IMG-LOAD] ✅ Carga inicial completada`)
-  console.log(`[IMG-LOAD] 📊 Resultado: ${totalLoaded} exitosas, ${totalFailed} fallidas de ${urls.length} totales`)
   updateSidebarDownloadProgress()
-  console.log(`[IMG-LOAD] 📊 Total acumulado: ${imageLoadState.loadedImages.size} imágenes cargadas en total`)
 
   if (totalFailed > 0) {
-    console.log(`[IMG-LOAD] 🔄 Iniciando proceso de reintentos para ${totalFailed} imágenes fallidas...`)
     await retryFailedImages(cache)
   }
 }
@@ -891,42 +931,36 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
   let failed = 0
 
   const promises = batch.map(async (url) => {
+    if (!url || url.startsWith("data:")) return { success: true, cached: true }
     try {
       const cachedResponse = await cache.match(url)
       if (cachedResponse) {
         imageLoadState.loadedImages.add(url)
         imageLoadState.failedImages.delete(url)
-        console.log(`[IMG-LOAD] ✅ Ya en caché: ${url.substring(url.lastIndexOf("/") + 1)}`)
         return { success: true, cached: true }
       }
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
 
       const response = await fetch(url, {
-        mode: "no-cors",
         cache: "force-cache",
         signal: controller.signal,
       })
 
       clearTimeout(timeoutId)
 
-      if (response) {
-        await cache.put(url, response)
+      if (response && (response.status === 200 || response.type === "opaque")) {
+        await cache.put(url, response.clone()).catch(() => {})
         imageLoadState.loadedImages.add(url)
         imageLoadState.failedImages.delete(url)
-        console.log(`[IMG-LOAD] ✅ Precargada: ${url.substring(url.lastIndexOf("/") + 1)}`)
         return { success: true, cached: false }
       }
 
-      console.log(`[IMG-LOAD] ❌ Sin respuesta: ${url.substring(url.lastIndexOf("/") + 1)}`)
       return { success: false, error: "No response" }
     } catch (error) {
       const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
       imageLoadState.failedImages.set(url, attemptCount)
-      console.log(
-        `[IMG-LOAD] ❌ Error (intento ${attemptCount}): ${url.substring(url.lastIndexOf("/") + 1)} - ${error.message}`,
-      )
       return { success: false, error: error.message }
     }
   })
@@ -940,8 +974,6 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
       failed++
     }
   })
-
-  console.log(`[IMG-LOAD] Lote ${batchNum}/${totalBatches}: ${loaded} exitosas, ${failed} fallidas`)
 
   return { loaded, failed }
 }
@@ -1055,8 +1087,8 @@ async function retryFailedImages(cache) {
 // ============================================
 
 function optimizeImageUrl(url) {
-  if (!url || url === "/images/ProductImages.jpg") {
-    return url
+  if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:")) {
+    return DEFAULT_PRODUCT_PLACEHOLDER
   }
 
   if (url.includes("ibb.co")) {
@@ -1068,16 +1100,7 @@ function optimizeImageUrl(url) {
 }
 
 function createImagePlaceholder(url) {
-  if (!url || url === "/images/ProductImages.jpg") {
-    return url
-  }
-
-  if (url.includes("ibb.co")) {
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}w=50&quality=30`
-  }
-
-  return url
+  return DEFAULT_PRODUCT_PLACEHOLDER
 }
 
 function initImageObserver() {
@@ -1089,36 +1112,33 @@ function initImageObserver() {
             const img = entry.target
             const fullSrc = img.dataset.src
 
-            if (fullSrc) {
-              console.log(
-                `[IMG-PRIORITY] 👁️ Imagen visible detectada: ${fullSrc.substring(fullSrc.lastIndexOf("/") + 1)}`,
-              )
-              loadPriorityImages([fullSrc])
-
-              const tempImg = new Image()
-              tempImg.onload = () => {
-                img.src = fullSrc
+            if (fullSrc && fullSrc !== DEFAULT_PRODUCT_PLACEHOLDER && !fullSrc.startsWith("data:")) {
+              img.src = fullSrc
+              img.onload = () => {
                 img.classList.remove("image-loading")
                 img.classList.add("image-loaded")
-                const retryBtn = img.parentElement.querySelector(".image-retry-btn")
-                if (retryBtn) {
-                  retryBtn.remove()
-                }
+                imageLoadState.loadedImages.add(fullSrc)
+                imageLoadState.failedImages.delete(fullSrc)
+                const retryBtn = img.parentElement?.querySelector(".image-retry-btn")
+                if (retryBtn) retryBtn.remove()
               }
-              tempImg.onerror = () => {
-                img.src = "/images/ProductImages.jpg"
+              img.onerror = () => {
+                img.src = DEFAULT_PRODUCT_PLACEHOLDER
                 img.classList.remove("image-loading")
+                img.classList.add("image-loaded")
                 addRetryButton(img, fullSrc)
               }
-              tempImg.src = fullSrc
-
+              observer.unobserve(img)
+            } else {
+              img.classList.remove("image-loading")
+              img.classList.add("image-loaded")
               observer.unobserve(img)
             }
           }
         })
       },
       {
-        rootMargin: "100px",
+        rootMargin: "250px",
         threshold: 0.01,
       },
     )
@@ -1127,6 +1147,7 @@ function initImageObserver() {
 
 function addRetryButton(imgElement, imageUrl) {
   if (!imgElement || !imgElement.parentElement) return
+  if (!imageUrl || imageUrl.startsWith("data:")) return
   const existingBtn = imgElement.parentElement.querySelector(".image-retry-btn")
   if (existingBtn) return
 
@@ -1145,8 +1166,10 @@ function addRetryButton(imgElement, imageUrl) {
     retryBtn.classList.add("spinning")
 
     try {
-      const cache = await caches.open(IMAGE_CACHE_NAME)
-      await cache.delete(imageUrl)
+      if ("caches" in window) {
+        const cache = await caches.open(IMAGE_CACHE_NAME)
+        await cache.delete(imageUrl)
+      }
       imageLoadState.loadedImages.delete(imageUrl)
       imageLoadState.failedImages.delete(imageUrl)
 
@@ -1154,43 +1177,22 @@ function addRetryButton(imgElement, imageUrl) {
         ? `${imageUrl}&_t=${Date.now()}`
         : `${imageUrl}?_t=${Date.now()}`
 
-      // Precargar en caché
-      try {
-        const response = await fetch(cacheBustUrl, {
-          mode: "no-cors",
-          cache: "reload",
-        })
-        if (response && (response.status === 200 || response.type === "opaque")) {
-          await cache.put(imageUrl, response.clone())
-          imageLoadState.loadedImages.add(imageUrl)
-        }
-      } catch (fe) {}
-
-      const tempImg = new Image()
-      tempImg.onload = () => {
-        imgElement.src = cacheBustUrl
+      imgElement.src = cacheBustUrl
+      imgElement.onload = () => {
         imgElement.classList.remove("image-loading")
         imgElement.classList.add("image-loaded")
+        imageLoadState.loadedImages.add(imageUrl)
         retryBtn.remove()
         saveImageLoadState()
         updateSidebarDownloadProgress()
       }
-
-      tempImg.onerror = () => {
+      imgElement.onerror = () => {
+        imgElement.src = DEFAULT_PRODUCT_PLACEHOLDER
         retryBtn.classList.remove("spinning")
-        imgElement.src = "/images/ProductImages.jpg"
-        const attempts = (imageLoadState.failedImages.get(imageUrl) || 0) + 1
-        imageLoadState.failedImages.set(imageUrl, attempts)
-        saveImageLoadState()
-        updateSidebarDownloadProgress()
       }
-
-      tempImg.src = cacheBustUrl
-    } catch (error) {
+    } catch (err) {
+      console.warn("[RETRY-IMG] Error:", err)
       retryBtn.classList.remove("spinning")
-      const attempts = (imageLoadState.failedImages.get(imageUrl) || 0) + 1
-      imageLoadState.failedImages.set(imageUrl, attempts)
-      saveImageLoadState()
     }
   })
 
@@ -2631,26 +2633,18 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
     if (indicator) indicator.textContent = formattedTime
     localStorage.setItem("sonimax_last_network_sync", Date.now().toString())
 
-    // Notificaciones de cambios
-    const lastProductCount = localStorage.getItem("sonimax_product_count")
-    if (lastProductCount !== null && parseInt(lastProductCount) !== allProducts.length) {
-      if (Notification.permission === "granted") {
-        new Notification("¡Inventario Actualizado!", {
+    // Notificaciones de cambios seguras (sin crashear en Android/iOS/WebViews)
+    try {
+      const lastProductCount = localStorage.getItem("sonimax_product_count")
+      if (lastProductCount !== null && parseInt(lastProductCount) !== allProducts.length) {
+        safeShowNotification("¡Inventario Actualizado!", {
           body: "Se han actualizado los productos de SONIMAX MÓVIL.",
           icon: "https://i.ibb.co/RkyBVXBP/LOGO-SONIMAX-PNG-2.png"
         })
-      } else if (Notification.permission !== "denied") {
-        Notification.requestPermission().then(p => {
-          if (p === "granted") {
-            new Notification("¡Inventario Actualizado!", {
-              body: "Se han actualizado los productos de SONIMAX MÓVIL.",
-              icon: "https://i.ibb.co/RkyBVXBP/LOGO-SONIMAX-PNG-2.png"
-            })
-          }
-        })
       }
+    } catch (notifErr) {
+      console.warn("[SYNC-NOTIF] Aviso:", notifErr)
     }
-    if (Notification.permission === "default") Notification.requestPermission()
 
     // Guardar en caché local
     try {
@@ -2658,11 +2652,15 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
     } catch (e) {
       console.warn("No se pudo guardar productos en caché:", e)
     }
-    localStorage.setItem(PRODUCTS_HASH_KEY, freshHash)
-    localStorage.setItem("sonimax_product_count", allProducts.length)
-    localStorage.setItem("sonimax_last_update", formattedTime)
+    try {
+      localStorage.setItem(PRODUCTS_HASH_KEY, freshHash)
+      localStorage.setItem("sonimax_product_count", allProducts.length.toString())
+      localStorage.setItem("sonimax_last_update", formattedTime)
+    } catch (e) {
+      console.warn("No se pudieron guardar metadatos en caché:", e)
+    }
 
-    setTimeout(() => { preloadAllImages() }, 2000)
+    setTimeout(() => { preloadAllImages() }, 3000)
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
 
   } catch (error) {
@@ -2685,7 +2683,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
           const indicator = document.getElementById("last-update-time")
           const cachedLastUpdate = localStorage.getItem("sonimax_last_update") || "Desconocido"
           if (indicator) {
-            indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : " (Error de Sinc.)")
+            indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : " (Offline)")
           }
           console.log(`✅ [OFFLINE] ${allProducts.length} productos desde caché de emergencia`)
         } catch (parseErr) {
@@ -2699,7 +2697,7 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
       const indicator = document.getElementById("last-update-time")
       const cachedLastUpdate = localStorage.getItem("sonimax_last_update") || ""
       if (indicator) {
-        indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : " (Error de Sinc.)")
+        indicator.textContent = cachedLastUpdate + (!navigator.onLine ? " (sin WiFi)" : "")
       }
     }
   } finally {
@@ -3095,7 +3093,7 @@ function createProductCard(product) {
     `
   }
 
-  const imageUrl = product.imagen_url || "/images/ProductImages.jpg"
+  const imageUrl = product.imagen_url || DEFAULT_PRODUCT_PLACEHOLDER
   const optimizedUrl = optimizeImageUrl(imageUrl)
   const placeholderUrl = createImagePlaceholder(imageUrl)
 
@@ -3259,8 +3257,9 @@ function createProductCard(product) {
   })
 
   productImage.addEventListener("error", () => {
-    productImage.src = "/images/ProductImages.jpg"
+    productImage.src = DEFAULT_PRODUCT_PLACEHOLDER
     productImage.classList.remove("image-loading")
+    productImage.classList.add("image-loaded")
     addRetryButton(productImage, optimizedUrl)
   })
 
@@ -3761,7 +3760,7 @@ function renderCart() {
       totalGmayor += (product.precio_gmayor || 0) * item.quantity
     }
 
-    const optimizedCartImage = optimizeImageUrl(item.imagen_url || "/images/ProductImages.jpg")
+    const optimizedCartImage = optimizeImageUrl(item.imagen_url || DEFAULT_PRODUCT_PLACEHOLDER)
 
     cartItemDiv.innerHTML = `
       <div class="flex items-center space-x-4">
@@ -3769,7 +3768,7 @@ function renderCart() {
              alt="${item.nombre}"
              class="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
              loading="lazy"
-             onerror="this.src='/images/ProductImages.jpg'">
+             onerror="this.src=DEFAULT_PRODUCT_PLACEHOLDER">
         <div class="flex-1">
           <h4 class="font-bold text-gray-800">${item.nombre}</h4>
           <p class="text-gray-600 text-sm">Cantidad: ${item.quantity}</p>
@@ -3791,7 +3790,7 @@ function renderCart() {
     const cartImage = cartItemDiv.querySelector("img")
     cartImage.addEventListener("click", (e) => {
       e.stopPropagation()
-      showImageModal(item.imagen_url || "/images/ProductImages.jpg", item.nombre)
+      showImageModal(item.imagen_url || DEFAULT_PRODUCT_PLACEHOLDER, item.nombre)
     })
 
     cartItemDiv.querySelector(".cart-decrease-btn").addEventListener("click", async () => {
@@ -5463,11 +5462,11 @@ function createInventorySearchResultCard(item) {
     // Normalizar códigos para búsqueda de imagen
     const itemCode = String(item.codigo || '').trim().toUpperCase();
     const productInCatalog = allProducts.find(p => String(p.codigo || '').trim().toUpperCase() === itemCode);
-    const imageUrl = productInCatalog?.imagen_url || '/images/ProductImages.jpg';
+    const imageUrl = productInCatalog?.imagen_url || DEFAULT_PRODUCT_PLACEHOLDER;
 
     return `
         <div class="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl shadow-sm flex flex-col sm:flex-row items-center gap-4 search-result-card">
-            <img src="${optimizeImageUrl(imageUrl)}" alt="Imagen del producto" class="w-16 h-16 object-cover rounded-lg flex-shrink-0 border bg-white" onerror="this.src='/images/ProductImages.jpg'">
+            <img src="${optimizeImageUrl(imageUrl)}" alt="Imagen del producto" class="w-16 h-16 object-cover rounded-lg flex-shrink-0 border bg-white" onerror="this.src=DEFAULT_PRODUCT_PLACEHOLDER">
             <div class="flex-grow text-center sm:text-left">
                 <p class="font-semibold text-gray-800 dark:text-white">${item.descripcion}</p>
                 <p class="text-sm text-gray-500">Código: <code class="font-mono">${item.codigo}</code></p>

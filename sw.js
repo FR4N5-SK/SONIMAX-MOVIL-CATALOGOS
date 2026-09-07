@@ -2,10 +2,12 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v5"
+const CACHE_VERSION = "v6"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
+
+const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="100%" height="100%" fill="#f1f5f9"/><path d="M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z" fill="#cbd5e1"/></svg>`
 
 // Recursos del "App Shell" que siempre deben estar disponibles offline
 const APP_SHELL = [
@@ -22,7 +24,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v5 instalándose...")
+  console.log("[SW] ✅ Service Worker v6 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -45,7 +47,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v5 activado")
+  console.log("[SW] 🚀 Service Worker v6 activado")
   event.waitUntil(
     caches
       .keys()
@@ -109,10 +111,11 @@ self.addEventListener("fetch", (event) => {
           return networkResponse
         } catch (fetchErr) {
           console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
-          // Fallback a imagen por defecto si existe en caché
-          const fallback = await caches.match("/images/ProductImages.jpg")
-          if (fallback) return fallback
-          return new Response("", { status: 503, statusText: "Offline Image" })
+          // Fallback a SVG por defecto sin peticiones de red fallidas
+          return new Response(FALLBACK_SVG, {
+            status: 200,
+            headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" }
+          })
         }
       })
     )
