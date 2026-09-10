@@ -4,12 +4,18 @@ npm-debug.log*
 
 # Carpeta temporal de Capacitor (se genera al compilar)
 www/
+assets/
+
 
 # Proyecto Android nativo (solo necesario para compilar la APK localmente)
 android/
 
 # Scripts de compilación
 generate-icons.js
+
+# APK binarios — se distribuyen desde el bucket de Supabase, no desde Git
+*.apk
+APK/
 
 # Archivos del sistema
 .DS_Store
