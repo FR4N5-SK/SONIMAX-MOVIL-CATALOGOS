@@ -54,9 +54,11 @@
   };
 
   const uploadProductPhotoFile = async (file, productId) => {
-    const { supabaseClient } = getGlobalState();
-    const activeClient = supabaseClient || window.supabaseClient;
-    if (!activeClient) throw new Error("Cliente de Supabase no disponible");
+    // Usar DIRECTAMENTE el bucket del servidor VIEJO (Plan Pro - tuqwzrsgczhgmfnfmryw)
+    const storageClient = window.supabaseOldClient;
+    if (!storageClient || !storageClient.storage) {
+      throw new Error("Cliente de Supabase viejo (Storage) no disponible en supabase-config.js");
+    }
 
     // 1. Comprimir en cliente (WebP a 800px max, peso < 60KB)
     const compressedBlob = await compressImageToBlob(file, 800, 0.75);
@@ -65,8 +67,8 @@
     const cleanId = String(productId).replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = `products/${cleanId}_${Date.now()}.webp`;
 
-    // 3. Subir al bucket product-images
-    const { error: uploadErr } = await activeClient.storage
+    // 3. Subir al bucket product-images del servidor VIEJO
+    const { error: uploadErr } = await storageClient.storage
       .from('product-images')
       .upload(filename, compressedBlob, {
         contentType: 'image/webp',
@@ -75,10 +77,17 @@
       });
 
     if (uploadErr) {
+      const errMsg = (uploadErr.message || uploadErr.error || '').toLowerCase();
+      if (errMsg.includes('bucket not found') || errMsg.includes('nosuchbucket')) {
+        throw new Error("El bucket 'product-images' no existe en el Supabase viejo.");
+      }
+      if (errMsg.includes('row-level security') || errMsg.includes('policy')) {
+        throw new Error("Falta la política de acceso (RLS) en el bucket 'product-images' del Supabase viejo.");
+      }
       throw new Error(`Error en Storage: ${uploadErr.message}`);
     }
 
-    const { data: urlData } = activeClient.storage.from('product-images').getPublicUrl(filename);
+    const { data: urlData } = storageClient.storage.from('product-images').getPublicUrl(filename);
     return urlData.publicUrl;
   };
 

@@ -1318,34 +1318,10 @@ function optimizeImageUrl(url, options = {}) {
   }
 
   try {
-    // 1. Supabase Storage — usar /object/authenticated/ con apikey en query param.
-    //    El bucket "product-images" es privado (RLS), por lo que las URLs públicas
-    //    devuelven 404. Supabase acepta apikey como query param igual que como header.
+    // 1. Supabase Storage — devolver URL pública limpia
     if (url.includes("supabase.co") || url.includes("supabase.io")) {
-      // Normalizar: quitar params viejos y usar endpoint autenticado
-      let cleanUrl = url
-        .replace("/storage/v1/render/image/public/", "/storage/v1/object/authenticated/")
-        .replace("/storage/v1/object/public/", "/storage/v1/object/authenticated/")
-        .split("?")[0]
-
-      // Obtener la clave anon del proyecto correspondiente
-      let anonKey = null
-      if (cleanUrl.includes("tuqwzrsgczhgmfnfmryw")) {
-        anonKey = (typeof SUPABASE_URL !== "undefined" && SUPABASE_URL.includes("tuqwzrsgczhgmfnfmryw"))
-          ? SUPABASE_ANON_KEY
-          : (typeof SUPABASE_OLD_ANON_KEY !== "undefined" && SUPABASE_OLD_URL.includes("tuqwzrsgczhgmfnfmryw") ? SUPABASE_OLD_ANON_KEY : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXd6cnNnY3poZ21mbmZtcnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTc4NTgsImV4cCI6MjA5NTY5Mzg1OH0.-mMR7gaq_TA_PvuZKSP4o_N2sCVaP0N7ihV2Bs94na0")
-      } else if (cleanUrl.includes("gvaitosnfotnkrpjojqn")) {
-        anonKey = (typeof SUPABASE_URL !== "undefined" && SUPABASE_URL.includes("gvaitosnfotnkrpjojqn"))
-          ? SUPABASE_ANON_KEY
-          : (typeof SUPABASE_OLD_ANON_KEY !== "undefined" && SUPABASE_OLD_URL.includes("gvaitosnfotnkrpjojqn") ? SUPABASE_OLD_ANON_KEY : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YWl0b3NuZm90bmtycGpvanFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MjA2NzQsImV4cCI6MjEwMjE5NjY3NH0.QKToCRnPi4GqCOjas55Ihp64hHVjdFScpyZpfJmltrs")
-      } else {
-        anonKey = typeof SUPABASE_ANON_KEY !== "undefined" ? SUPABASE_ANON_KEY : null
-      }
-
-      if (anonKey) {
-        return `${cleanUrl}?apikey=${anonKey}`
-      }
-      return cleanUrl
+      let cleanUrl = url.split("?")[0];
+      return cleanUrl;
     }
 
     // 2. ImgBB — devolver URL limpia (no soporta parámetros de resize)
