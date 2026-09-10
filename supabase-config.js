@@ -1,8 +1,13 @@
+// =====================================================================
+// SONIMAX MOVIL - CONFIGURACIÓN DE SUPABASE (PLAN PRO)
+// =====================================================================
+
+// Servidor Principal (Supabase con catálogo y productos al día - gvaitosnfotnkrpjojqn)
 const SUPABASE_URL = "https://gvaitosnfotnkrpjojqn.supabase.co"
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YWl0b3NuZm90bmtycGpvanFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MjA2NzQsImV4cCI6MjEwMjE5NjY3NH0.QKToCRnPi4GqCOjas55Ihp64hHVjdFScpyZpfJmltrs"
 
-// Credenciales del proyecto antiguo para puente de autenticación
+// Servidor Secundario / Puente de Respaldo (Plan Pro - tuqwzrsgczhgmfnfmryw)
 const SUPABASE_OLD_URL = "https://tuqwzrsgczhgmfnfmryw.supabase.co"
 const SUPABASE_OLD_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXd6cnNnY3poZ21mbmZtcnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTc4NTgsImV4cCI6MjA5NTY5Mzg1OH0.-mMR7gaq_TA_PvuZKSP4o_N2sCVaP0N7ihV2Bs94na0"
@@ -15,8 +20,8 @@ if (SUPABASE_URL === "TU_SUPABASE_URL_AQUI" || SUPABASE_ANON_KEY === "TU_SUPABAS
 }
 
 console.log("✅ Credenciales de Supabase validadas")
-console.log("🔗 URL Nuevo:", SUPABASE_URL)
-console.log("🔗 URL Viejo (Puente):", SUPABASE_OLD_URL)
+console.log("🔗 URL Principal (Catálogo al día):", SUPABASE_URL)
+console.log("🔗 URL Respaldo (Plan Pro):", SUPABASE_OLD_URL)
 
 // Inicializar cliente de Supabase desde el CDN
 const { createClient } = window.supabase
@@ -27,4 +32,4 @@ const supabaseOldClient = createClient(SUPABASE_OLD_URL, SUPABASE_OLD_ANON_KEY)
 window.supabaseClient = supabaseClient
 window.supabaseOldClient = supabaseOldClient
 
-console.log("✅ Clientes de Supabase (Nuevo y Viejo) inicializados correctamente")
+console.log("✅ Clientes de Supabase (Principal y Respaldo) inicializados correctamente")

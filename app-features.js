@@ -17,63 +17,156 @@
   // Importación de XLSX
   const XLSX = window.XLSX;
 
-  // ============================================
-  // PRODUCTOS SIN FOTO - CORREGIDO
-  // ============================================
+  // Helper para comprimir archivo de imagen antes de subir a Supabase
+  const compressImageToBlob = (file, maxDim = 800, quality = 0.75) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > height && width > maxDim) {
+            height = Math.round(height * (maxDim / width));
+            width = maxDim;
+          } else if (height > maxDim) {
+            width = Math.round(width * (maxDim / height));
+            height = maxDim;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('No se pudo generar el blob de la imagen'));
+          }, 'image/webp', quality);
+        };
+        img.onerror = () => reject(new Error('Error al cargar la imagen seleccionada'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Error al leer el archivo'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const uploadProductPhotoFile = async (file, productId) => {
+    const { supabaseClient } = getGlobalState();
+    const activeClient = supabaseClient || window.supabaseClient;
+    if (!activeClient) throw new Error("Cliente de Supabase no disponible");
+
+    // 1. Comprimir en cliente (WebP a 800px max, peso < 60KB)
+    const compressedBlob = await compressImageToBlob(file, 800, 0.75);
+    
+    // 2. Nombre limpio en el bucket
+    const cleanId = String(productId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `products/${cleanId}_${Date.now()}.webp`;
+
+    // 3. Subir al bucket product-images
+    const { error: uploadErr } = await activeClient.storage
+      .from('product-images')
+      .upload(filename, compressedBlob, {
+        contentType: 'image/webp',
+        cacheControl: '31536000',
+        upsert: true
+      });
+
+    if (uploadErr) {
+      throw new Error(`Error en Storage: ${uploadErr.message}`);
+    }
+
+    const { data: urlData } = activeClient.storage.from('product-images').getPublicUrl(filename);
+    return urlData.publicUrl;
+  };
 
   window.showProductsWithoutPhoto = async function() {
     try {
       const { allProducts } = getGlobalState();
-      
-      console.log('[NO-PHOTO] Buscando productos sin foto en memoria...');
       
       if (!allProducts || allProducts.length === 0) {
         alert('Cargando productos... Por favor espera unos segundos.');
         return;
       }
 
-      const productsWithoutPhoto = allProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
+      const productsWithoutPhoto = allProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '' || p.imagen_url === '/images/ProductImages.jpg');
       console.log('[NO-PHOTO] Encontrados:', productsWithoutPhoto.length, 'productos sin foto');
 
       const modalDiv = document.createElement('div');
-      modalDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto';
+      modalDiv.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto';
       modalDiv.innerHTML = `
-        <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl my-8">
-          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between rounded-t-2xl">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full shadow-2xl my-8 border border-gray-100 dark:border-gray-700">
+          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between rounded-t-2xl shadow">
             <div>
-              <h2 class="text-2xl font-bold">Productos sin Foto</h2>
-              <p class="text-amber-100 mt-1">Total encontrados: ${productsWithoutPhoto.length} — Haz clic en un producto para agregar su foto</p>
+              <h2 class="text-2xl font-bold flex items-center gap-2">
+                <span>📷</span> Productos sin Foto
+              </h2>
+              <p class="text-amber-100 text-sm mt-1">Total pendientes: ${productsWithoutPhoto.length} — Selecciona una imagen desde tu dispositivo para subirla al instante</p>
             </div>
-            <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-lg transition-all text-xl font-bold">✕</button>
+            <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-xl transition text-xl font-bold">✕</button>
           </div>
           
           <div class="p-6 space-y-4">
-            <input type="text" id="no-photo-search" placeholder="Busca por código o nombre..." 
-              class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent transition-all">
+            <input type="text" id="no-photo-search" placeholder="🔍 Buscar por código o nombre..." 
+              class="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition">
             
-            <div id="no-photo-results" class="space-y-2 max-h-[60vh] overflow-y-auto">
+            <div id="no-photo-results" class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
               ${productsWithoutPhoto.length === 0 
-                ? '<p class="text-gray-500 text-center py-8">¡Todos los productos tienen foto!</p>' 
+                ? '<div class="text-center py-12"><span class="text-4xl">🎉</span><p class="text-gray-500 dark:text-gray-400 font-semibold mt-2">¡Todos los productos tienen foto asignada!</p></div>' 
                 : productsWithoutPhoto.map(p => `
-                <div class="no-photo-item border-l-4 border-amber-500 rounded-lg overflow-hidden"
+                <div class="no-photo-item border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm bg-white dark:bg-gray-800 transition hover:shadow-md"
                   data-codigo="${(p.codigo || '').replace(/"/g,'&quot;')}" 
                   data-nombre="${(p.nombre || '').replace(/"/g,'&quot;')}" 
                   data-id="${p.id}">
-                  <div class="p-4 bg-gray-50 hover:bg-amber-50 transition cursor-pointer flex items-center justify-between no-photo-header">
+                  <div class="p-4 bg-gray-50 dark:bg-gray-750 hover:bg-amber-50/50 dark:hover:bg-gray-700 transition cursor-pointer flex items-center justify-between no-photo-header">
                     <div>
-                      <p class="font-semibold text-gray-800">${p.codigo || 'SIN CÓDIGO'}</p>
-                      <p class="text-sm text-gray-600 mt-0.5">${p.nombre || 'Sin nombre'}</p>
-                      <p class="text-xs text-amber-600 mt-1">Stock: ${p.stock || 0}</p>
+                      <p class="font-bold text-gray-900 dark:text-white">${p.codigo || 'SIN CÓDIGO'}</p>
+                      <p class="text-sm text-gray-600 dark:text-gray-300 mt-0.5">${p.nombre || 'Sin nombre'}</p>
+                      <p class="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-1">Stock disponible: ${p.stock || 0}</p>
                     </div>
-                    <span class="text-amber-500 text-xl font-bold ml-3">📷</span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 font-semibold px-2.5 py-1 rounded-lg">Subir Foto</span>
+                      <span class="text-amber-500 text-lg">➕</span>
+                    </div>
                   </div>
-                  <div class="no-photo-form hidden px-4 pb-4 bg-amber-50 border-t border-amber-200">
-                    <label class="block text-xs font-semibold text-gray-700 mt-3 mb-1">URL de la Foto:</label>
-                    <input type="url" class="photo-url-input w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="https://i.ibb.co/...">
-                    <p class="text-xs text-gray-500 mt-1">Sube tu foto en <a href="https://imgbb.com" target="_blank" class="text-blue-600 underline">imgbb.com</a></p>
-                    <div class="flex gap-2 mt-3">
-                      <button class="save-photo-btn flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg font-semibold text-sm hover:bg-amber-700 transition" data-id="${p.id}">Guardar Foto</button>
-                      <button class="cancel-photo-btn flex-1 px-3 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-300 transition">Cancelar</button>
+                  
+                  <div class="no-photo-form hidden p-4 bg-amber-50/70 dark:bg-gray-700/60 border-t border-amber-100 dark:border-gray-600 space-y-3">
+                    
+                    <!-- Subida directa de archivo -->
+                    <div class="flex flex-col gap-2">
+                      <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">Seleccionar Imagen (Galería o Archivo):</label>
+                      <div class="flex items-center gap-3">
+                        <label class="flex-1 cursor-pointer bg-white dark:bg-gray-800 border-2 border-dashed border-amber-400 hover:border-amber-600 rounded-xl p-3 text-center transition">
+                          <span class="text-xs font-semibold text-amber-700 dark:text-amber-300 flex items-center justify-center gap-2">
+                            📁 Elegir archivo de imagen...
+                          </span>
+                          <input type="file" accept="image/*" class="photo-file-input hidden" data-id="${p.id}">
+                        </label>
+                      </div>
+                      <div class="photo-preview-container hidden flex items-center gap-3 p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200">
+                        <img class="photo-preview-img w-14 h-14 object-cover rounded-lg shadow-sm" src="">
+                        <div class="flex-1 min-w-0">
+                          <p class="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate photo-file-name"></p>
+                          <p class="text-[10px] text-green-600 font-bold">✓ Lista para comprimir y subir</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Opción secundaria: URL manual -->
+                    <details class="text-xs text-gray-500 pt-1">
+                      <summary class="cursor-pointer font-medium hover:text-amber-600">O pegar URL directa</summary>
+                      <input type="url" class="photo-url-input w-full mt-2 px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg text-xs focus:ring-1 focus:ring-amber-500" placeholder="https://...">
+                    </details>
+
+                    <div class="flex gap-2 pt-2">
+                      <button class="save-photo-btn flex-1 py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-sm transition shadow-sm flex items-center justify-center gap-2" data-id="${p.id}">
+                        💾 Subir y Guardar
+                      </button>
+                      <button class="cancel-photo-btn py-2.5 px-4 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold rounded-xl text-sm hover:bg-gray-300 transition">
+                        Cancelar
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -81,8 +174,8 @@
             </div>
           </div>
           
-          <div class="p-6 border-t flex gap-3">
-            <button class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition" 
+          <div class="p-5 border-t border-gray-100 dark:border-gray-700 flex justify-end">
+            <button class="px-6 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-semibold hover:bg-gray-200 transition text-sm" 
               onclick="this.closest('.fixed').remove()">
               Cerrar
             </button>
@@ -102,65 +195,102 @@
       });
       searchInput.focus();
 
-      // Toggle inline del formulario al hacer clic en el header
+      // Manejador de cambio de archivo para previsualización
+      modalDiv.addEventListener('change', (e) => {
+        if (e.target.classList.contains('photo-file-input')) {
+          const fileInput = e.target;
+          const file = fileInput.files[0];
+          const form = fileInput.closest('.no-photo-form');
+          const previewContainer = form.querySelector('.photo-preview-container');
+          const previewImg = form.querySelector('.photo-preview-img');
+          const fileNameEl = form.querySelector('.photo-file-name');
+
+          if (file) {
+            previewImg.src = URL.createObjectURL(file);
+            fileNameEl.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
+            previewContainer.classList.remove('hidden');
+          } else {
+            previewContainer.classList.add('hidden');
+          }
+        }
+      });
+
+      // Toggle inline y acciones
       modalDiv.addEventListener('click', async (e) => {
-        // Abrir/cerrar formulario inline
         const header = e.target.closest('.no-photo-header');
         if (header) {
           const item = header.closest('.no-photo-item');
           const form = item.querySelector('.no-photo-form');
           const isOpen = !form.classList.contains('hidden');
-          // Cerrar todos los demás
           modalDiv.querySelectorAll('.no-photo-form').forEach(f => f.classList.add('hidden'));
           if (!isOpen) {
             form.classList.remove('hidden');
-            form.querySelector('.photo-url-input').focus();
           }
           return;
         }
 
-        // Cancelar
         if (e.target.classList.contains('cancel-photo-btn')) {
           e.target.closest('.no-photo-form').classList.add('hidden');
           return;
         }
 
-        // Guardar foto
-        if (e.target.classList.contains('save-photo-btn')) {
-          const btn = e.target;
+        // Guardar foto (Archivo o URL)
+        if (e.target.classList.contains('save-photo-btn') || e.target.closest('.save-photo-btn')) {
+          const btn = e.target.closest('.save-photo-btn') || e.target;
           const productId = btn.dataset.id;
           const form = btn.closest('.no-photo-form');
+          const fileInput = form.querySelector('.photo-file-input');
           const urlInput = form.querySelector('.photo-url-input');
-          const url = urlInput.value.trim();
+          const selectedFile = fileInput.files ? fileInput.files[0] : null;
+          let photoUrl = urlInput ? urlInput.value.trim() : '';
 
-          if (!url) { alert('Por favor ingresa una URL de foto válida.'); return; }
+          if (!selectedFile && !photoUrl) {
+            alert('Por favor selecciona una imagen de tu dispositivo o ingresa una URL.');
+            return;
+          }
 
-          const { supabaseClient } = getGlobalState();
-          btn.textContent = 'Guardando...';
+          const originalText = btn.innerHTML;
+          btn.innerHTML = '⏳ Subiendo y optimizando...';
           btn.disabled = true;
 
           try {
-            const { error } = await supabaseClient.from('products').update({ imagen_url: url }).eq('id', productId);
-            if (error) throw error;
+            const { supabaseClient } = getGlobalState();
+            const activeClient = supabaseClient || window.supabaseClient;
 
-            // Actualizar en memoria
-            if (window.allProducts) {
-              const idx = window.allProducts.findIndex(p => p.id === productId);
-              if (idx !== -1) window.allProducts[idx].imagen_url = url;
+            // Si seleccionó un archivo local, subirlo a Supabase Storage con compresión WebP
+            if (selectedFile) {
+              photoUrl = await uploadProductPhotoFile(selectedFile, productId);
             }
 
-            // Remover el ítem de la lista
+            // Actualizar la URL en la tabla products
+            const { error: dbErr } = await activeClient
+              .from('products')
+              .update({ imagen_url: photoUrl })
+              .eq('id', productId);
+
+            if (dbErr) throw dbErr;
+
+            // Actualizar estado en memoria
+            if (window.allProducts) {
+              const idx = window.allProducts.findIndex(p => String(p.id) === String(productId));
+              if (idx !== -1) window.allProducts[idx].imagen_url = photoUrl;
+            }
+
+            // Quitar el elemento de la lista
             form.closest('.no-photo-item').remove();
-            if (window.renderProducts) window.renderProducts();
+            if (typeof window.renderProducts === 'function') window.renderProducts();
 
             // Actualizar contador
             const remaining = modalDiv.querySelectorAll('.no-photo-item').length;
-            modalDiv.querySelector('.text-amber-100').textContent = `Total encontrados: ${remaining} — Haz clic en un producto para agregar su foto`;
+            const subtitleEl = modalDiv.querySelector('.text-amber-100');
+            if (subtitleEl) {
+              subtitleEl.textContent = `Total pendientes: ${remaining} — Selecciona una imagen desde tu dispositivo para subirla al instante`;
+            }
 
           } catch (err) {
-            console.error('[NO-PHOTO] Error guardando:', err);
-            alert('Error al guardar: ' + err.message);
-            btn.textContent = 'Guardar Foto';
+            console.error('[NO-PHOTO] Error subiendo foto:', err);
+            alert('Error al guardar foto: ' + err.message);
+            btn.innerHTML = originalText;
             btn.disabled = false;
           }
         }
@@ -844,32 +974,58 @@
     }
   };
 
-  // Función auxiliar para convertir URL de imagen a base64 usando canvas
+  // Función auxiliar optimizada para convertir URL de imagen a base64 con timeout de seguridad
   const imageUrlToBase64 = (url) => {
     return new Promise((resolve) => {
+      if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:image/svg")) {
+        return resolve(null);
+      }
+      
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        // OPTIMIZACIÓN: Redimensionar para evitar error "Invalid string length" en PDFs grandes
-        const MAX_DIM = 200; // Suficiente para miniaturas de tabla (25mm)
-        let width = img.width;
-        let height = img.height;
-        if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
-        else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+      
+      const TIMEOUT = 10000; // 10 segundos de timeout para no bloquear el PDF
+      const timeoutId = setTimeout(() => {
+        console.warn('[PDF] ⏱️ Timeout cargando imagen:', url);
+        resolve(null);
+      }, TIMEOUT);
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        // Calidad reducida para optimizar tamaño del PDF
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      img.onload = () => {
+        clearTimeout(timeoutId);
+        try {
+          const canvas = document.createElement('canvas');
+          // Redimensionar para optimizar tamaño y memoria del PDF
+          const MAX_DIM = 200; // Suficiente para miniaturas de tabla (25mm)
+          let width = img.width;
+          let height = img.height;
+          if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
+          else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+
+          canvas.width = Math.max(1, Math.round(width));
+          canvas.height = Math.max(1, Math.round(height));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          // Calidad 0.6 para mantener el PDF ligero
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          // Limpiar canvas de memoria
+          canvas.width = 0;
+          canvas.height = 0;
+          resolve(dataUrl);
+        } catch (canvasErr) {
+          console.warn('[PDF] Error en canvas:', canvasErr);
+          resolve(null);
+        }
       };
+      
       img.onerror = () => {
+        clearTimeout(timeoutId);
         console.warn('[PDF] No se pudo cargar imagen:', url);
-        resolve(null); // Retornar null si falla
+        resolve(null);
       };
-      img.src = url;
+      
+      // Usar URL optimizada
+      const optimizedUrl = typeof window.optimizeImageUrl === 'function' ? window.optimizeImageUrl(url, { width: 300, quality: 60 }) : url;
+      img.src = optimizedUrl;
     });
   };
 
@@ -925,19 +1081,34 @@
         return;
       }
 
-      // --- 2. Cargar Recursos y Paleta de Colores ---
+      // --- 2. Cargar Recursos en Lotes (Batches) para máxima velocidad y evitar congelamiento ---
       const assets = {}; // Almacenará imágenes en base64
-
       const totalResources = filtered.length;
       updateProgress(0, totalResources, 'Cargando recursos...');
 
-      let imagesLoaded = 0;
-      for (const product of filtered) {
-        if (product.imagen_url) {
-          assets[product.id] = await imageUrlToBase64(product.imagen_url);
-        }
-        imagesLoaded++;
-        updateProgress(imagesLoaded, totalResources, `Cargando imagen ${imagesLoaded} de ${filtered.length}...`);
+      const BATCH_SIZE = 8;
+      for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
+        const batch = filtered.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (product) => {
+            if (product.imagen_url) {
+              const base64 = await imageUrlToBase64(product.imagen_url);
+              return { id: product.id, base64 };
+            }
+            return { id: product.id, base64: null };
+          })
+        );
+
+        batchResults.forEach((res) => {
+          if (res.status === 'fulfilled' && res.value && res.value.base64) {
+            assets[res.value.id] = res.value.base64;
+          }
+        });
+
+        const currentLoaded = Math.min(i + BATCH_SIZE, totalResources);
+        updateProgress(currentLoaded, totalResources, `Cargando imágenes: ${currentLoaded} de ${totalResources}...`);
+        // Pequeña pausa para no congelar la interfaz
+        await new Promise((r) => setTimeout(r, 20));
       }
 
       updateProgress(totalResources, totalResources, 'Generando documento...');

@@ -2,10 +2,16 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v6"
+const CACHE_VERSION = "v9"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
+
+// Clave anon del Supabase Viejo (Plan Pro) - para autenticar peticiones de imágenes
+const SUPABASE_VIEJO_URL = "tuqwzrsgczhgmfnfmryw.supabase.co"
+const SUPABASE_VIEJO_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXd6cnNnY3poZ21mbmZtcnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTc4NTgsImV4cCI6MjA5NTY5Mzg1OH0.-mMR7gaq_TA_PvuZKSP4o_N2sCVaP0N7ihV2Bs94na0"
+const SUPABASE_OLD_URL = "gvaitosnfotnkrpjojqn.supabase.co"
+const SUPABASE_OLD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YWl0b3NuZm90bmtycGpvanFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MjA2NzQsImV4cCI6MjEwMjE5NjY3NH0.QKToCRnPi4GqCOjas55Ihp64hHVjdFScpyZpfJmltrs"
 
 const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="100%" height="100%" fill="#f1f5f9"/><path d="M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z" fill="#cbd5e1"/></svg>`
 
@@ -24,7 +30,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v6 instalándose...")
+  console.log("[SW] ✅ Service Worker v7 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -47,7 +53,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v6 activado")
+  console.log("[SW] 🚀 Service Worker v8 activado")
   event.waitUntil(
     caches
       .keys()
@@ -76,11 +82,9 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES (Supabase Storage, ibb.co, o cualquier imagen de producto) ──
-  // Estrategia: Cache First (Ahorra hasta 99% de Supabase Egress)
+  // ── 1. IMÁGENES (ibb.co y Supabase Storage) ─────────────────
+  // Estrategia: Cache First
   const isImageRequest =
-    event.request.destination === "image" ||
-    url.pathname.match(/\.(jpg|jpeg|png|webp|gif|svg|avif)($|\?)/i) ||
     url.hostname.includes("ibb.co") ||
     url.hostname.includes("i.ibb.co") ||
     ((url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) && url.pathname.includes("/storage/"))
@@ -94,7 +98,7 @@ self.addEventListener("fetch", (event) => {
           return cachedResponse
         }
 
-        // Si la URL tiene parámetros de timestamp o query, intentar match por URL limpia
+        // Si la URL tiene parámetros, intentar match por URL limpia
         const cleanUrl = url.origin + url.pathname
         const cleanMatch = await cache.match(cleanUrl)
         if (cleanMatch) {
@@ -103,19 +107,34 @@ self.addEventListener("fetch", (event) => {
 
         // 2. Si no está en caché, descargar de la red y guardar copia
         try {
-          const networkResponse = await fetch(event.request)
-          // Aceptar status 200 y respuestas opacas (cross-origin / no-cors)
+          // Para URLs de Supabase Storage, añadir cabeceras de autenticación
+          let fetchRequest = event.request
+          if (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) {
+            const anonKey = url.hostname.includes(SUPABASE_VIEJO_URL)
+              ? SUPABASE_VIEJO_ANON_KEY
+              : SUPABASE_OLD_ANON_KEY
+            fetchRequest = new Request(event.request.url, {
+              method: "GET",
+              headers: {
+                "apikey": anonKey,
+                "Authorization": `Bearer ${anonKey}`,
+              },
+              mode: "cors",
+              credentials: "omit",
+            })
+          }
+
+          const networkResponse = await fetch(fetchRequest)
           if (networkResponse && (networkResponse.status === 200 || networkResponse.type === "opaque")) {
+            // Guardar en caché tanto la petición original como la URL limpia para CERO consumo redundante
             cache.put(event.request, networkResponse.clone()).catch(() => {})
+            const cleanUrl = url.origin + url.pathname
+            cache.put(cleanUrl, networkResponse.clone()).catch(() => {})
           }
           return networkResponse
         } catch (fetchErr) {
-          console.warn("[SW] ⚠️ Sin conexión para imagen:", url.pathname)
-          // Fallback a SVG por defecto sin peticiones de red fallidas
-          return new Response(FALLBACK_SVG, {
-            status: 200,
-            headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" }
-          })
+          console.warn("[SW] ⚠️ Sin conexión para imagen:", url.href)
+          return new Response("", { status: 503, statusText: "Offline Image Unavailable" })
         }
       })
     )
@@ -222,7 +241,27 @@ self.addEventListener("message", (event) => {
       cache.match(imageUrl).then((cached) => {
         if (cached) return
 
-        fetch(imageUrl)
+        // Añadir autenticación si es imagen de Supabase Storage
+        let fetchRequest = imageUrl
+        try {
+          const parsedUrl = new URL(imageUrl)
+          if (parsedUrl.hostname.includes("supabase.co") || parsedUrl.hostname.includes("supabase.io")) {
+            const anonKey = parsedUrl.hostname.includes(SUPABASE_VIEJO_URL)
+              ? SUPABASE_VIEJO_ANON_KEY
+              : SUPABASE_OLD_ANON_KEY
+            fetchRequest = new Request(imageUrl, {
+              method: "GET",
+              headers: {
+                "apikey": anonKey,
+                "Authorization": `Bearer ${anonKey}`,
+              },
+              mode: "cors",
+              credentials: "omit",
+            })
+          }
+        } catch (_) {}
+
+        fetch(fetchRequest)
           .then((response) => {
             if (response && (response.status === 200 || response.type === "opaque")) {
               cache.put(imageUrl, response.clone()).catch(() => {})

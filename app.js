@@ -42,7 +42,8 @@ let isLoadingMore = false
 let imageObserver = null
 let serviceWorkerRegistration = null
 
-const IMAGE_CACHE_NAME = "sonimax-images-v6"
+const CURRENT_APP_VERSION = "1.0.4"
+const IMAGE_CACHE_NAME = "sonimax-images-v9"
 const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
 
 async function safeShowNotification(title, options = {}) {
@@ -73,6 +74,7 @@ async function safeShowNotification(title, options = {}) {
 }
 
 const IMAGE_LOAD_STATE_KEY = "sonimax_image_load_state"
+const IMAGE_CACHE_VERSION_KEY = "sonimax_image_cache_version" // Para detectar cambios de versión
 const PRODUCTS_HASH_KEY = "sonimax_products_hash"
 const FAVORITES_KEY = "sonimax_favorites" // [NUEVO]
 const NEW_PRODUCTS_KEY = "sonimax_new_products"
@@ -83,16 +85,112 @@ const STOCK_VISIBILITY_CONFIG_KEY = "sonimax_stock_visibility_config"
 const MAX_RETRY_ATTEMPTS = 3
 const RETRY_DELAY = 500 // 0.5 segundos entre reintentos
 
+
+
+
 let banners = []
 let currentBannerIndex = 0
 let bannerAutoPlayInterval = null
 
+class NormalizedUrlSet {
+  constructor(iterable) {
+    this._set = new Set()
+    if (iterable) {
+      for (const item of iterable) {
+        this.add(item)
+      }
+    }
+  }
+  _norm(url) {
+    if (!url || typeof url !== "string") return ""
+    return url.split("?")[0].trim().toLowerCase()
+  }
+  add(url) {
+    const norm = this._norm(url)
+    if (norm) this._set.add(norm)
+    return this
+  }
+  has(url) {
+    if (!url || typeof url !== "string") return false
+    const norm = this._norm(url)
+    return this._set.has(norm) || this._set.has(url)
+  }
+  delete(url) {
+    const norm = this._norm(url)
+    const d1 = this._set.delete(norm)
+    const d2 = this._set.delete(url)
+    return d1 || d2
+  }
+  clear() {
+    this._set.clear()
+  }
+  get size() {
+    return this._set.size
+  }
+  [Symbol.iterator]() {
+    return this._set[Symbol.iterator]()
+  }
+  values() {
+    return this._set.values()
+  }
+}
+
+class NormalizedUrlMap {
+  constructor(entries) {
+    this._map = new Map()
+    if (entries) {
+      for (const item of entries) {
+        if (Array.isArray(item) && item.length >= 2) {
+          this.set(item[0], item[1])
+        }
+      }
+    }
+  }
+  _norm(url) {
+    if (!url || typeof url !== "string") return ""
+    return url.split("?")[0].trim().toLowerCase()
+  }
+  set(url, val) {
+    const norm = this._norm(url)
+    if (norm) this._map.set(norm, val)
+    return this
+  }
+  get(url) {
+    if (!url || typeof url !== "string") return undefined
+    const norm = this._norm(url)
+    return this._map.get(norm) !== undefined ? this._map.get(norm) : this._map.get(url)
+  }
+  has(url) {
+    if (!url || typeof url !== "string") return false
+    const norm = this._norm(url)
+    return this._map.has(norm) || this._map.has(url)
+  }
+  delete(url) {
+    const norm = this._norm(url)
+    const d1 = this._map.delete(norm)
+    const d2 = this._map.delete(url)
+    return d1 || d2
+  }
+  clear() {
+    this._map.clear()
+  }
+  get size() {
+    return this._map.size
+  }
+  entries() {
+    return this._map.entries()
+  }
+  [Symbol.iterator]() {
+    return this._map[Symbol.iterator]()
+  }
+}
+
 const imageLoadState = {
-  loadedImages: new Set(),
-  failedImages: new Map(), // url -> attemptCount
+  loadedImages: new NormalizedUrlSet(),
+  failedImages: new NormalizedUrlMap(), // url -> attemptCount
   inProgress: false,
   lastUpdate: null,
-  isPaused: false,
+  isPaused: true, // Pausado por defecto para CERO consumo innecesario de Egress. Solo se activa si el usuario pulsa "Descargar todo"
   priorityQueue: [],
   backgroundQueue: [],
   currentAbortController: null,
@@ -400,7 +498,8 @@ async function getBestSellingProducts(limit = 20) {
 // Function to fetch all products
 async function fetchAllProducts() {
   try {
-    // FIX: Implementar paginación para cargar TODOS los productos (evitar límite de 1000)
+    // Seleccionar solo las columnas necesarias para reducir egress de Supabase
+    // (omitimos 'descripcion' que es redundante con 'nombre' y pesa mucho en JSON)
     let allData = [];
     let start = 0;
     const batchSize = 1000;
@@ -409,7 +508,7 @@ async function fetchAllProducts() {
     while (hasMore) {
       const { data, error } = await window.supabaseClient
         .from("products")
-        .select("*")
+        .select("id, codigo, nombre, departamento, precio_cliente, precio_mayor, precio_gmayor, stock, imagen_url, is_new, created_at")
         .range(start, start + batchSize - 1);
 
       if (error) {
@@ -450,13 +549,34 @@ function cleanupSalesData() {
 // GESTIÓN DE ESTADO DE CARGA DE IMÁGENES
 // ============================================
 
+let saveStateDebounceTimer = null
+function queueSaveImageLoadState() {
+  if (saveStateDebounceTimer) return
+  saveStateDebounceTimer = setTimeout(() => {
+    saveStateDebounceTimer = null
+    saveImageLoadState()
+  }, 3000) // Guarda a disco como máximo una vez cada 3 segundos
+}
+
 function loadImageLoadState() {
   try {
+    // Si la versión del caché cambió (SW subió de versión y borró el caché),
+    // limpiar el estado guardado — ya no es válido porque el caché fue vaciado.
+    const savedCacheVersion = localStorage.getItem(IMAGE_CACHE_VERSION_KEY)
+    if (savedCacheVersion !== IMAGE_CACHE_NAME) {
+      console.log(`[IMG-STATE] ♻️ Versión de caché cambió (${savedCacheVersion} → ${IMAGE_CACHE_NAME}), limpiando estado...`)
+      localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
+      localStorage.setItem(IMAGE_CACHE_VERSION_KEY, IMAGE_CACHE_NAME)
+      imageLoadState.loadedImages.clear()
+      imageLoadState.failedImages.clear()
+      return
+    }
+
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
-      const parsed = JSON.parse(saved) // Corregir JSON.JSON -> JSON.parse
-      imageLoadState.loadedImages = new Set(parsed.loadedImages || [])
-      imageLoadState.failedImages = new Map(parsed.failedImages || [])
+      const parsed = JSON.parse(saved)
+      imageLoadState.loadedImages = new NormalizedUrlSet(parsed.loadedImages || [])
+      imageLoadState.failedImages = new NormalizedUrlMap(parsed.failedImages || [])
       imageLoadState.lastUpdate = parsed.lastUpdate
       console.log(
         `[IMG-STATE] Estado cargado: ${imageLoadState.loadedImages.size} imágenes exitosas, ${imageLoadState.failedImages.size} fallidas`,
@@ -468,15 +588,54 @@ function loadImageLoadState() {
 }
 
 function saveImageLoadState() {
+  if (saveStateDebounceTimer) {
+    clearTimeout(saveStateDebounceTimer)
+    saveStateDebounceTimer = null
+  }
   try {
+    // Almacenamiento normalizado: cada URL ocupa solo ~60 bytes en vez de 300 bytes
+    // 7,500 productos ocupan menos de 500 KB en total (muy por debajo del límite de 5MB)
     const toSave = {
       loadedImages: Array.from(imageLoadState.loadedImages),
-      failedImages: Array.from(imageLoadState.failedImages),
+      failedImages: Array.from(imageLoadState.failedImages.entries()),
       lastUpdate: Date.now(),
     }
     localStorage.setItem(IMAGE_LOAD_STATE_KEY, JSON.stringify(toSave))
   } catch (error) {
-    console.error("[IMG-STATE] Error guardando estado:", error)
+    console.warn("[IMG-STATE] Error guardando estado completo, intentando fallback:", error)
+    try {
+      const toSave = {
+        loadedImages: Array.from(imageLoadState.loadedImages).slice(-4000),
+        failedImages: [],
+        lastUpdate: Date.now(),
+      }
+      localStorage.setItem(IMAGE_LOAD_STATE_KEY, JSON.stringify(toSave))
+    } catch (_) {
+      console.warn("[IMG-STATE] localStorage lleno, no se pudo guardar estado")
+    }
+  }
+}
+
+// Sincroniza loadedImages desde el Cache API real al iniciar.
+// Esto evita re-descargar imágenes que ya están en caché aunque el
+// estado en localStorage esté desincronizado.
+async function syncLoadedImagesFromCache() {
+  if (!("caches" in window)) return
+  try {
+    const cache = await caches.open(IMAGE_CACHE_NAME)
+    const keys = await cache.keys()
+    let newCount = 0
+    for (const req of keys) {
+      const url = req.url
+      if (!imageLoadState.loadedImages.has(url)) {
+        imageLoadState.loadedImages.add(url)
+        newCount++
+      }
+    }
+    console.log(`[IMG-STATE] 🔄 Caché real: ${keys.length} imágenes. ${newCount} nuevas reconocidas. Total en memoria: ${imageLoadState.loadedImages.size}`)
+    if (newCount > 0) saveImageLoadState()
+  } catch (err) {
+    console.warn("[IMG-STATE] Error sincronizando desde caché:", err)
   }
 }
 
@@ -695,6 +854,36 @@ if (typeof window !== "undefined") {
     },
     { passive: true },
   )
+
+  // ── Reanudar precarga cuando la app vuelve al primer plano ───────────────
+  // Cubre: minimizar/maximizar en Android, cambiar de app, bloquear pantalla
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      console.log("[IMG-BG] 📲 App en primer plano — reanudando precarga")
+      setTimeout(() => ensureContinuousPreload(), 600)
+    }
+  })
+
+  // ── Evento nativo de Capacitor (más fiable en Android) ───────────────────
+  document.addEventListener("resume", () => {
+    console.log("[IMG-BG] 📲 Capacitor resume — reanudando precarga")
+    setTimeout(() => ensureContinuousPreload(), 600)
+  })
+
+  // ── Keep-alive para segundo plano: reanudar si quedan imágenes pendientes ─
+  // Si la app está en segundo plano o el timer anterior expiró, este intervalo
+  // verifica si faltan imágenes y despierta la cola automáticamente sin quedarse pegado
+  setInterval(() => {
+    if (imageLoadState.isPaused) return
+    const stats = getDownloadStats()
+    if (stats.pending > 0 && !imageLoadState.isProcessingQueue) {
+      console.log(`[IMG-BG] 💓 Keep-alive despertando precarga: ${stats.pending} pendientes`)
+      if (imageLoadState.backgroundQueue.length === 0) {
+        refillBackgroundQueue()
+      }
+      processBackgroundQueue()
+    }
+  }, 8000)
 }
 
 async function loadPriorityImages(urls) {
@@ -716,7 +905,7 @@ async function loadPriorityImages(urls) {
         }
 
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 8000)
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
 
         const response = await fetch(url, {
           cache: "force-cache",
@@ -730,6 +919,18 @@ async function loadPriorityImages(urls) {
           await cache.put(url, response.clone()).catch(() => {})
           imageLoadState.loadedImages.add(url)
           imageLoadState.failedImages.delete(url)
+
+          // Actualizar inmediatamente imagen en pantalla si está visible
+          try {
+            const allImgs = document.querySelectorAll("img.product-image")
+            allImgs.forEach((img) => {
+              if (img.dataset.src === url && img.src !== url) {
+                img.src = url
+                img.classList.remove("image-loading")
+                img.classList.add("image-loaded")
+              }
+            })
+          } catch (_) {}
         }
       } catch (error) {
         const attemptCount = (imageLoadState.failedImages.get(url) || 0) + 1
@@ -738,7 +939,7 @@ async function loadPriorityImages(urls) {
     })
 
     await Promise.allSettled(priorityPromises)
-    saveImageLoadState()
+    queueSaveImageLoadState()
   } catch (err) {
     console.warn("[IMG-PRIORITY] Error cargando imágenes prioritarias:", err)
   }
@@ -761,16 +962,26 @@ async function processBackgroundQueue() {
       const refilled = await refillBackgroundQueue()
       if (!refilled) {
         updateSidebarDownloadProgress()
+        saveImageLoadState()
         imageLoadState.isProcessingQueue = false
-        // Chequear periódicamente cada 45 segundos
-        imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 45000)
+        // Reintentar o verificar cada 10 segundos (no 45s para no dormirse en segundo plano)
+        imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 10000)
         return
       }
     }
 
     const cache = await caches.open(IMAGE_CACHE_NAME)
-    // Concurrencia suave de 2 en móvil para no saturar ancho de banda ni bloquear Supabase
-    const CONCURRENCY = 2
+    
+    // Concurrencia adaptativa óptima para evitar saturar el pool de sockets de Android WebView (máx 6 por host)
+    // WiFi (2.4GHz / 5GHz) = 8 simultáneas con multiplexing HTTP/2
+    // Celular = según calidad de señal
+    const connType = navigator.connection?.type || ""
+    const effectiveType = navigator.connection?.effectiveType || ""
+    const isWifi = connType === "wifi" || connType === "ethernet"
+    const is2G = !isWifi && effectiveType.includes("2g")
+    const is3G = !isWifi && effectiveType.includes("3g")
+    const CONCURRENCY = isWifi ? 8 : is2G ? 2 : is3G ? 4 : 6
+    const BATCH_DELAY = is2G ? 40 : is3G ? 15 : 0
 
     while (imageLoadState.backgroundQueue.length > 0 && !imageLoadState.isPaused) {
       const batch = imageLoadState.backgroundQueue.splice(0, CONCURRENCY)
@@ -787,7 +998,7 @@ async function processBackgroundQueue() {
           }
 
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 8000)
+          const timeoutId = setTimeout(() => controller.abort(), 15000)
 
           const response = await fetch(url, {
             cache: "force-cache",
@@ -809,15 +1020,16 @@ async function processBackgroundQueue() {
 
       await Promise.allSettled(batchPromises)
       updateSidebarDownloadProgress()
-      saveImageLoadState()
-      await new Promise((resolve) => setTimeout(resolve, 60))
+      queueSaveImageLoadState() // Guardado con debounce para no bloquear el hilo de JS
+      await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY))
     }
   } catch (err) {
     console.warn("[IMG-LOAD] Error procesando cola de fondo:", err)
   } finally {
     imageLoadState.isProcessingQueue = false
+    queueSaveImageLoadState()
     if (!imageLoadState.isPaused && imageLoadState.backgroundQueue.length > 0) {
-      imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 500)
+      imageLoadState.backgroundQueueTimer = setTimeout(() => processBackgroundQueue(), 300)
     }
   }
 }
@@ -832,9 +1044,22 @@ async function refillBackgroundQueue() {
     )
   )
 
-  const pending = allImageUrls.filter(
-    (url) => !imageLoadState.loadedImages.has(url) && (imageLoadState.failedImages.get(url) || 0) < MAX_RETRY_ATTEMPTS
-  )
+  let pending = allImageUrls.filter((url) => {
+    const alreadyLoaded = imageLoadState.loadedImages.has(url)
+    const tooManyFails = (imageLoadState.failedImages.get(url) || 0) >= MAX_RETRY_ATTEMPTS
+    return !alreadyLoaded && !tooManyFails
+  })
+
+  // Si no hay pendientes limpias pero aún hay imágenes sin descargar (fallaron temporalmente),
+  // reiniciar el contador de fallos para darles reintento y que la app no quede trabada
+  if (pending.length === 0 && imageLoadState.failedImages.size > 0) {
+    const notLoaded = allImageUrls.filter((url) => !imageLoadState.loadedImages.has(url))
+    if (notLoaded.length > 0) {
+      console.log(`[IMG-BG] 🔄 Reintentando ${notLoaded.length} imágenes tras pausa o fallo temporal...`)
+      imageLoadState.failedImages.clear()
+      pending = notLoaded
+    }
+  }
 
   if (pending.length > 0) {
     console.log(`[IMG-PRIORITY] 🔄 Cola repoblada con ${pending.length} imágenes pendientes`)
@@ -850,7 +1075,11 @@ async function preloadAllImages() {
     return
   }
 
+  // 1. Cargar estado guardado (con detección de versión de caché)
   loadImageLoadState()
+
+  // 2. Pre-calentar loadedImages desde el Cache API real
+  await syncLoadedImagesFromCache()
 
   const { changed, newUrls } = checkProductsChanged(allProducts)
 
@@ -866,16 +1095,18 @@ async function preloadAllImages() {
   let urlsToLoad = []
 
   if (changed && newUrls.length > 0) {
-    urlsToLoad = newUrls
-    console.log(`[IMG-LOAD] 🔄 Cargando ${urlsToLoad.length} imágenes nuevas`)
+    urlsToLoad = newUrls.filter((url) => !imageLoadState.loadedImages.has(url))
+    console.log(`[IMG-LOAD] 🔄 ${urlsToLoad.length} imágenes nuevas (de ${newUrls.length} detectadas)`)
   } else {
-    urlsToLoad = allImageUrls.filter(
-      (url) => !imageLoadState.loadedImages.has(url) && (imageLoadState.failedImages.get(url) || 0) < MAX_RETRY_ATTEMPTS
-    )
+    urlsToLoad = allImageUrls.filter((url) => {
+      const alreadyLoaded = imageLoadState.loadedImages.has(url)
+      const tooManyFails = (imageLoadState.failedImages.get(url) || 0) >= MAX_RETRY_ATTEMPTS
+      return !alreadyLoaded && !tooManyFails
+    })
   }
 
   imageLoadState.backgroundQueue = Array.from(new Set([...imageLoadState.backgroundQueue, ...urlsToLoad]))
-  console.log(`[IMG-LOAD] 📋 ${imageLoadState.backgroundQueue.length} imágenes listas en cola`)
+  console.log(`[IMG-LOAD] 📋 ${imageLoadState.backgroundQueue.length} imágenes pendientes en cola (de ${allImageUrls.length} totales)`)
 
   if (!imageLoadState.isPaused) {
     processBackgroundQueue()
@@ -941,7 +1172,7 @@ async function processBatch(cache, batch, batchNum, totalBatches) {
       }
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
 
       const response = await fetch(url, {
         cache: "force-cache",
@@ -996,7 +1227,7 @@ async function retryFailedImages(cache) {
   let retrySuccess = 0
   let retryFailed = 0
 
-  const RETRY_CONCURRENT = 10
+  const RETRY_CONCURRENT = 5
   for (let i = 0; i < failedUrls.length; i += RETRY_CONCURRENT) {
     const batch = failedUrls.slice(i, i + RETRY_CONCURRENT)
 
@@ -1009,18 +1240,17 @@ async function retryFailedImages(cache) {
 
       try {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5000)
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
 
         const response = await fetch(url, {
-          mode: "no-cors",
           cache: "force-cache",
           signal: controller.signal,
         })
 
         clearTimeout(timeoutId)
 
-        if (response) {
-          await cache.put(url, response)
+        if (response && (response.ok || response.status === 200 || response.type === "opaque")) {
+          await cache.put(url, response.clone()).catch(() => {})
           imageLoadState.loadedImages.add(url)
           imageLoadState.failedImages.delete(url)
           retrySuccess++
@@ -1082,21 +1312,78 @@ async function retryFailedImages(cache) {
   }
 }
 
-// ============================================
-// OPTIMIZACIÓN DE IMÁGENES
-// ============================================
-
-function optimizeImageUrl(url) {
+function optimizeImageUrl(url, options = {}) {
   if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:")) {
     return DEFAULT_PRODUCT_PLACEHOLDER
   }
 
-  if (url.includes("ibb.co")) {
-    const separator = url.includes("?") ? "&" : "?"
-    return `${url}${separator}w=400&quality=70`
-  }
+  try {
+    // 1. Supabase Storage — usar /object/authenticated/ con apikey en query param.
+    //    El bucket "product-images" es privado (RLS), por lo que las URLs públicas
+    //    devuelven 404. Supabase acepta apikey como query param igual que como header.
+    if (url.includes("supabase.co") || url.includes("supabase.io")) {
+      // Normalizar: quitar params viejos y usar endpoint autenticado
+      let cleanUrl = url
+        .replace("/storage/v1/render/image/public/", "/storage/v1/object/authenticated/")
+        .replace("/storage/v1/object/public/", "/storage/v1/object/authenticated/")
+        .split("?")[0]
 
-  return url
+      // Obtener la clave anon del proyecto correspondiente
+      let anonKey = null
+      if (cleanUrl.includes("tuqwzrsgczhgmfnfmryw")) {
+        anonKey = (typeof SUPABASE_URL !== "undefined" && SUPABASE_URL.includes("tuqwzrsgczhgmfnfmryw"))
+          ? SUPABASE_ANON_KEY
+          : (typeof SUPABASE_OLD_ANON_KEY !== "undefined" && SUPABASE_OLD_URL.includes("tuqwzrsgczhgmfnfmryw") ? SUPABASE_OLD_ANON_KEY : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXd6cnNnY3poZ21mbmZtcnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTc4NTgsImV4cCI6MjA5NTY5Mzg1OH0.-mMR7gaq_TA_PvuZKSP4o_N2sCVaP0N7ihV2Bs94na0")
+      } else if (cleanUrl.includes("gvaitosnfotnkrpjojqn")) {
+        anonKey = (typeof SUPABASE_URL !== "undefined" && SUPABASE_URL.includes("gvaitosnfotnkrpjojqn"))
+          ? SUPABASE_ANON_KEY
+          : (typeof SUPABASE_OLD_ANON_KEY !== "undefined" && SUPABASE_OLD_URL.includes("gvaitosnfotnkrpjojqn") ? SUPABASE_OLD_ANON_KEY : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YWl0b3NuZm90bmtycGpvanFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MjA2NzQsImV4cCI6MjEwMjE5NjY3NH0.QKToCRnPi4GqCOjas55Ihp64hHVjdFScpyZpfJmltrs")
+      } else {
+        anonKey = typeof SUPABASE_ANON_KEY !== "undefined" ? SUPABASE_ANON_KEY : null
+      }
+
+      if (anonKey) {
+        return `${cleanUrl}?apikey=${anonKey}`
+      }
+      return cleanUrl
+    }
+
+    // 2. ImgBB — devolver URL limpia (no soporta parámetros de resize)
+    if (url.includes("ibb.co") || url.includes("i.ibb.co")) {
+      return url.split("?")[0]
+    }
+
+    return url
+  } catch (err) {
+    return url
+  }
+}
+
+// Limpieza de imágenes huérfanas en Cache API para ahorrar espacio en disco
+async function pruneImageCache() {
+  if (!("caches" in window) || !allProducts || allProducts.length === 0) return
+  try {
+    const cache = await caches.open(IMAGE_CACHE_NAME)
+    const activeUrls = new Set(
+      allProducts
+        .map((p) => optimizeImageUrl(p.imagen_url))
+        .filter((url) => url && !url.startsWith("data:") && url !== DEFAULT_PRODUCT_PLACEHOLDER)
+    )
+
+    const requests = await cache.keys()
+    let deletedCount = 0
+    for (const req of requests) {
+      if (!activeUrls.has(req.url)) {
+        await cache.delete(req)
+        deletedCount++
+      }
+    }
+    if (deletedCount > 0) {
+      console.log(`[CACHE] 🧹 Limpiadas ${deletedCount} imágenes huérfanas del caché local`)
+    }
+  } catch (err) {
+    console.warn("[CACHE] Error en pruneImageCache:", err)
+  }
 }
 
 function createImagePlaceholder(url) {
@@ -1533,7 +1820,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   ensureContinuousPreload()
 
   setInterval(() => {
-    if (document.getElementById("sidebar-menu") && !document.getElementById("sidebar-menu").classList.contains("-translate-x-full")) {
+    const sidebar = document.getElementById("sidebar-menu")
+    if (sidebar && sidebar.classList.contains("open")) {
       updateSidebarDownloadProgress()
       
       // Sincronizar texto del botón toggle con el estado real
@@ -2470,12 +2758,11 @@ async function loadProducts() {
       }
     }
 
-    // ── PASO 2: Actualizar en segundo plano si hay conexión ─────────────────
+    // ── PASO 2: Actualizar en segundo plano si hay conexión (respetando intervalo de caché) ─
     if (navigator.onLine) {
-      setTimeout(() => _refreshProductsFromNetwork(false, true), 800)
+      setTimeout(() => _refreshProductsFromNetwork(false, false), 1500)
     } else {
       console.log("📴 [OFFLINE] Sin conexión - usando datos del caché")
-      setTimeout(() => { preloadAllImages() }, 2000)
     }
 
   } else {
@@ -2554,6 +2841,15 @@ async function _loadInventoryData() {
 // ── FUNCIÓN INTERNA: Actualizar desde red (puede ser silencioso) ─────────────
 async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = false) {
   console.log(`🔄 [NET] ${isFirstLoad ? 'Carga inicial' : 'Actualización en segundo plano'} desde Supabase...`)
+
+  // Si cambió la URL de Supabase, invalidar caché para forzar carga fresca de productos
+  const lastSupabaseUrl = localStorage.getItem("sonimax_last_supabase_url")
+  if (typeof SUPABASE_URL !== "undefined" && lastSupabaseUrl !== SUPABASE_URL) {
+    localStorage.setItem("sonimax_last_supabase_url", SUPABASE_URL)
+    localStorage.removeItem("sonimax_last_network_sync")
+    localStorage.removeItem(PRODUCTS_HASH_KEY)
+    forceSync = true
+  }
 
   if (!isFirstLoad && !forceSync) {
     const lastSync = localStorage.getItem("sonimax_last_network_sync")
@@ -2660,7 +2956,6 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
       console.warn("No se pudieron guardar metadatos en caché:", e)
     }
 
-    setTimeout(() => { preloadAllImages() }, 3000)
     console.log(`✅ [NET] ${allProducts.length} productos actualizados y guardados en caché`)
 
   } catch (error) {
@@ -3004,6 +3299,13 @@ function renderProducts() {
   grid.appendChild(fragment)
 
   updateLoadMoreButton(visibleProducts)
+
+  // Carga inmediata de las imágenes de las tarjetas en pantalla (respuesta instantánea)
+  grid.querySelectorAll(".product-image").forEach((img) => {
+    if (img.dataset.src && img.dataset.src !== DEFAULT_PRODUCT_PLACEHOLDER && img.src !== img.dataset.src) {
+      img.src = img.dataset.src
+    }
+  })
 
   console.log("Productos renderizados:", productsToRender.length)
 }
@@ -4055,11 +4357,10 @@ async function generateExcelAndSendOrder(responsables, sitio) {
     console.log("Abriendo WhatsApp...")
     window.open(whatsappURL, "_blank")
 
-    await clearCart()
-
+    // El carrito se mantiene intacto para que el usuario decida cuándo vaciarlo con el botón "Vaciar Carrito"
     document.getElementById("cart-modal").classList.add("hidden")
 
-    alert(`Pedido enviado por WhatsApp y Excel descargado como: ${fileName}\nEl carrito ha sido limpiado.`)
+    alert(`✅ Pedido enviado por WhatsApp y Excel descargado como: ${fileName}\n(Los productos se mantienen en tu carrito hasta que decidas vaciarlo).`)
   } catch (error) {
     console.error("❌ Error al generar Excel:", error)
     alert("Error al generar el archivo Excel. Se enviará solo el mensaje de WhatsApp.")
@@ -4104,15 +4405,7 @@ async function sendWhatsAppOrderFallback(responsables, sitio) {
   const whatsappURL = `https://api.whatsapp.com/send?text=${encodedMessage}`
 
   window.open(whatsappURL, "_blank")
-
-  const onFocus = async () => {
-    window.removeEventListener("focus", onFocus)
-    if (confirm("Pedido enviado, ¿Desea vaciar el carrito?")) {
-      await clearCart()
-      document.getElementById("cart-modal").classList.add("hidden")
-    }
-  }
-  setTimeout(() => window.addEventListener("focus", onFocus), 500)
+  document.getElementById("cart-modal").classList.add("hidden")
 }
 
 async function sendWhatsAppOrder() {
@@ -4180,15 +4473,7 @@ async function sendWhatsAppOrder() {
 
   console.log("Abriendo WhatsApp...")
   window.open(whatsappURL, "_blank")
-
-  const onFocus = async () => {
-    window.removeEventListener("focus", onFocus)
-    if (confirm("Pedido enviado, ¿Desea vaciar el carrito?")) {
-      await clearCart()
-      document.getElementById("cart-modal").classList.add("hidden")
-    }
-  }
-  setTimeout(() => window.addEventListener("focus", onFocus), 500)
+  document.getElementById("cart-modal").classList.add("hidden")
 }
 
 function normalizeText(text) {
@@ -4281,12 +4566,26 @@ function handleGlobalSearch(e) {
       console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
 
       const searchResultUrls = filteredProducts
-        .slice(0, 15)
         .map((p) => optimizeImageUrl(p.imagen_url))
-        .filter((url) => url && url !== "/images/ProductImages.jpg")
+        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
 
       if (searchResultUrls.length > 0) {
-        loadPriorityImages(searchResultUrls)
+        // Inyectar URLs de búsqueda AL FRENTE de la cola de fondo
+        const notCached = searchResultUrls.filter(url => !imageLoadState.loadedImages.has(url))
+        if (notCached.length > 0) {
+          // 1. Descarga INMEDIATA y concurrente de los primeros 15 resultados
+          loadPriorityImages(notCached.slice(0, 15))
+
+          // 2. Priorizar el resto al frente de la cola
+          imageLoadState.backgroundQueue = [
+            ...notCached,
+            ...imageLoadState.backgroundQueue.filter(u => !notCached.includes(u))
+          ]
+          console.log(`[SEARCH-PRIORITY] 🎯 ${notCached.length} imágenes de búsqueda al frente de la cola`)
+          if (!imageLoadState.isProcessingQueue) {
+            processBackgroundQueue()
+          }
+        }
       }
 
       currentPage = 1
@@ -5998,7 +6297,7 @@ async function loadAllUsers() {
   try {
     const { data, error } = await window.supabaseClient
       .from('users')
-      .select('id, username, name, role, created_at')
+      .select('id, auth_id, username, name, email, role, created_at')
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -6219,40 +6518,94 @@ async function saveUserChanges() {
       }
     }
 
-    // 2. Actualizar datos en la tabla users
+    // 2. Actualizar datos en la tabla users (servidor principal)
     const updatePayload = { name, username, role }
     if (email) updatePayload.email = email
 
+    let updatedSuccess = false
     const { error: updateError } = await window.supabaseClient
       .from('users')
       .update(updatePayload)
       .eq('id', userId)
 
-    if (updateError) throw updateError
+    if (!updateError) {
+      updatedSuccess = true
+    } else {
+      console.warn('Fallo actualización por id en principal, intentando por username:', updateError)
+      const { error: errByUsername } = await window.supabaseClient
+        .from('users')
+        .update(updatePayload)
+        .eq('username', username)
+      if (!errByUsername) updatedSuccess = true
+    }
 
-    // 3. Cambiar contraseña si se proporcionó (usando Supabase Admin API via RPC si está disponible)
-    if (password && password.length >= 6 && authId) {
-      // Intentar cambiar contraseña (requiere permisos de admin en Supabase)
+    // Actualizar también en el servidor secundario si está disponible
+    if (window.supabaseOldClient) {
       try {
-        const { error: pwError } = await window.supabaseClient.rpc('admin_change_user_password', {
-          target_auth_id: authId,
-          new_password: password
-        })
-        if (pwError) {
-          console.warn('RPC admin_change_user_password no disponible:', pwError.message)
-          showEditUserStatus('✅ Datos actualizados. La contraseña requiere la función RPC en Supabase (ver instrucciones en la consola).', 'success')
-          console.info(
-            '📌 Para habilitar el cambio de contraseña, crea esta función en Supabase SQL Editor:\n' +
-            'CREATE OR REPLACE FUNCTION admin_change_user_password(target_auth_id UUID, new_password TEXT)\n' +
-            'RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$\n' +
-            'BEGIN\n  UPDATE auth.users SET encrypted_password = crypt(new_password, gen_salt(\'bf\')) WHERE id = target_auth_id;\n' +
-            'END;\n$$;'
-          )
-        } else {
-          showEditUserStatus('✅ Usuario y contraseña actualizados correctamente.', 'success')
+        await window.supabaseOldClient
+          .from('users')
+          .update(updatePayload)
+          .eq('username', username)
+      } catch (errSec) {
+        console.warn('No se pudo actualizar en servidor secundario (no crítico):', errSec)
+      }
+    }
+
+    // 3. Cambiar contraseña si se proporcionó
+    if (password && password.length >= 6) {
+      let pwChanged = false
+      let effectiveAuthId = authId
+
+      // Si no tenemos authId, buscarlo en users
+      if (!effectiveAuthId) {
+        try {
+          const { data: uInfo } = await window.supabaseClient
+            .from('users')
+            .select('auth_id')
+            .eq('username', username)
+            .maybeSingle()
+          if (uInfo && uInfo.auth_id) effectiveAuthId = uInfo.auth_id
+        } catch (_) {}
+      }
+
+      // Intentar cambiar contraseña en servidor principal
+      if (effectiveAuthId) {
+        try {
+          const { error: pwError } = await window.supabaseClient.rpc('admin_change_user_password', {
+            target_auth_id: effectiveAuthId,
+            new_password: password
+          })
+          if (!pwError) pwChanged = true
+          else console.warn('RPC en principal falló:', pwError.message)
+        } catch (e) {
+          console.warn('Error llamando RPC en principal:', e)
         }
-      } catch (e) {
-        showEditUserStatus('✅ Datos actualizados. No se pudo cambiar la contraseña (función RPC no disponible).', 'success')
+      }
+
+      // Intentar también en servidor secundario
+      if (window.supabaseOldClient) {
+        try {
+          const { data: oldU } = await window.supabaseOldClient
+            .from('users')
+            .select('auth_id')
+            .eq('username', username)
+            .maybeSingle()
+          if (oldU && oldU.auth_id) {
+            const { error: oldPwErr } = await window.supabaseOldClient.rpc('admin_change_user_password', {
+              target_auth_id: oldU.auth_id,
+              new_password: password
+            })
+            if (!oldPwErr) pwChanged = true
+          }
+        } catch (eSec) {
+          console.warn('Error llamando RPC en secundario:', eSec)
+        }
+      }
+
+      if (pwChanged) {
+        showEditUserStatus('✅ Usuario y contraseña actualizados correctamente.', 'success')
+      } else {
+        showEditUserStatus('✅ Datos actualizados (rol y perfil guardados).', 'success')
       }
     } else {
       showEditUserStatus('✅ Usuario actualizado correctamente.', 'success')
@@ -6376,5 +6729,138 @@ document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('edit-user-password')
     if (input) input.type = input.type === 'password' ? 'text' : 'password'
   })
+
+  // Ejecutar verificación de actualización y limpieza de caché
+  setTimeout(() => {
+    if (typeof checkAppUpdate === 'function') checkAppUpdate()
+    if (typeof pruneImageCache === 'function') pruneImageCache()
+  }, 3500)
 })
+
+// ============================================
+// SISTEMA DE ACTUALIZACIÓN AUTOMÁTICA DE APK
+// ============================================
+
+function compareSemVer(v1, v2) {
+  const p1 = (v1 || '0').replace(/[^0-9.]/g, '').split('.').map(Number)
+  const p2 = (v2 || '0').replace(/[^0-9.]/g, '').split('.').map(Number)
+  for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+    const n1 = p1[i] || 0
+    const n2 = p2[i] || 0
+    if (n1 > n2) return 1
+    if (n1 < n2) return -1
+  }
+  return 0
+}
+
+async function checkAppUpdate(isManual = false) {
+  try {
+    const activeClient = window.supabaseClient || window.supabaseOldClient
+    let updateData = null
+
+    // 1. Intentar consultar tabla app_version en Supabase
+    if (activeClient) {
+      try {
+        const { data, error } = await activeClient
+          .from('app_version')
+          .select('*')
+          .order('id', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (!error && data && data.latest_version) {
+          updateData = data
+        }
+      } catch (e) {}
+    }
+
+    // 2. Si no hay tabla, consultar archivo version.json desde el bucket de Supabase
+    if (!updateData) {
+      try {
+        const oldUrl = typeof SUPABASE_OLD_URL !== 'undefined' ? SUPABASE_OLD_URL : "https://tuqwzrsgczhgmfnfmryw.supabase.co"
+        const res = await fetch(`${oldUrl}/storage/v1/object/public/apk/version.json?t=${Date.now()}`)
+        if (res.ok) {
+          updateData = await res.json()
+        }
+      } catch (e) {}
+    }
+
+    if (!updateData || !updateData.latest_version) {
+      if (isManual) alert(`Tu aplicación está al día (Versión: v${CURRENT_APP_VERSION})`)
+      return
+    }
+
+    const hasNewerVersion = compareSemVer(updateData.latest_version, CURRENT_APP_VERSION) > 0
+    if (hasNewerVersion) {
+      showUpdateModal(updateData)
+    } else if (isManual) {
+      alert(`✅ Tienes la última versión instalada (v${CURRENT_APP_VERSION})`)
+    }
+  } catch (err) {
+    console.warn('[APP-UPDATE] Error verificando actualización:', err)
+    if (isManual) alert('No se pudo verificar la actualización.')
+  }
+}
+
+function showUpdateModal(info) {
+  // Evitar modales duplicados
+  const existing = document.getElementById('apk-update-modal')
+  if (existing) existing.remove()
+
+  const modal = document.createElement('div')
+  modal.id = 'apk-update-modal'
+  modal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in'
+
+  const notesHtml = Array.isArray(info.release_notes)
+    ? info.release_notes.map(n => `<li class="text-xs text-gray-600 dark:text-gray-300">• ${n}</li>`).join('')
+    : `<p class="text-xs text-gray-600 dark:text-gray-300">${info.release_notes || 'Mejoras de rendimiento y optimización de imágenes.'}</p>`
+
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-red-100 dark:border-gray-700 text-center transform transition-all">
+      <div class="w-16 h-16 bg-red-100 dark:bg-red-900/40 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+        </svg>
+      </div>
+      <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-1">¡Nueva Versión Disponible!</h3>
+      <p class="text-sm font-semibold text-red-600 mb-3">Versión v${info.latest_version} <span class="text-xs text-gray-400">(Actual: v${CURRENT_APP_VERSION})</span></p>
+      
+      <div class="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl mb-5 text-left max-h-36 overflow-y-auto">
+        <p class="text-xs font-bold text-gray-700 dark:text-gray-200 mb-1.5">Novedades:</p>
+        <ul class="space-y-1">
+          ${notesHtml}
+        </ul>
+      </div>
+
+      <div class="flex flex-col gap-2.5">
+        <button id="btn-download-apk" class="w-full py-3 px-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all text-sm flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+          Actualizar e Instalar Ahora
+        </button>
+        ${!info.force_update ? `
+        <button id="btn-dismiss-apk-update" class="w-full py-2 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition">
+          Recordar más tarde
+        </button>
+        ` : ''}
+      </div>
+    </div>
+  `
+
+  document.body.appendChild(modal)
+
+  document.getElementById('btn-download-apk')?.addEventListener('click', () => {
+    const apkUrl = info.apk_url || `${SUPABASE_OLD_URL}/storage/v1/object/public/apk/sonimax-movil.apk`
+    window.open(apkUrl, '_system')
+  })
+
+  document.getElementById('btn-dismiss-apk-update')?.addEventListener('click', () => {
+    modal.remove()
+  })
+}
+
+// Exponer globalmente
+window.checkAppUpdate = checkAppUpdate
+
 
