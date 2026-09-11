@@ -304,12 +304,10 @@ async function getPreviousCSVSnapshot() {
       .maybeSingle()
 
     if (error) {
-      console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
-      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
-      // Fallback a localStorage
+      // Si la tabla no existe en la BD (PGRST205 / 404), usar snapshot en localStorage
       const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
       if (saved) {
-        return JSON.parse(saved)
+        try { return JSON.parse(saved) } catch (_) { return [] }
       }
       return []
     }
@@ -2118,7 +2116,7 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    const { data, error } = await window.supabaseClient.from("users").select("id, username, name, role, can_see_stock").eq("auth_id", userId).single()
+    const { data, error } = await window.supabaseClient.from("users").select("id, auth_id, username, name, role, can_see_stock").eq("auth_id", userId).single()
 
     if (error) {
       console.error("Error obteniendo datos:", error)
@@ -2130,13 +2128,17 @@ async function loadUserData(userId) {
       throw new Error("Usuario no encontrado")
     }
 
-    currentUser = data
+    currentUser = {
+      ...data,
+      auth_id: data.auth_id || userId,
+      id: data.id || userId,
+    }
     currentUserRole = data.role || 'cliente'
     window.currentUserRole = data.role || 'cliente'
 
     // Guardar en caché local
     try {
-      localStorage.setItem("sonimax_current_user", JSON.stringify(data))
+      localStorage.setItem("sonimax_current_user", JSON.stringify(currentUser))
     } catch (e) {
       console.warn("No se pudo guardar usuario en caché local:", e)
     }
@@ -2620,12 +2622,14 @@ async function loadPriceSnapshot() {
 // [NUEVO] Cargar favoritos desde Supabase (Por Usuario)
 async function loadFavorites() {
     if (!currentUser) return;
+    const userId = currentUser.auth_id || currentUser.id;
+    if (!userId) return;
     
     try {
         const { data, error } = await window.supabaseClient
             .from('favorites')
             .select('product_id')
-            .eq('user_id', currentUser.auth_id);
+            .eq('user_id', userId);
             
         if (error) throw error;
         
@@ -3741,6 +3745,8 @@ function isFavorite(productId) {
 
 async function toggleFavorite(productId, buttonElement) {
     if (!currentUser) return;
+    const userId = currentUser.auth_id || currentUser.id;
+    if (!userId) return;
 
     const index = favorites.indexOf(productId);
     const isAdding = index === -1;
@@ -3757,10 +3763,10 @@ async function toggleFavorite(productId, buttonElement) {
     // Sincronizar con Supabase
     try {
         if (isAdding) {
-            await window.supabaseClient.from('favorites').insert({ user_id: currentUser.auth_id, product_id: productId });
+            await window.supabaseClient.from('favorites').insert({ user_id: userId, product_id: productId });
             console.log(`[FAVORITES] ❤️ Guardado en nube.`);
         } else {
-            await window.supabaseClient.from('favorites').delete().eq('user_id', currentUser.auth_id).eq('product_id', productId);
+            await window.supabaseClient.from('favorites').delete().eq('user_id', userId).eq('product_id', productId);
             console.log(`[FAVORITES] 💔 Eliminado de nube.`);
         }
     } catch (error) {
@@ -3774,13 +3780,15 @@ async function toggleFavorite(productId, buttonElement) {
 // [NUEVO] Guardar carrito en Supabase
 async function saveCartToSupabase() {
   if (!currentUser) return;
+  const userId = currentUser.auth_id || currentUser.id;
+  if (!userId) return;
 
   console.log(`[CARRITO-NUBE] ☁️ Guardando carrito en Supabase para ${currentUser.username}...`);
   try {
     const { error } = await window.supabaseClient
       .from('user_carts')
       .upsert({
-        user_id: currentUser.auth_id,
+        user_id: userId,
         cart_data: cart,
         updated_at: new Date().toISOString()
       }, {
@@ -3800,13 +3808,15 @@ async function saveCartToSupabase() {
 // [NUEVO] Cargar carrito desde Supabase
 async function loadCartFromSupabase() {
   if (!currentUser) return;
+  const userId = currentUser.auth_id || currentUser.id;
+  if (!userId) return;
 
   console.log(`[CARRITO-NUBE] ☁️ Cargando carrito desde Supabase para ${currentUser.username}...`);
   try {
     const { data, error } = await window.supabaseClient
       .from('user_carts')
       .select('cart_data')
-      .eq('user_id', currentUser.auth_id)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found, no es un error
@@ -4558,29 +4568,6 @@ function handleGlobalSearch(e) {
       }
 
       console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
-
-      const searchResultUrls = filteredProducts
-        .map((p) => optimizeImageUrl(p.imagen_url))
-        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
-
-      if (searchResultUrls.length > 0) {
-        // Inyectar URLs de búsqueda AL FRENTE de la cola de fondo
-        const notCached = searchResultUrls.filter(url => !imageLoadState.loadedImages.has(url))
-        if (notCached.length > 0) {
-          // 1. Descarga INMEDIATA y concurrente de los primeros 15 resultados
-          loadPriorityImages(notCached.slice(0, 15))
-
-          // 2. Priorizar el resto al frente de la cola
-          imageLoadState.backgroundQueue = [
-            ...notCached,
-            ...imageLoadState.backgroundQueue.filter(u => !notCached.includes(u))
-          ]
-          console.log(`[SEARCH-PRIORITY] 🎯 ${notCached.length} imágenes de búsqueda al frente de la cola`)
-          if (!imageLoadState.isProcessingQueue) {
-            processBackgroundQueue()
-          }
-        }
-      }
 
       currentPage = 1
       renderProducts()
