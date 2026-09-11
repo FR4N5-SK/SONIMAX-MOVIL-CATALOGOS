@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v9"
+const CACHE_VERSION = "v12"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -83,46 +83,13 @@ self.addEventListener("fetch", (event) => {
   if (method !== "GET") return
 
   // ── 1. IMÁGENES (ibb.co y Supabase Storage) ─────────────────
-  // Estrategia: Cache First
-  const isImageRequest =
+  // Dejar que el navegador las descargue directamente con su motor HTTP nativo
+  // para soporte total de redirecciones y carga a máxima velocidad
+  if (
     url.hostname.includes("ibb.co") ||
     url.hostname.includes("i.ibb.co") ||
     ((url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) && url.pathname.includes("/storage/"))
-
-  if (isImageRequest) {
-    event.respondWith(
-      caches.open(IMAGE_CACHE).then(async (cache) => {
-        // 1. Intentar servir desde caché local
-        const cachedResponse = await cache.match(event.request, { ignoreSearch: false })
-        if (cachedResponse) {
-          return cachedResponse
-        }
-
-        // Si la URL tiene parámetros, intentar match por URL limpia
-        const cleanUrl = url.origin + url.pathname
-        const cleanMatch = await cache.match(cleanUrl)
-        if (cleanMatch) {
-          return cleanMatch
-        }
-
-        // 2. Si no está en caché, descargar de la red y guardar copia
-        try {
-          const networkResponse = await fetch(event.request)
-          if (networkResponse && (networkResponse.status === 200 || networkResponse.type === "opaque")) {
-            // Guardar en caché tanto la petición original como la URL limpia para CERO consumo redundante
-            cache.put(event.request, networkResponse.clone()).catch(() => {})
-            if (url.search) {
-              const cleanUrl = url.origin + url.pathname
-              cache.put(cleanUrl, networkResponse.clone()).catch(() => {})
-            }
-          }
-          return networkResponse
-        } catch (fetchErr) {
-          console.warn("[SW] ⚠️ Sin conexión para imagen:", url.href)
-          return new Response("", { status: 503, statusText: "Offline Image Unavailable" })
-        }
-      })
-    )
+  ) {
     return
   }
 

@@ -43,7 +43,7 @@ let imageObserver = null
 let serviceWorkerRegistration = null
 
 const CURRENT_APP_VERSION = "1.0.4"
-const IMAGE_CACHE_NAME = "sonimax-images-v9"
+const IMAGE_CACHE_NAME = "sonimax-images-v12"
 const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
 
 async function safeShowNotification(title, options = {}) {
@@ -3525,11 +3525,11 @@ function createProductCard(product) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.5l1.318-1.182a4.5 4.5 0 116.364 6.364L12 20.273l-7.682-7.682a4.5 4.5 0 010-6.364z"></path>
         </svg>
       </button>
-      <img src="${placeholderUrl}"
-           data-src="${optimizedUrl}"
+      <img src="${optimizedUrl}"
            alt="${product.nombre}"
-           class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
-           loading="lazy">
+           class="product-image cursor-pointer hover:opacity-90 transition-opacity"
+           loading="lazy"
+           decoding="async">
       <!-- [MODIFICADO] Badges movidos aquí para correcta superposición y visibilidad -->
       ${priceDropBadge}
       ${newBadge}
@@ -3547,13 +3547,13 @@ function createProductCard(product) {
   `
 
   const productImage = card.querySelector(".product-image")
-  if (imageObserver && productImage) {
-    imageObserver.observe(productImage)
-  }
 
-  productImage.addEventListener("click", (e) => {
-    e.stopPropagation()
-    showImageModal(imageUrl, product.nombre)
+  productImage.addEventListener("load", () => {
+    productImage.classList.remove("image-loading")
+    productImage.classList.add("image-loaded")
+    imageLoadState.loadedImages.add(optimizedUrl)
+    imageLoadState.failedImages.delete(optimizedUrl)
+    queueSaveImageLoadState()
   })
 
   productImage.addEventListener("error", () => {
@@ -3561,6 +3561,11 @@ function createProductCard(product) {
     productImage.classList.remove("image-loading")
     productImage.classList.add("image-loaded")
     addRetryButton(productImage, optimizedUrl)
+  })
+
+  productImage.addEventListener("click", (e) => {
+    e.stopPropagation()
+    showImageModal(imageUrl, product.nombre)
   })
 
   // [NUEVO] Lógica de Favoritos
