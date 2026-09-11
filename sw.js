@@ -107,29 +107,14 @@ self.addEventListener("fetch", (event) => {
 
         // 2. Si no está en caché, descargar de la red y guardar copia
         try {
-          // Para URLs de Supabase Storage, añadir cabeceras de autenticación
-          let fetchRequest = event.request
-          if (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) {
-            const anonKey = url.hostname.includes(SUPABASE_VIEJO_URL)
-              ? SUPABASE_VIEJO_ANON_KEY
-              : SUPABASE_OLD_ANON_KEY
-            fetchRequest = new Request(event.request.url, {
-              method: "GET",
-              headers: {
-                "apikey": anonKey,
-                "Authorization": `Bearer ${anonKey}`,
-              },
-              mode: "cors",
-              credentials: "omit",
-            })
-          }
-
-          const networkResponse = await fetch(fetchRequest)
+          const networkResponse = await fetch(event.request)
           if (networkResponse && (networkResponse.status === 200 || networkResponse.type === "opaque")) {
             // Guardar en caché tanto la petición original como la URL limpia para CERO consumo redundante
             cache.put(event.request, networkResponse.clone()).catch(() => {})
-            const cleanUrl = url.origin + url.pathname
-            cache.put(cleanUrl, networkResponse.clone()).catch(() => {})
+            if (url.search) {
+              const cleanUrl = url.origin + url.pathname
+              cache.put(cleanUrl, networkResponse.clone()).catch(() => {})
+            }
           }
           return networkResponse
         } catch (fetchErr) {
@@ -241,27 +226,7 @@ self.addEventListener("message", (event) => {
       cache.match(imageUrl).then((cached) => {
         if (cached) return
 
-        // Añadir autenticación si es imagen de Supabase Storage
-        let fetchRequest = imageUrl
-        try {
-          const parsedUrl = new URL(imageUrl)
-          if (parsedUrl.hostname.includes("supabase.co") || parsedUrl.hostname.includes("supabase.io")) {
-            const anonKey = parsedUrl.hostname.includes(SUPABASE_VIEJO_URL)
-              ? SUPABASE_VIEJO_ANON_KEY
-              : SUPABASE_OLD_ANON_KEY
-            fetchRequest = new Request(imageUrl, {
-              method: "GET",
-              headers: {
-                "apikey": anonKey,
-                "Authorization": `Bearer ${anonKey}`,
-              },
-              mode: "cors",
-              credentials: "omit",
-            })
-          }
-        } catch (_) {}
-
-        fetch(fetchRequest)
+        fetch(imageUrl)
           .then((response) => {
             if (response && (response.status === 200 || response.type === "opaque")) {
               cache.put(imageUrl, response.clone()).catch(() => {})

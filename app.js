@@ -563,14 +563,13 @@ function loadImageLoadState() {
     // Si la versión del caché cambió (SW subió de versión y borró el caché),
     // limpiar el estado guardado — ya no es válido porque el caché fue vaciado.
     const savedCacheVersion = localStorage.getItem(IMAGE_CACHE_VERSION_KEY)
-    if (savedCacheVersion !== IMAGE_CACHE_NAME) {
+    if (savedCacheVersion && savedCacheVersion !== IMAGE_CACHE_NAME) {
       console.log(`[IMG-STATE] ♻️ Versión de caché cambió (${savedCacheVersion} → ${IMAGE_CACHE_NAME}), limpiando estado...`)
       localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
-      localStorage.setItem(IMAGE_CACHE_VERSION_KEY, IMAGE_CACHE_NAME)
       imageLoadState.loadedImages.clear()
       imageLoadState.failedImages.clear()
-      return
     }
+    localStorage.setItem(IMAGE_CACHE_VERSION_KEY, IMAGE_CACHE_NAME)
 
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
@@ -779,11 +778,28 @@ function updateSidebarDownloadProgress() {
 
   if (!percentEl || !barEl || !statusEl) return
 
+  if (stats.total === 0) {
+    if (imageLoadState.loadedImages.size > 0) {
+      percentEl.textContent = "100%"
+      barEl.style.width = "100%"
+      statusEl.textContent = `✅ ${imageLoadState.loadedImages.size} imágenes en caché`
+    } else {
+      percentEl.textContent = "0%"
+      barEl.style.width = "0%"
+      statusEl.textContent = "Cargando catálogo..."
+    }
+    return
+  }
+
   percentEl.textContent = `${stats.percent}%`
   barEl.style.width = `${stats.percent}%`
 
   if (imageLoadState.isPaused) {
-    statusEl.textContent = `⏸️ Precarga pausada · ${stats.loaded}/${stats.total} · ${stats.pending} pendientes`
+    if (stats.pending === 0 && stats.loaded > 0) {
+      statusEl.textContent = `✅ ${stats.loaded}/${stats.total} en caché (100%)`
+    } else {
+      statusEl.textContent = `⏸️ Precarga pausada · ${stats.loaded}/${stats.total} · ${stats.pending} pendientes`
+    }
   } else if (imageLoadState.isProcessingQueue || imageLoadState.inProgress) {
     statusEl.textContent = `📡 Precargando... ${stats.loaded}/${stats.total} (${stats.percent}%)`
   } else if (stats.pending > 0) {
@@ -1382,6 +1398,7 @@ function initImageObserver() {
                 img.classList.add("image-loaded")
                 imageLoadState.loadedImages.add(fullSrc)
                 imageLoadState.failedImages.delete(fullSrc)
+                queueSaveImageLoadState()
                 const retryBtn = img.parentElement?.querySelector(".image-retry-btn")
                 if (retryBtn) retryBtn.remove()
               }
@@ -1733,6 +1750,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await registerServiceWorker()
   initImageObserver()
+  loadImageLoadState()
+  syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
 
   try {
     // getSession() lee de localStorage, funciona offline
@@ -2436,9 +2455,11 @@ function setupEventListeners() {
     document.getElementById("create-user-modal").classList.add("hidden")
   })
 
-  document.getElementById("open-sidebar")?.addEventListener("click", () => {
+  document.getElementById("open-sidebar")?.addEventListener("click", async () => {
     document.getElementById("sidebar-menu").classList.add("open")
     document.getElementById("sidebar-overlay").classList.remove("hidden")
+    loadImageLoadState()
+    await syncLoadedImagesFromCache()
     updateSidebarDownloadProgress()
   })
 
@@ -2706,6 +2727,8 @@ async function loadProducts() {
       }
 
       // Cargar datos adicionales de forma segura (sin bloquear la carga)
+      loadImageLoadState()
+      syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
       await loadPriceSnapshot()
       await loadFavorites()
 
@@ -2890,6 +2913,8 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
       await _loadInventoryData()
     }
 
+    loadImageLoadState()
+    syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
     await loadPriceSnapshot()
     await loadFavorites()
 
@@ -3275,13 +3300,6 @@ function renderProducts() {
   grid.appendChild(fragment)
 
   updateLoadMoreButton(visibleProducts)
-
-  // Carga inmediata de las imágenes de las tarjetas en pantalla (respuesta instantánea)
-  grid.querySelectorAll(".product-image").forEach((img) => {
-    if (img.dataset.src && img.dataset.src !== DEFAULT_PRODUCT_PLACEHOLDER && img.src !== img.dataset.src) {
-      img.src = img.dataset.src
-    }
-  })
 
   console.log("Productos renderizados:", productsToRender.length)
 }
