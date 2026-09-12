@@ -42,8 +42,9 @@ let isLoadingMore = false
 let imageObserver = null
 let serviceWorkerRegistration = null
 
-const CURRENT_APP_VERSION = "1.0.4"
-const IMAGE_CACHE_NAME = "sonimax-images-v12"
+const CURRENT_APP_VERSION = "1.0.9"
+const IMAGE_CACHE_NAME = "sonimax-images-v13"
+const MIN_REQUIRED_VERSION = "1.0.9" // Force-update: versiones menores quedan bloqueadas
 const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
 
 async function safeShowNotification(title, options = {}) {
@@ -884,20 +885,11 @@ if (typeof window !== "undefined") {
     setTimeout(() => ensureContinuousPreload(), 600)
   })
 
-  // ── Keep-alive para segundo plano: reanudar si quedan imágenes pendientes ─
-  // Si la app está en segundo plano o el timer anterior expiró, este intervalo
-  // verifica si faltan imágenes y despierta la cola automáticamente sin quedarse pegado
-  setInterval(() => {
-    if (imageLoadState.isPaused) return
-    const stats = getDownloadStats()
-    if (stats.pending > 0 && !imageLoadState.isProcessingQueue) {
-      console.log(`[IMG-BG] 💓 Keep-alive despertando precarga: ${stats.pending} pendientes`)
-      if (imageLoadState.backgroundQueue.length === 0) {
-        refillBackgroundQueue()
-      }
-      processBackgroundQueue()
-    }
-  }, 8000)
+  // ── Keep-alive DESACTIVADO: la precarga masiva en segundo plano causaba
+  // un consumo de ~3.6 GB por usuario en Supabase Egress (50 GB en 2 días).
+  // Las imágenes ahora se descargan únicamente cuando el usuario las ve en pantalla
+  // (Lazy Loading puro con IntersectionObserver + Supabase Image Transformation).
+  // console.log('[IMG-BG] Keep-alive desactivado para conservar ancho de banda')
 }
 
 async function loadPriorityImages(urls) {
@@ -1332,10 +1324,24 @@ function optimizeImageUrl(url, options = {}) {
   }
 
   try {
-    // 1. Supabase Storage — devolver URL pública limpia
+    // 1. Supabase Storage — usar Image Transformation para reducir peso 97%
+    // El endpoint /render/image/ convierte y redimensiona al vuelo.
+    // Cloudflare CDN añade Cache-Control: public, max-age=31536000 automáticamente.
     if (url.includes("supabase.co") || url.includes("supabase.io")) {
-      let cleanUrl = url.split("?")[0];
-      return cleanUrl;
+      // Ya es una URL render → devolver limpia
+      if (url.includes("/render/image/")) {
+        return url.split("?")[0] + "?width=360&quality=70&format=webp"
+      }
+      // Convertir /object/public/ → /render/image/public/
+      const objectMatch = url.match(/\/storage\/v1\/object\/public\//)
+      if (objectMatch) {
+        const renderUrl = url
+          .replace("/storage/v1/object/public/", "/storage/v1/render/image/public/")
+          .split("?")[0]
+        return renderUrl + "?width=360&quality=70&format=webp"
+      }
+      // URL de Supabase sin patrón conocido → devolver limpia
+      return url.split("?")[0]
     }
 
     // 2. ImgBB — devolver URL limpia (no soporta parámetros de resize)
@@ -6760,7 +6766,7 @@ async function checkAppUpdate(isManual = false) {
       } catch (e) {}
     }
 
-    // 2. Si no hay tabla, consultar archivo version.json desde el bucket de Supabase
+    // 2. Fallback: archivo version.json en el bucket apk
     if (!updateData) {
       try {
         const oldUrl = typeof SUPABASE_OLD_URL !== 'undefined' ? SUPABASE_OLD_URL : "https://tuqwzrsgczhgmfnfmryw.supabase.co"
@@ -6777,6 +6783,17 @@ async function checkAppUpdate(isManual = false) {
     }
 
     const hasNewerVersion = compareSemVer(updateData.latest_version, CURRENT_APP_VERSION) > 0
+
+    // ⚠️ FORCE-UPDATE: Si la versión actual es inferior a la mínima requerida
+    // O si el admin activó force_update=true en Supabase, bloqueamos la app completa.
+    const isForcedByFlag = updateData.force_update === true
+    const isForcedByVersion = compareSemVer(CURRENT_APP_VERSION, MIN_REQUIRED_VERSION) < 0
+
+    if ((isForcedByFlag || isForcedByVersion) && hasNewerVersion) {
+      showForceUpdateScreen(updateData)
+      return
+    }
+
     if (hasNewerVersion) {
       showUpdateModal(updateData)
     } else if (isManual) {
@@ -6786,6 +6803,76 @@ async function checkAppUpdate(isManual = false) {
     console.warn('[APP-UPDATE] Error verificando actualización:', err)
     if (isManual) alert('No se pudo verificar la actualización.')
   }
+}
+
+// 🚫 PANTALLA COMPLETA BLOQUEANTE — el usuario DEBE actualizar para usar la app
+function showForceUpdateScreen(info) {
+  // Eliminar modal anterior si existe
+  const existingForce = document.getElementById('force-update-screen')
+  if (existingForce) return // ya está mostrando
+
+  // Ocultar toda la app detrás del overlay
+  const overlay = document.createElement('div')
+  overlay.id = 'force-update-screen'
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'z-index:99999',
+    'background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)',
+    'display:flex', 'align-items:center', 'justify-content:center',
+    'padding:1.5rem', 'flex-direction:column'
+  ].join(';')
+
+  const notes = Array.isArray(info.release_notes)
+    ? info.release_notes.map(n => `<li style="margin-bottom:4px">• ${n}</li>`).join('')
+    : `<li>• ${info.release_notes || 'Optimización crítica de rendimiento y consumo de datos.'}</li>`
+
+  const apkUrl = info.apk_url || `https://tuqwzrsgczhgmfnfmryw.supabase.co/storage/v1/object/public/apk/sonimax-movil.apk`
+
+  overlay.innerHTML = `
+    <div style="max-width:380px;width:100%;text-align:center">
+      <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#f97316);display:flex;align-items:center;justify-content:center;margin:0 auto 1.5rem;box-shadow:0 0 40px rgba(220,38,38,0.5)">
+        <svg width="40" height="40" fill="none" stroke="white" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        </svg>
+      </div>
+
+      <h1 style="color:white;font-size:1.5rem;font-weight:800;margin-bottom:.5rem;line-height:1.2">
+        Actualización Obligatoria
+      </h1>
+      <p style="color:#94a3b8;font-size:.875rem;margin-bottom:1.5rem;line-height:1.5">
+        Esta versión ya no es compatible. Por favor instala la nueva versión para continuar usando SONIMAX Móvil.
+      </p>
+
+      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:1rem;margin-bottom:1.5rem;text-align:left">
+        <p style="color:#f8fafc;font-size:.75rem;font-weight:700;margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">Novedades en v${info.latest_version}:</p>
+        <ul style="color:#94a3b8;font-size:.8rem;line-height:1.8;margin:0;padding:0;list-style:none">${notes}</ul>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:.75rem;margin-bottom:1.5rem">
+        <p style="color:#64748b;font-size:.7rem;margin:0">
+          Versión actual: <span style="color:#f87171;font-weight:700">v${CURRENT_APP_VERSION}</span>
+          &nbsp;&nbsp;→&nbsp;&nbsp;
+          Nueva versión: <span style="color:#4ade80;font-weight:700">v${info.latest_version}</span>
+        </p>
+      </div>
+
+      <a href="${apkUrl}" 
+         onclick="window.open('${apkUrl}','_system');return false"
+         style="display:block;width:100%;padding:1rem;background:linear-gradient(135deg,#dc2626,#f97316);color:white;font-weight:800;font-size:1rem;border-radius:14px;text-decoration:none;box-shadow:0 8px 32px rgba(220,38,38,0.4);transition:all .2s;margin-bottom:.75rem;box-sizing:border-box">
+        ⬇️ Descargar e Instalar v${info.latest_version}
+      </a>
+
+      <p style="color:#475569;font-size:.7rem;line-height:1.4">
+        La aplicación quedará bloqueada hasta que instales la actualización.
+        <br>Descarga el archivo .apk y abre el instalador.
+      </p>
+    </div>
+  `
+
+  document.body.appendChild(overlay)
+
+  // Bloquear todo tipo de navegación — el usuario solo puede tocar el botón de descarga
+  overlay.addEventListener('click', (e) => e.stopPropagation())
+  document.addEventListener('keydown', (e) => { if (document.getElementById('force-update-screen')) e.preventDefault() }, true)
 }
 
 function showUpdateModal(info) {
@@ -6825,11 +6912,9 @@ function showUpdateModal(info) {
           </svg>
           Actualizar e Instalar Ahora
         </button>
-        ${!info.force_update ? `
         <button id="btn-dismiss-apk-update" class="w-full py-2 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition">
           Recordar más tarde
         </button>
-        ` : ''}
       </div>
     </div>
   `
@@ -6848,5 +6933,3 @@ function showUpdateModal(info) {
 
 // Exponer globalmente
 window.checkAppUpdate = checkAppUpdate
-
-

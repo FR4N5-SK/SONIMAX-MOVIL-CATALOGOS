@@ -1,17 +1,15 @@
 // ============================================================
-// SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
+// SONIMAX MÓVIL - Service Worker v13 — Cache-First Images
+// Optimizado para minimizar consumo de Supabase Egress.
+// Las imágenes de Supabase se sirven con Cache-First: se descargan
+// una única vez desde el endpoint /render/image/ (ya optimizado)
+// y se almacenan indefinidamente en el dispositivo.
 // ============================================================
 
-const CACHE_VERSION = "v12"
+const CACHE_VERSION = "v13"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
-
-// Clave anon del Supabase Viejo (Plan Pro) - para autenticar peticiones de imágenes
-const SUPABASE_VIEJO_URL = "tuqwzrsgczhgmfnfmryw.supabase.co"
-const SUPABASE_VIEJO_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1cXd6cnNnY3poZ21mbmZtcnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTc4NTgsImV4cCI6MjA5NTY5Mzg1OH0.-mMR7gaq_TA_PvuZKSP4o_N2sCVaP0N7ihV2Bs94na0"
-const SUPABASE_OLD_URL = "gvaitosnfotnkrpjojqn.supabase.co"
-const SUPABASE_OLD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YWl0b3NuZm90bmtycGpvanFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MjA2NzQsImV4cCI6MjEwMjE5NjY3NH0.QKToCRnPi4GqCOjas55Ihp64hHVjdFScpyZpfJmltrs"
 
 const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="100%" height="100%" fill="#f1f5f9"/><path d="M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z" fill="#cbd5e1"/></svg>`
 
@@ -30,7 +28,7 @@ const APP_SHELL = [
 // INSTALAR: Guarda los recursos del App Shell en caché
 // ============================================================
 self.addEventListener("install", (event) => {
-  console.log("[SW] ✅ Service Worker v7 instalándose...")
+  console.log("[SW] ✅ Service Worker v13 instalándose...")
   event.waitUntil(
     caches
       .open(APP_CACHE)
@@ -53,7 +51,7 @@ self.addEventListener("install", (event) => {
 // ACTIVAR: Limpiar cachés antiguas
 // ============================================================
 self.addEventListener("activate", (event) => {
-  console.log("[SW] 🚀 Service Worker v8 activado")
+  console.log("[SW] 🚀 Service Worker v13 activado")
   event.waitUntil(
     caches
       .keys()
@@ -82,18 +80,51 @@ self.addEventListener("fetch", (event) => {
   // Solo manejar GET
   if (method !== "GET") return
 
-  // ── 1. IMÁGENES (ibb.co y Supabase Storage) ─────────────────
-  // Dejar que el navegador las descargue directamente con su motor HTTP nativo
-  // para soporte total de redirecciones y carga a máxima velocidad
+  // ── 1. IMÁGENES de Supabase Storage (render/image y object/public) ──
+  // Estrategia: Cache-First — se descarga UNA sola vez y se guarda para siempre.
+  // Esto evita que Supabase contabilice descargas repetidas de la misma imagen.
+  // Las URLs ya vienen optimizadas con Supabase Image Transformation (?width=360&quality=70&format=webp)
   if (
-    url.hostname.includes("ibb.co") ||
-    url.hostname.includes("i.ibb.co") ||
-    ((url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) && url.pathname.includes("/storage/"))
+    (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) &&
+    (url.pathname.includes("/storage/v1/render/image/") || url.pathname.includes("/storage/v1/object/"))
   ) {
+    event.respondWith(
+      caches.open(IMAGE_CACHE).then((cache) => {
+        // Normalizar URL: quitar parámetros para que el mismo archivo no se duplique en caché
+        const normalizedRequest = new Request(event.request.url.split("?")[0] + "?width=360&quality=70&format=webp", {
+          mode: "cors",
+          credentials: "omit",
+        })
+        return cache.match(normalizedRequest).then((cached) => {
+          if (cached) {
+            // ✅ Cache HIT — no se consume egress de Supabase
+            return cached
+          }
+          // Cache MISS — primera descarga, guardar para no repetir
+          return fetch(event.request.url, { mode: "cors", credentials: "omit" })
+            .then((response) => {
+              if (response && response.status === 200) {
+                cache.put(normalizedRequest, response.clone()).catch(() => {})
+              }
+              return response
+            })
+            .catch(() => {
+              return new Response(FALLBACK_SVG, {
+                headers: { "Content-Type": "image/svg+xml" },
+              })
+            })
+        })
+      })
+    )
     return
   }
 
-  // ── 2. API DE SUPABASE (Base de datos / Auth) ────────────────
+  // ── 2. Imágenes de ibb.co — dejar pasar sin cachear (dominio externo) ──
+  if (url.hostname.includes("ibb.co") || url.hostname.includes("i.ibb.co")) {
+    return
+  }
+
+  // ── 3. API DE SUPABASE (Base de datos / Auth) ────────────────
   // Estrategia: Network First con fallback a Cache
   if (
     (url.hostname.includes("supabase.co") || url.hostname.includes("supabase.io")) &&
@@ -128,7 +159,7 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 3. CDN (Tailwind, Supabase JS, Chart.js, Fuentes, etc.) ─
+  // ── 4. CDN (Tailwind, Supabase JS, Chart.js, Fuentes, etc.) ─
   // Estrategia: Cache First
   if (
     url.hostname.includes("cdn.tailwindcss.com") ||
@@ -155,7 +186,7 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // ── 4. RECURSOS LOCALES (HTML, CSS, JS) ────────────────────
+  // ── 5. RECURSOS LOCALES (HTML, CSS, JS) ────────────────────
   // Estrategia: Network First con fallback a caché
   if (url.origin === self.location.origin) {
     event.respondWith(
@@ -184,33 +215,9 @@ self.addEventListener("fetch", (event) => {
 })
 
 // ============================================================
-// MENSAJES: Descargas en segundo plano y limpieza
+// MENSAJES: Limpieza de caché
 // ============================================================
 self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "DOWNLOAD_IMAGE") {
-    const imageUrl = event.data.url
-    caches.open(IMAGE_CACHE).then((cache) => {
-      cache.match(imageUrl).then((cached) => {
-        if (cached) return
-
-        fetch(imageUrl)
-          .then((response) => {
-            if (response && (response.status === 200 || response.type === "opaque")) {
-              cache.put(imageUrl, response.clone()).catch(() => {})
-              self.clients.matchAll().then((clients) => {
-                clients.forEach((client) => {
-                  client.postMessage({ type: "DOWNLOAD_COMPLETE", url: imageUrl })
-                })
-              })
-            }
-          })
-          .catch((err) => {
-            console.error("[SW] ❌ Error descargando imagen:", imageUrl, err)
-          })
-      })
-    })
-  }
-
   if (event.data && event.data.type === "CLEAR_IMAGE_CACHE") {
     caches.delete(IMAGE_CACHE).then(() => {
       console.log("[SW] 🗑️ Caché de imágenes limpiado")
