@@ -42,9 +42,9 @@ let isLoadingMore = false
 let imageObserver = null
 let serviceWorkerRegistration = null
 
-const CURRENT_APP_VERSION = "1.0.9"
-const IMAGE_CACHE_NAME = "sonimax-images-v13"
-const MIN_REQUIRED_VERSION = "1.0.9" // Force-update: versiones menores quedan bloqueadas
+const CURRENT_APP_VERSION = "2.0.0"
+const IMAGE_CACHE_NAME = "sonimax-images-v14"
+const MIN_REQUIRED_VERSION = "2.0.0" // Force-update: versiones menores quedan bloqueadas
 const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
 
 async function safeShowNotification(title, options = {}) {
@@ -1324,24 +1324,12 @@ function optimizeImageUrl(url, options = {}) {
   }
 
   try {
-    // 1. Supabase Storage — usar Image Transformation para reducir peso 97%
-    // El endpoint /render/image/ convierte y redimensiona al vuelo.
-    // Cloudflare CDN añade Cache-Control: public, max-age=31536000 automáticamente.
+    // 1. Supabase Storage — Servir URL original limpia (sin /render/image/ que distorsiona las dimensiones)
+    // Las imágenes se visualizan perfectas en su proporción original y se guardan en caché local por el Service Worker
     if (url.includes("supabase.co") || url.includes("supabase.io")) {
-      // Ya es una URL render → devolver limpia
-      if (url.includes("/render/image/")) {
-        return url.split("?")[0] + "?width=360&quality=70&format=webp"
-      }
-      // Convertir /object/public/ → /render/image/public/
-      const objectMatch = url.match(/\/storage\/v1\/object\/public\//)
-      if (objectMatch) {
-        const renderUrl = url
-          .replace("/storage/v1/object/public/", "/storage/v1/render/image/public/")
-          .split("?")[0]
-        return renderUrl + "?width=360&quality=70&format=webp"
-      }
-      // URL de Supabase sin patrón conocido → devolver limpia
-      return url.split("?")[0]
+      return url
+        .replace("/storage/v1/render/image/public/", "/storage/v1/object/public/")
+        .split("?")[0]
     }
 
     // 2. ImgBB — devolver URL limpia (no soporta parámetros de resize)
@@ -6750,10 +6738,11 @@ async function checkAppUpdate(isManual = false) {
     const activeClient = window.supabaseClient || window.supabaseOldClient
     let updateData = null
 
-    // 1. Intentar consultar tabla app_version en Supabase
-    if (activeClient) {
+    // 1. Intentar consultar tabla app_version en Supabase (servidor principal o respaldo Plan Pro)
+    const clients = [window.supabaseClient, window.supabaseOldClient].filter(Boolean)
+    for (const client of clients) {
       try {
-        const { data, error } = await activeClient
+        const { data, error } = await client
           .from('app_version')
           .select('*')
           .order('id', { ascending: false })
@@ -6762,6 +6751,7 @@ async function checkAppUpdate(isManual = false) {
 
         if (!error && data && data.latest_version) {
           updateData = data
+          break
         }
       } catch (e) {}
     }

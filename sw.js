@@ -6,7 +6,7 @@
 // y se almacenan indefinidamente en el dispositivo.
 // ============================================================
 
-const CACHE_VERSION = "v13"
+const CACHE_VERSION = "v14"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-" + CACHE_VERSION
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -90,8 +90,9 @@ self.addEventListener("fetch", (event) => {
   ) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then((cache) => {
-        // Normalizar URL: quitar parámetros para que el mismo archivo no se duplique en caché
-        const normalizedRequest = new Request(event.request.url.split("?")[0] + "?width=360&quality=70&format=webp", {
+        // Normalizar URL: quitar query params para que se almacene por su URL limpia original
+        const cleanUrl = event.request.url.split("?")[0]
+        const normalizedRequest = new Request(cleanUrl, {
           mode: "cors",
           credentials: "omit",
         })
