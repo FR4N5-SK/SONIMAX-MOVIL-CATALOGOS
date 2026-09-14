@@ -1,10 +1,10 @@
-# =====================================================
-# SONIMAX MOVIL — Cloudflare Pages Headers
-# Reglas de caché y seguridad para máximo rendimiento
+﻿# =====================================================
+# SONIMAX MOVIL â€” Cloudflare Pages Headers
+# Reglas de cachÃ© y seguridad para mÃ¡ximo rendimiento
 # =====================================================
 
-# ── App Shell (HTML) ──────────────────────────────
-# No cachear el HTML para que siempre cargue el último
+# â”€â”€ App Shell (HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# No cachear el HTML para que siempre cargue el Ãºltimo
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
   X-Content-Type-Options: nosniff
@@ -16,8 +16,8 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
 
-# ── JavaScript y CSS ──────────────────────────────
-# Para JS sin hash en el nombre, validar siempre en cada petición
+# â”€â”€ JavaScript y CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Para JS sin hash en el nombre, validar siempre en cada peticiÃ³n
 /*.js
   Cache-Control: public, max-age=0, must-revalidate
   Content-Type: application/javascript; charset=utf-8
@@ -27,13 +27,13 @@
   Content-Type: text/css; charset=utf-8
 
 
-# ── Service Worker ────────────────────────────────
-# El SW NUNCA debe cachearse — debe actualizarse siempre
+# â”€â”€ Service Worker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# El SW NUNCA debe cachearse â€” debe actualizarse siempre
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: application/javascript; charset=utf-8
 
-# ── Imágenes locales ──────────────────────────────
+# â”€â”€ ImÃ¡genes locales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /images/*
   Cache-Control: public, max-age=31536000, immutable
   Vary: Accept
@@ -50,7 +50,18 @@
 *.ico
   Cache-Control: public, max-age=86400
 
-# ── Fuentes ───────────────────────────────────────
+# â”€â”€ Fuentes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /*.woff2
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
+
+# version.json - Cache corta (60s) para que los clientes detecten nuevas versiones rapidamente
+/version.json
+  Cache-Control: public, max-age=60, must-revalidate
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
+
+# APK - Cache larga (inmutable segun version en URL)
+/*.apk
+  Cache-Control: public, max-age=86400
+  Content-Disposition: attachment

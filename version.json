@@ -1,0 +1,13 @@
+﻿{
+  "latest_version": "2.0.0",
+  "apk_url": "https://github.com/FRANS-SK/SONIMAX-MOVIL-CATALOGOS/releases/download/v2.0.0/SONIMAX-MOVIL-LA-APK-v2.0.0.apk",
+  "release_notes": [
+    "Imagenes hasta 95% mas ligeras (carga instantanea)",
+    "Cache permanente: no se repiten descargas al actualizar",
+    "Carga de catalogo mucho mas rapida",
+    "Mejoras de rendimiento en busqueda",
+    "Compatibilidad mejorada con modo offline"
+  ],
+  "force_update": false,
+  "min_version": "1.0.0"
+}

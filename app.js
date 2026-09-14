@@ -43,8 +43,7 @@ let imageObserver = null
 let serviceWorkerRegistration = null
 
 const CURRENT_APP_VERSION = "2.0.0"
-const IMAGE_CACHE_NAME = "sonimax-images-v14"
-const MIN_REQUIRED_VERSION = "2.0.0" // Force-update: versiones menores quedan bloqueadas
+const IMAGE_CACHE_NAME = "sonimax-images-permanent"
 const DEFAULT_PRODUCT_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='100%' height='100%' fill='%23f1f5f9'/><path d='M100 125a20 20 0 100-40 20 20 0 000 40zm120 75H80l40-55 30 35 40-45 30 65z' fill='%23cbd5e1'/></svg>"
 
 async function safeShowNotification(title, options = {}) {
@@ -305,10 +304,12 @@ async function getPreviousCSVSnapshot() {
       .maybeSingle()
 
     if (error) {
-      // Si la tabla no existe en la BD (PGRST205 / 404), usar snapshot en localStorage
+      console.error('[CSV-SNAPSHOT] ❌ Error obteniendo snapshot de Supabase:', error, JSON.stringify(error))
+      console.log("[CSV-SNAPSHOT] No hay snapshot en Supabase, intentando localStorage")
+      // Fallback a localStorage
       const saved = localStorage.getItem(CSV_SNAPSHOT_KEY)
       if (saved) {
-        try { return JSON.parse(saved) } catch (_) { return [] }
+        return JSON.parse(saved)
       }
       return []
     }
@@ -562,13 +563,14 @@ function loadImageLoadState() {
     // Si la versión del caché cambió (SW subió de versión y borró el caché),
     // limpiar el estado guardado — ya no es válido porque el caché fue vaciado.
     const savedCacheVersion = localStorage.getItem(IMAGE_CACHE_VERSION_KEY)
-    if (savedCacheVersion && savedCacheVersion !== IMAGE_CACHE_NAME) {
+    if (savedCacheVersion !== IMAGE_CACHE_NAME) {
       console.log(`[IMG-STATE] ♻️ Versión de caché cambió (${savedCacheVersion} → ${IMAGE_CACHE_NAME}), limpiando estado...`)
       localStorage.removeItem(IMAGE_LOAD_STATE_KEY)
+      localStorage.setItem(IMAGE_CACHE_VERSION_KEY, IMAGE_CACHE_NAME)
       imageLoadState.loadedImages.clear()
       imageLoadState.failedImages.clear()
+      return
     }
-    localStorage.setItem(IMAGE_CACHE_VERSION_KEY, IMAGE_CACHE_NAME)
 
     const saved = localStorage.getItem(IMAGE_LOAD_STATE_KEY)
     if (saved) {
@@ -732,10 +734,8 @@ function resumeBackgroundDownloads() {
 }
 
 function ensureContinuousPreload() {
-  if (imageLoadState.isPaused) return
-  if (!imageLoadState.isProcessingQueue) {
-    processBackgroundQueue()
-  }
+  // Desactivado permanentemente para proteger la cuota de Egress
+  return;
 }
 
 function getDownloadStats() {
@@ -777,28 +777,11 @@ function updateSidebarDownloadProgress() {
 
   if (!percentEl || !barEl || !statusEl) return
 
-  if (stats.total === 0) {
-    if (imageLoadState.loadedImages.size > 0) {
-      percentEl.textContent = "100%"
-      barEl.style.width = "100%"
-      statusEl.textContent = `✅ ${imageLoadState.loadedImages.size} imágenes en caché`
-    } else {
-      percentEl.textContent = "0%"
-      barEl.style.width = "0%"
-      statusEl.textContent = "Cargando catálogo..."
-    }
-    return
-  }
-
   percentEl.textContent = `${stats.percent}%`
   barEl.style.width = `${stats.percent}%`
 
   if (imageLoadState.isPaused) {
-    if (stats.pending === 0 && stats.loaded > 0) {
-      statusEl.textContent = `✅ ${stats.loaded}/${stats.total} en caché (100%)`
-    } else {
-      statusEl.textContent = `⏸️ Precarga pausada · ${stats.loaded}/${stats.total} · ${stats.pending} pendientes`
-    }
+    statusEl.textContent = `⏸️ Precarga pausada · ${stats.loaded}/${stats.total} · ${stats.pending} pendientes`
   } else if (imageLoadState.isProcessingQueue || imageLoadState.inProgress) {
     statusEl.textContent = `📡 Precargando... ${stats.loaded}/${stats.total} (${stats.percent}%)`
   } else if (stats.pending > 0) {
@@ -885,11 +868,20 @@ if (typeof window !== "undefined") {
     setTimeout(() => ensureContinuousPreload(), 600)
   })
 
-  // ── Keep-alive DESACTIVADO: la precarga masiva en segundo plano causaba
-  // un consumo de ~3.6 GB por usuario en Supabase Egress (50 GB en 2 días).
-  // Las imágenes ahora se descargan únicamente cuando el usuario las ve en pantalla
-  // (Lazy Loading puro con IntersectionObserver + Supabase Image Transformation).
-  // console.log('[IMG-BG] Keep-alive desactivado para conservar ancho de banda')
+  // ── Keep-alive para segundo plano: reanudar si quedan imágenes pendientes ─
+  // Si la app está en segundo plano o el timer anterior expiró, este intervalo
+  // verifica si faltan imágenes y despierta la cola automáticamente sin quedarse pegado
+  setInterval(() => {
+    if (imageLoadState.isPaused) return
+    const stats = getDownloadStats()
+    if (stats.pending > 0 && !imageLoadState.isProcessingQueue) {
+      console.log(`[IMG-BG] 💓 Keep-alive despertando precarga: ${stats.pending} pendientes`)
+      if (imageLoadState.backgroundQueue.length === 0) {
+        refillBackgroundQueue()
+      }
+      processBackgroundQueue()
+    }
+  }, 8000)
 }
 
 async function loadPriorityImages(urls) {
@@ -1041,38 +1033,8 @@ async function processBackgroundQueue() {
 }
 
 async function refillBackgroundQueue() {
-  const allImageUrls = Array.from(
-    new Set(
-      allProducts
-        .map((p) => p.imagen_url)
-        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
-        .map((url) => optimizeImageUrl(url))
-    )
-  )
-
-  let pending = allImageUrls.filter((url) => {
-    const alreadyLoaded = imageLoadState.loadedImages.has(url)
-    const tooManyFails = (imageLoadState.failedImages.get(url) || 0) >= MAX_RETRY_ATTEMPTS
-    return !alreadyLoaded && !tooManyFails
-  })
-
-  // Si no hay pendientes limpias pero aún hay imágenes sin descargar (fallaron temporalmente),
-  // reiniciar el contador de fallos para darles reintento y que la app no quede trabada
-  if (pending.length === 0 && imageLoadState.failedImages.size > 0) {
-    const notLoaded = allImageUrls.filter((url) => !imageLoadState.loadedImages.has(url))
-    if (notLoaded.length > 0) {
-      console.log(`[IMG-BG] 🔄 Reintentando ${notLoaded.length} imágenes tras pausa o fallo temporal...`)
-      imageLoadState.failedImages.clear()
-      pending = notLoaded
-    }
-  }
-
-  if (pending.length > 0) {
-    console.log(`[IMG-PRIORITY] 🔄 Cola repoblada con ${pending.length} imágenes pendientes`)
-    imageLoadState.backgroundQueue = pending
-    return true
-  }
-  return false
+  // Desactivado permanentemente para evitar consumo de Egress
+  return false;
 }
 
 async function preloadAllImages() {
@@ -1320,26 +1282,37 @@ async function retryFailedImages(cache) {
 
 function optimizeImageUrl(url, options = {}) {
   if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:")) {
-    return DEFAULT_PRODUCT_PLACEHOLDER
+    return DEFAULT_PRODUCT_PLACEHOLDER;
   }
 
   try {
-    // 1. Supabase Storage — Servir URL original limpia (sin /render/image/ que distorsiona las dimensiones)
-    // Las imágenes se visualizan perfectas en su proporción original y se guardan en caché local por el Service Worker
+    // 1. Supabase Storage - Servir thumbnail optimizado manteniendo proporciones exactas
     if (url.includes("supabase.co") || url.includes("supabase.io")) {
-      return url
-        .replace("/storage/v1/render/image/public/", "/storage/v1/object/public/")
-        .split("?")[0]
+      const cleanUrl = url.split("?")[0];
+      
+      // Si ya es una URL de render, mantenerla
+      if (cleanUrl.includes("/storage/v1/render/image/public/")) {
+        return cleanUrl;
+      }
+
+      // Convertir /storage/v1/object/public/ a /storage/v1/render/image/public/
+      // width=400&height=400&resize=contain garantiza 100% la preservacion de la relacion de aspecto original
+      // y reduce el peso de ~220 KB a ~8-15 KB (ahorro del 95% en Cached Egress)
+      if (cleanUrl.includes("/storage/v1/object/public/")) {
+        return cleanUrl.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") + "?width=400&height=400&resize=contain&quality=75";
+      }
+
+      return cleanUrl;
     }
 
-    // 2. ImgBB — devolver URL limpia (no soporta parámetros de resize)
+    // 2. ImgBB - devolver URL limpia (no soporta parametros de resize)
     if (url.includes("ibb.co") || url.includes("i.ibb.co")) {
-      return url.split("?")[0]
+      return url.split("?")[0];
     }
 
-    return url
+    return url;
   } catch (err) {
-    return url
+    return url;
   }
 }
 
@@ -1390,7 +1363,6 @@ function initImageObserver() {
                 img.classList.add("image-loaded")
                 imageLoadState.loadedImages.add(fullSrc)
                 imageLoadState.failedImages.delete(fullSrc)
-                queueSaveImageLoadState()
                 const retryBtn = img.parentElement?.querySelector(".image-retry-btn")
                 if (retryBtn) retryBtn.remove()
               }
@@ -1742,8 +1714,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await registerServiceWorker()
   initImageObserver()
-  loadImageLoadState()
-  syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
 
   try {
     // getSession() lee de localStorage, funciona offline
@@ -2110,7 +2080,7 @@ async function loadUserData(userId) {
   console.log("Cargando datos del usuario:", userId)
 
   try {
-    const { data, error } = await window.supabaseClient.from("users").select("id, auth_id, username, name, role, can_see_stock").eq("auth_id", userId).single()
+    const { data, error } = await window.supabaseClient.from("users").select("id, username, name, role, can_see_stock").eq("auth_id", userId).single()
 
     if (error) {
       console.error("Error obteniendo datos:", error)
@@ -2122,17 +2092,13 @@ async function loadUserData(userId) {
       throw new Error("Usuario no encontrado")
     }
 
-    currentUser = {
-      ...data,
-      auth_id: data.auth_id || userId,
-      id: data.id || userId,
-    }
+    currentUser = data
     currentUserRole = data.role || 'cliente'
     window.currentUserRole = data.role || 'cliente'
 
     // Guardar en caché local
     try {
-      localStorage.setItem("sonimax_current_user", JSON.stringify(currentUser))
+      localStorage.setItem("sonimax_current_user", JSON.stringify(data))
     } catch (e) {
       console.warn("No se pudo guardar usuario en caché local:", e)
     }
@@ -2451,11 +2417,9 @@ function setupEventListeners() {
     document.getElementById("create-user-modal").classList.add("hidden")
   })
 
-  document.getElementById("open-sidebar")?.addEventListener("click", async () => {
+  document.getElementById("open-sidebar")?.addEventListener("click", () => {
     document.getElementById("sidebar-menu").classList.add("open")
     document.getElementById("sidebar-overlay").classList.remove("hidden")
-    loadImageLoadState()
-    await syncLoadedImagesFromCache()
     updateSidebarDownloadProgress()
   })
 
@@ -2616,14 +2580,12 @@ async function loadPriceSnapshot() {
 // [NUEVO] Cargar favoritos desde Supabase (Por Usuario)
 async function loadFavorites() {
     if (!currentUser) return;
-    const userId = currentUser.auth_id || currentUser.id;
-    if (!userId) return;
     
     try {
         const { data, error } = await window.supabaseClient
             .from('favorites')
             .select('product_id')
-            .eq('user_id', userId);
+            .eq('user_id', currentUser.auth_id);
             
         if (error) throw error;
         
@@ -2725,8 +2687,6 @@ async function loadProducts() {
       }
 
       // Cargar datos adicionales de forma segura (sin bloquear la carga)
-      loadImageLoadState()
-      syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
       await loadPriceSnapshot()
       await loadFavorites()
 
@@ -2911,8 +2871,6 @@ async function _refreshProductsFromNetwork(isFirstLoad = false, forceSync = fals
       await _loadInventoryData()
     }
 
-    loadImageLoadState()
-    syncLoadedImagesFromCache().then(() => updateSidebarDownloadProgress()).catch(() => {})
     await loadPriceSnapshot()
     await loadFavorites()
 
@@ -3299,6 +3257,9 @@ function renderProducts() {
 
   updateLoadMoreButton(visibleProducts)
 
+  // Carga inmediata de las imágenes de las tarjetas en pantalla (respuesta instantánea)
+  // Lazy loading por IntersectionObserver bajo demanda
+
   console.log("Productos renderizados:", productsToRender.length)
 }
 
@@ -3519,11 +3480,11 @@ function createProductCard(product) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.5l1.318-1.182a4.5 4.5 0 116.364 6.364L12 20.273l-7.682-7.682a4.5 4.5 0 010-6.364z"></path>
         </svg>
       </button>
-      <img src="${optimizedUrl}"
+      <img src="${placeholderUrl}"
+           data-src="${optimizedUrl}"
            alt="${product.nombre}"
-           class="product-image cursor-pointer hover:opacity-90 transition-opacity"
-           loading="lazy"
-           decoding="async">
+           class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
+           loading="lazy">
       <!-- [MODIFICADO] Badges movidos aquí para correcta superposición y visibilidad -->
       ${priceDropBadge}
       ${newBadge}
@@ -3541,13 +3502,13 @@ function createProductCard(product) {
   `
 
   const productImage = card.querySelector(".product-image")
+  if (imageObserver && productImage) {
+    imageObserver.observe(productImage)
+  }
 
-  productImage.addEventListener("load", () => {
-    productImage.classList.remove("image-loading")
-    productImage.classList.add("image-loaded")
-    imageLoadState.loadedImages.add(optimizedUrl)
-    imageLoadState.failedImages.delete(optimizedUrl)
-    queueSaveImageLoadState()
+  productImage.addEventListener("click", (e) => {
+    e.stopPropagation()
+    showImageModal(imageUrl, product.nombre)
   })
 
   productImage.addEventListener("error", () => {
@@ -3555,11 +3516,6 @@ function createProductCard(product) {
     productImage.classList.remove("image-loading")
     productImage.classList.add("image-loaded")
     addRetryButton(productImage, optimizedUrl)
-  })
-
-  productImage.addEventListener("click", (e) => {
-    e.stopPropagation()
-    showImageModal(imageUrl, product.nombre)
   })
 
   // [NUEVO] Lógica de Favoritos
@@ -3744,8 +3700,6 @@ function isFavorite(productId) {
 
 async function toggleFavorite(productId, buttonElement) {
     if (!currentUser) return;
-    const userId = currentUser.auth_id || currentUser.id;
-    if (!userId) return;
 
     const index = favorites.indexOf(productId);
     const isAdding = index === -1;
@@ -3762,10 +3716,10 @@ async function toggleFavorite(productId, buttonElement) {
     // Sincronizar con Supabase
     try {
         if (isAdding) {
-            await window.supabaseClient.from('favorites').insert({ user_id: userId, product_id: productId });
+            await window.supabaseClient.from('favorites').insert({ user_id: currentUser.auth_id, product_id: productId });
             console.log(`[FAVORITES] ❤️ Guardado en nube.`);
         } else {
-            await window.supabaseClient.from('favorites').delete().eq('user_id', userId).eq('product_id', productId);
+            await window.supabaseClient.from('favorites').delete().eq('user_id', currentUser.auth_id).eq('product_id', productId);
             console.log(`[FAVORITES] 💔 Eliminado de nube.`);
         }
     } catch (error) {
@@ -3779,15 +3733,13 @@ async function toggleFavorite(productId, buttonElement) {
 // [NUEVO] Guardar carrito en Supabase
 async function saveCartToSupabase() {
   if (!currentUser) return;
-  const userId = currentUser.auth_id || currentUser.id;
-  if (!userId) return;
 
   console.log(`[CARRITO-NUBE] ☁️ Guardando carrito en Supabase para ${currentUser.username}...`);
   try {
     const { error } = await window.supabaseClient
       .from('user_carts')
       .upsert({
-        user_id: userId,
+        user_id: currentUser.auth_id,
         cart_data: cart,
         updated_at: new Date().toISOString()
       }, {
@@ -3807,15 +3759,13 @@ async function saveCartToSupabase() {
 // [NUEVO] Cargar carrito desde Supabase
 async function loadCartFromSupabase() {
   if (!currentUser) return;
-  const userId = currentUser.auth_id || currentUser.id;
-  if (!userId) return;
 
   console.log(`[CARRITO-NUBE] ☁️ Cargando carrito desde Supabase para ${currentUser.username}...`);
   try {
     const { data, error } = await window.supabaseClient
       .from('user_carts')
       .select('cart_data')
-      .eq('user_id', userId)
+      .eq('user_id', currentUser.auth_id)
       .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found, no es un error
@@ -4567,6 +4517,16 @@ function handleGlobalSearch(e) {
       }
 
       console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
+
+      const searchResultUrls = filteredProducts
+        .map((p) => optimizeImageUrl(p.imagen_url))
+        .filter((url) => url && url !== "/images/ProductImages.jpg" && !url.startsWith("data:"))
+
+      if (searchResultUrls.length > 0) {
+        // Inyectar URLs de búsqueda AL FRENTE de la cola de fondo
+        const notCached = searchResultUrls.filter(url => !imageLoadState.loadedImages.has(url))
+        // Lazy loading automatico por IntersectionObserver para resultados de busqueda
+      }
 
       currentPage = 1
       renderProducts()
@@ -6738,11 +6698,10 @@ async function checkAppUpdate(isManual = false) {
     const activeClient = window.supabaseClient || window.supabaseOldClient
     let updateData = null
 
-    // 1. Intentar consultar tabla app_version en Supabase (servidor principal o respaldo Plan Pro)
-    const clients = [window.supabaseClient, window.supabaseOldClient].filter(Boolean)
-    for (const client of clients) {
+    // 1. Intentar consultar tabla app_version en Supabase
+    if (activeClient) {
       try {
-        const { data, error } = await client
+        const { data, error } = await activeClient
           .from('app_version')
           .select('*')
           .order('id', { ascending: false })
@@ -6751,19 +6710,26 @@ async function checkAppUpdate(isManual = false) {
 
         if (!error && data && data.latest_version) {
           updateData = data
-          break
         }
       } catch (e) {}
     }
 
-    // 2. Fallback: archivo version.json en el bucket apk
+    // 2. Consultar version.json desde el propio hosting (Cloudflare Pages / dominio web)
+    //    ZERO egress de Supabase - el archivo reside en el mismo servidor web
     if (!updateData) {
       try {
-        const oldUrl = typeof SUPABASE_OLD_URL !== 'undefined' ? SUPABASE_OLD_URL : "https://tuqwzrsgczhgmfnfmryw.supabase.co"
-        const res = await fetch(`${oldUrl}/storage/v1/object/public/apk/version.json?t=${Date.now()}`)
+        const res = await fetch('./version.json?t=' + Date.now())
         if (res.ok) {
           updateData = await res.json()
         }
+      } catch (e) {}
+    }
+    // 3. Fallback a Supabase solo si el hosting propio fallo
+    if (!updateData) {
+      try {
+        const fbUrl = (typeof SUPABASE_OLD_URL !== 'undefined' ? SUPABASE_OLD_URL : 'https://tuqwzrsgczhgmfnfmryw.supabase.co')
+        const res2 = await fetch(fbUrl + '/storage/v1/object/public/apk/version.json?t=' + Date.now())
+        if (res2.ok) { updateData = await res2.json() }
       } catch (e) {}
     }
 
@@ -6773,17 +6739,6 @@ async function checkAppUpdate(isManual = false) {
     }
 
     const hasNewerVersion = compareSemVer(updateData.latest_version, CURRENT_APP_VERSION) > 0
-
-    // ⚠️ FORCE-UPDATE: Si la versión actual es inferior a la mínima requerida
-    // O si el admin activó force_update=true en Supabase, bloqueamos la app completa.
-    const isForcedByFlag = updateData.force_update === true
-    const isForcedByVersion = compareSemVer(CURRENT_APP_VERSION, MIN_REQUIRED_VERSION) < 0
-
-    if ((isForcedByFlag || isForcedByVersion) && hasNewerVersion) {
-      showForceUpdateScreen(updateData)
-      return
-    }
-
     if (hasNewerVersion) {
       showUpdateModal(updateData)
     } else if (isManual) {
@@ -6793,76 +6748,6 @@ async function checkAppUpdate(isManual = false) {
     console.warn('[APP-UPDATE] Error verificando actualización:', err)
     if (isManual) alert('No se pudo verificar la actualización.')
   }
-}
-
-// 🚫 PANTALLA COMPLETA BLOQUEANTE — el usuario DEBE actualizar para usar la app
-function showForceUpdateScreen(info) {
-  // Eliminar modal anterior si existe
-  const existingForce = document.getElementById('force-update-screen')
-  if (existingForce) return // ya está mostrando
-
-  // Ocultar toda la app detrás del overlay
-  const overlay = document.createElement('div')
-  overlay.id = 'force-update-screen'
-  overlay.style.cssText = [
-    'position:fixed', 'inset:0', 'z-index:99999',
-    'background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)',
-    'display:flex', 'align-items:center', 'justify-content:center',
-    'padding:1.5rem', 'flex-direction:column'
-  ].join(';')
-
-  const notes = Array.isArray(info.release_notes)
-    ? info.release_notes.map(n => `<li style="margin-bottom:4px">• ${n}</li>`).join('')
-    : `<li>• ${info.release_notes || 'Optimización crítica de rendimiento y consumo de datos.'}</li>`
-
-  const apkUrl = info.apk_url || `https://tuqwzrsgczhgmfnfmryw.supabase.co/storage/v1/object/public/apk/sonimax-movil.apk`
-
-  overlay.innerHTML = `
-    <div style="max-width:380px;width:100%;text-align:center">
-      <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#f97316);display:flex;align-items:center;justify-content:center;margin:0 auto 1.5rem;box-shadow:0 0 40px rgba(220,38,38,0.5)">
-        <svg width="40" height="40" fill="none" stroke="white" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-        </svg>
-      </div>
-
-      <h1 style="color:white;font-size:1.5rem;font-weight:800;margin-bottom:.5rem;line-height:1.2">
-        Actualización Obligatoria
-      </h1>
-      <p style="color:#94a3b8;font-size:.875rem;margin-bottom:1.5rem;line-height:1.5">
-        Esta versión ya no es compatible. Por favor instala la nueva versión para continuar usando SONIMAX Móvil.
-      </p>
-
-      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:1rem;margin-bottom:1.5rem;text-align:left">
-        <p style="color:#f8fafc;font-size:.75rem;font-weight:700;margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">Novedades en v${info.latest_version}:</p>
-        <ul style="color:#94a3b8;font-size:.8rem;line-height:1.8;margin:0;padding:0;list-style:none">${notes}</ul>
-      </div>
-
-      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:.75rem;margin-bottom:1.5rem">
-        <p style="color:#64748b;font-size:.7rem;margin:0">
-          Versión actual: <span style="color:#f87171;font-weight:700">v${CURRENT_APP_VERSION}</span>
-          &nbsp;&nbsp;→&nbsp;&nbsp;
-          Nueva versión: <span style="color:#4ade80;font-weight:700">v${info.latest_version}</span>
-        </p>
-      </div>
-
-      <a href="${apkUrl}" 
-         onclick="window.open('${apkUrl}','_system');return false"
-         style="display:block;width:100%;padding:1rem;background:linear-gradient(135deg,#dc2626,#f97316);color:white;font-weight:800;font-size:1rem;border-radius:14px;text-decoration:none;box-shadow:0 8px 32px rgba(220,38,38,0.4);transition:all .2s;margin-bottom:.75rem;box-sizing:border-box">
-        ⬇️ Descargar e Instalar v${info.latest_version}
-      </a>
-
-      <p style="color:#475569;font-size:.7rem;line-height:1.4">
-        La aplicación quedará bloqueada hasta que instales la actualización.
-        <br>Descarga el archivo .apk y abre el instalador.
-      </p>
-    </div>
-  `
-
-  document.body.appendChild(overlay)
-
-  // Bloquear todo tipo de navegación — el usuario solo puede tocar el botón de descarga
-  overlay.addEventListener('click', (e) => e.stopPropagation())
-  document.addEventListener('keydown', (e) => { if (document.getElementById('force-update-screen')) e.preventDefault() }, true)
 }
 
 function showUpdateModal(info) {
@@ -6902,9 +6787,11 @@ function showUpdateModal(info) {
           </svg>
           Actualizar e Instalar Ahora
         </button>
+        ${!info.force_update ? `
         <button id="btn-dismiss-apk-update" class="w-full py-2 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition">
           Recordar más tarde
         </button>
+        ` : ''}
       </div>
     </div>
   `
@@ -6923,3 +6810,5 @@ function showUpdateModal(info) {
 
 // Exponer globalmente
 window.checkAppUpdate = checkAppUpdate
+
+
