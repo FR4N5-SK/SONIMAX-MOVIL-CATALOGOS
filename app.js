@@ -6739,7 +6739,8 @@ async function checkAppUpdate(isManual = false) {
     }
 
     const hasNewerVersion = compareSemVer(updateData.latest_version, CURRENT_APP_VERSION) > 0
-    if (hasNewerVersion) {
+    const dismissedVersion = localStorage.getItem('sonimax_dismissed_update_version')
+    if (hasNewerVersion && (isManual || dismissedVersion !== updateData.latest_version)) {
       showUpdateModal(updateData)
     } else if (isManual) {
       alert(`✅ Tienes la última versión instalada (v${CURRENT_APP_VERSION})`)
@@ -6804,6 +6805,7 @@ function showUpdateModal(info) {
   })
 
   document.getElementById('btn-dismiss-apk-update')?.addEventListener('click', () => {
+    localStorage.setItem('sonimax_dismissed_update_version', info.latest_version)
     modal.remove()
   })
 }

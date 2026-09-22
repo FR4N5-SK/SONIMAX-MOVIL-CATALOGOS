@@ -91,6 +91,266 @@
     return urlData.publicUrl;
   };
 
+  // ============================================
+  // HELPER: Normalizar texto para comparacion
+  // ============================================
+  function _normalizeForMatch(str) {
+    return (str || '')
+      .toString()
+      .trim()
+      .toUpperCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
+      .replace(/[^A-Z0-9]/g, ' ')                        // no alfanum -> espacio
+      .replace(/\s+/g, ' ')                               // colapsar espacios
+      .trim();
+  }
+
+  // Busca el producto en allProducts que mejor coincide con el nombre de archivo
+  function _matchFileToProduct(fileName, products) {
+    const baseName = _normalizeForMatch(fileName.replace(/\.[^.]+$/, '')); // quitar extension
+    let best = null;
+    let bestScore = 0;
+
+    for (const p of products) {
+      const codigo  = _normalizeForMatch(p.codigo);
+      const nombre  = _normalizeForMatch(p.nombre || p.descripcion);
+
+      // 1. Coincidencia exacta por código
+      if (codigo && baseName === codigo) return { product: p, score: 100, matchType: 'Código exacto' };
+      // 2. El nombre de archivo contiene el código como palabra entera
+      if (codigo && baseName.includes(codigo) && codigo.length >= 3) {
+        const score = 90 + (codigo.length / baseName.length) * 10;
+        if (score > bestScore) { best = p; bestScore = score; p._matchType = 'Código parcial'; }
+      }
+      // 3. El código contiene el nombre del archivo
+      if (codigo && codigo.includes(baseName) && baseName.length >= 3) {
+        const score = 80;
+        if (score > bestScore) { best = p; bestScore = score; p._matchType = 'Código contiene nombre'; }
+      }
+      // 4. Coincidencia exacta por nombre
+      if (nombre && baseName === nombre) {
+        const score = 85;
+        if (score > bestScore) { best = p; bestScore = score; p._matchType = 'Nombre exacto'; }
+      }
+      // 5. Nombre del archivo contiene el nombre del producto (>= 8 chars)
+      if (nombre && nombre.length >= 8 && baseName.includes(nombre)) {
+        const score = 70 + (nombre.length / baseName.length) * 10;
+        if (score > bestScore) { best = p; bestScore = score; p._matchType = 'Nombre parcial'; }
+      }
+    }
+    return best ? { product: best, score: bestScore, matchType: best._matchType || 'Parcial' } : null;
+  }
+
+  // Modal de previsualización para carga masiva desde carpeta
+  async function _showFolderBulkPreview(files, allProducts, modalDiv) {
+    const { supabaseClient } = getGlobalState();
+    const activeClient = supabaseClient || window.supabaseClient;
+
+    // Filtrar solo imágenes
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      alert('No se encontraron imágenes en la carpeta seleccionada.');
+      return;
+    }
+
+    // Emparejar cada imagen con un producto
+    const pairs = imageFiles.map(file => {
+      const match = _matchFileToProduct(file.name, allProducts);
+      return { file, match, selected: !!match };
+    });
+
+    // Crear modal de previsualización
+    const previewModal = document.createElement('div');
+    previewModal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-3 overflow-y-auto';
+    previewModal.innerHTML = `
+      <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-3xl w-full shadow-2xl my-4 border border-gray-100 dark:border-gray-700">
+        <div class="bg-gradient-to-r from-violet-600 to-violet-700 p-5 text-white sticky top-0 z-10 rounded-t-2xl flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-bold flex items-center gap-2">📁 Vista Previa — Carga Masiva desde Carpeta</h2>
+            <p class="text-violet-100 text-sm mt-0.5">${imageFiles.length} imágenes encontradas — Revisa y confirma los emparejamientos</p>
+          </div>
+          <button id="bulk-preview-close" class="text-white hover:bg-violet-800 p-2 rounded-xl transition text-xl font-bold">✕</button>
+        </div>
+
+        <!-- Resumen -->
+        <div class="px-5 py-3 bg-violet-50 dark:bg-gray-700 border-b border-violet-100 dark:border-gray-600 flex flex-wrap gap-4 text-sm">
+          <span class="font-semibold text-violet-800 dark:text-violet-200">
+            ✅ <span id="bulk-match-count">${pairs.filter(p=>p.match).length}</span> con producto encontrado
+          </span>
+          <span class="font-semibold text-red-600 dark:text-red-400">
+            ❌ <span id="bulk-nomatch-count">${pairs.filter(p=>!p.match).length}</span> sin coincidencia
+          </span>
+          <span class="font-semibold text-gray-600 dark:text-gray-300">
+            ☑️ <span id="bulk-selected-count">${pairs.filter(p=>p.selected).length}</span> seleccionadas para subir
+          </span>
+        </div>
+
+        <!-- Tabla de pares -->
+        <div id="bulk-pairs-list" class="divide-y divide-gray-100 dark:divide-gray-700 max-h-[50vh] overflow-y-auto">
+        </div>
+
+        <!-- Barra de progreso (oculta inicialmente) -->
+        <div id="bulk-progress-section" class="hidden px-5 py-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-100">
+          <div class="flex justify-between text-sm mb-1">
+            <span id="bulk-progress-text" class="font-semibold text-gray-700 dark:text-gray-200">Procesando...</span>
+            <span id="bulk-progress-pct" class="text-gray-500">0%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div id="bulk-progress-bar" class="bg-violet-600 h-2.5 rounded-full transition-all" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Acciones -->
+        <div class="p-5 border-t border-gray-100 dark:border-gray-700 flex gap-3">
+          <button id="bulk-upload-btn" class="flex-1 py-3 px-5 bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm">
+            🚀 Subir Fotos Seleccionadas (<span id="bulk-count-label">${pairs.filter(p=>p.selected).length}</span>)
+          </button>
+          <button id="bulk-cancel-btn" class="py-3 px-5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-xl hover:bg-gray-200 transition text-sm">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(previewModal);
+
+    // Renderizar la tabla de pares
+    function renderPairs() {
+      const listEl = previewModal.querySelector('#bulk-pairs-list');
+      listEl.innerHTML = pairs.map((pair, idx) => {
+        const p = pair.match ? pair.match.product : null;
+        const previewUrl = URL.createObjectURL(pair.file);
+        const hasMatch = !!p;
+        const rowBg = !hasMatch ? 'bg-red-50 dark:bg-red-900/10' : (pair.selected ? '' : 'opacity-50');
+        return `
+          <div class="flex items-center gap-3 px-4 py-3 ${rowBg} hover:bg-gray-50 dark:hover:bg-gray-700/50 transition" data-pair-idx="${idx}">
+            <!-- Checkbox -->
+            <input type="checkbox" class="bulk-pair-check w-4 h-4 accent-violet-600 cursor-pointer flex-shrink-0"
+              data-idx="${idx}" ${pair.selected ? 'checked' : ''} ${!hasMatch ? 'disabled' : ''}>
+            <!-- Miniatura imagen -->
+            <img src="${previewUrl}" class="w-12 h-12 object-cover rounded-lg shadow-sm flex-shrink-0 border border-gray-200" loading="lazy">
+            <!-- Info archivo -->
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">${pair.file.name}</p>
+              <p class="text-[10px] text-gray-400 mt-0.5">${Math.round(pair.file.size/1024)} KB</p>
+            </div>
+            <!-- Flecha -->
+            <span class="text-gray-300 text-lg flex-shrink-0">${hasMatch ? '→' : '✗'}</span>
+            <!-- Producto encontrado -->
+            <div class="flex-1 min-w-0 ${hasMatch ? '' : 'text-red-500'}">
+              ${hasMatch
+                ? `<p class="text-xs font-bold text-gray-900 dark:text-white truncate">${p.codigo || ''}</p>
+                   <p class="text-[10px] text-gray-500 dark:text-gray-400 truncate">${p.nombre || ''}</p>
+                   <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${pair.match.score >= 90 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">${pair.match.matchType} (${Math.round(pair.match.score)}%)</span>`
+                : '<p class="text-xs font-semibold">Sin coincidencia</p><p class="text-[10px] text-gray-400">Revisa el nombre del archivo</p>'}
+            </div>
+          </div>`;
+      }).join('');
+
+      // Actualizar contadores
+      const sel = pairs.filter(p => p.selected).length;
+      previewModal.querySelector('#bulk-selected-count').textContent = sel;
+      previewModal.querySelector('#bulk-count-label').textContent = sel;
+      previewModal.querySelector('#bulk-match-count').textContent = pairs.filter(p=>p.match).length;
+      previewModal.querySelector('#bulk-nomatch-count').textContent = pairs.filter(p=>!p.match).length;
+    }
+    renderPairs();
+
+    // Toggle checkboxes
+    previewModal.querySelector('#bulk-pairs-list').addEventListener('change', (e) => {
+      if (e.target.classList.contains('bulk-pair-check')) {
+        const idx = parseInt(e.target.dataset.idx);
+        pairs[idx].selected = e.target.checked;
+        const sel = pairs.filter(p => p.selected).length;
+        previewModal.querySelector('#bulk-selected-count').textContent = sel;
+        previewModal.querySelector('#bulk-count-label').textContent = sel;
+      }
+    });
+
+    // Cerrar
+    previewModal.querySelector('#bulk-preview-close').addEventListener('click', () => previewModal.remove());
+    previewModal.querySelector('#bulk-cancel-btn').addEventListener('click', () => previewModal.remove());
+
+    // Subida masiva
+    previewModal.querySelector('#bulk-upload-btn').addEventListener('click', async () => {
+      const toUpload = pairs.filter(p => p.selected && p.match);
+      if (toUpload.length === 0) {
+        alert('No hay imágenes seleccionadas para subir.');
+        return;
+      }
+
+      const uploadBtn = previewModal.querySelector('#bulk-upload-btn');
+      const cancelBtn = previewModal.querySelector('#bulk-cancel-btn');
+      const progressSection = previewModal.querySelector('#bulk-progress-section');
+      const progressBar = previewModal.querySelector('#bulk-progress-bar');
+      const progressText = previewModal.querySelector('#bulk-progress-text');
+      const progressPct = previewModal.querySelector('#bulk-progress-pct');
+
+      uploadBtn.disabled = true;
+      cancelBtn.disabled = true;
+      progressSection.classList.remove('hidden');
+
+      let done = 0, errors = 0;
+      const results = [];
+
+      for (const pair of toUpload) {
+        const p = pair.match.product;
+        progressText.textContent = `Subiendo: ${pair.file.name}...`;
+        try {
+          // Subir imagen comprimida al bucket
+          const photoUrl = await uploadProductPhotoFile(pair.file, p.id);
+
+          // Guardar URL en la BD
+          const { error: dbErr } = await activeClient
+            .from('products')
+            .update({ imagen_url: photoUrl })
+            .eq('id', p.id);
+
+          if (dbErr) throw dbErr;
+
+          // Actualizar en memoria
+          if (window.allProducts) {
+            const idx = window.allProducts.findIndex(x => String(x.id) === String(p.id));
+            if (idx !== -1) window.allProducts[idx].imagen_url = photoUrl;
+          }
+
+          results.push({ name: pair.file.name, product: p, ok: true });
+          done++;
+
+          // Quitar producto de la lista principal si estaba en la lista de sin foto
+          const noPhotoItem = modalDiv?.querySelector(`.no-photo-item[data-id="${p.id}"]`);
+          if (noPhotoItem) noPhotoItem.remove();
+
+        } catch (err) {
+          console.error('[BULK-UPLOAD] Error subiendo', pair.file.name, err);
+          results.push({ name: pair.file.name, product: p, ok: false, err: err.message });
+          errors++;
+        }
+
+        const total = toUpload.length;
+        const pct = Math.round(((done + errors) / total) * 100);
+        progressBar.style.width = pct + '%';
+        progressPct.textContent = pct + '%';
+      }
+
+      // Re-renderizar catálogo
+      if (window.renderProducts) window.renderProducts();
+
+      // Actualizar contador del modal principal
+      if (modalDiv) {
+        const remaining = modalDiv.querySelectorAll('.no-photo-item').length;
+        const subtitleEl = modalDiv.querySelector('.text-amber-100');
+        if (subtitleEl) subtitleEl.textContent = `Total pendientes: ${remaining} — Selecciona una imagen desde tu dispositivo para subirla al instante`;
+      }
+
+      progressText.textContent = `✅ Completado: ${done} subidas, ${errors} errores.`;
+      progressPct.textContent = '100%';
+      progressBar.style.width = '100%';
+      uploadBtn.disabled = false;
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = 'Cerrar';
+    });
+  }
+
   window.showProductsWithoutPhoto = async function() {
     try {
       const { allProducts } = getGlobalState();
@@ -107,14 +367,25 @@
       modalDiv.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto';
       modalDiv.innerHTML = `
         <div class="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full shadow-2xl my-8 border border-gray-100 dark:border-gray-700">
-          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 flex items-center justify-between rounded-t-2xl shadow">
-            <div>
-              <h2 class="text-2xl font-bold flex items-center gap-2">
-                <span>📷</span> Productos sin Foto
-              </h2>
-              <p class="text-amber-100 text-sm mt-1">Total pendientes: ${productsWithoutPhoto.length} — Selecciona una imagen desde tu dispositivo para subirla al instante</p>
+          <div class="bg-gradient-to-r from-amber-600 to-amber-700 p-6 text-white sticky top-0 z-10 rounded-t-2xl shadow">
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-2xl font-bold flex items-center gap-2">
+                  <span>📷</span> Productos sin Foto
+                </h2>
+                <p class="text-amber-100 text-sm mt-1" id="no-photo-subtitle">Total pendientes: ${productsWithoutPhoto.length} — Selecciona una imagen desde tu dispositivo para subirla al instante</p>
+              </div>
+              <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-xl transition text-xl font-bold">✕</button>
             </div>
-            <button onclick="this.closest('.fixed').remove()" class="text-white hover:bg-amber-800 p-2 rounded-xl transition text-xl font-bold">✕</button>
+            <!-- Botón carga masiva desde carpeta -->
+            <div class="mt-4">
+              <label class="flex items-center gap-2 cursor-pointer bg-white/20 hover:bg-white/30 border border-white/40 rounded-xl px-4 py-2.5 transition w-full sm:w-auto">
+                <span class="text-lg">📁</span>
+                <span class="font-semibold text-sm">Cargar fotos desde Carpeta (carga masiva)</span>
+                <input type="file" id="bulk-folder-input" webkitdirectory multiple accept="image/*" class="hidden">
+              </label>
+              <p class="text-amber-200 text-xs mt-1.5">Las imágenes se emparejan automáticamente por código o nombre del archivo</p>
+            </div>
           </div>
           
           <div class="p-6 space-y-4">
@@ -192,6 +463,18 @@
         </div>
       `;
       document.body.appendChild(modalDiv);
+
+      // ============================================
+      // CARGA MASIVA DESDE CARPETA
+      // ============================================
+      const bulkFolderInput = document.getElementById('bulk-folder-input');
+      bulkFolderInput?.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+        // Incluir TODOS los productos (no solo los sin foto) para que actualice también los que ya tienen
+        _showFolderBulkPreview(files, allProducts, modalDiv);
+        e.target.value = ''; // reset para poder seleccionar de nuevo
+      });
 
       // Búsqueda
       const searchInput = document.getElementById('no-photo-search');
@@ -291,7 +574,7 @@
 
             // Actualizar contador
             const remaining = modalDiv.querySelectorAll('.no-photo-item').length;
-            const subtitleEl = modalDiv.querySelector('.text-amber-100');
+            const subtitleEl = modalDiv.querySelector('#no-photo-subtitle');
             if (subtitleEl) {
               subtitleEl.textContent = `Total pendientes: ${remaining} — Selecciona una imagen desde tu dispositivo para subirla al instante`;
             }
@@ -824,7 +1107,27 @@
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-700 mb-1">URL Foto:</label>
-            <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
+            <!-- Opción A: subir archivo -->
+            <div class="mb-2">
+              <label class="flex items-center gap-2 cursor-pointer w-full bg-gray-50 border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-lg p-3 transition">
+                <span class="text-xl">🖼️</span>
+                <span class="text-xs font-semibold text-indigo-700" id="edit-file-label">Elegir imagen desde archivo...</span>
+                <input type="file" accept="image/*" id="edit-photo-file" class="hidden">
+              </label>
+              <div id="edit-photo-preview-container" class="hidden mt-2 flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-200">
+                <img id="edit-photo-preview-img" src="" class="w-14 h-14 object-cover rounded-lg shadow-sm">
+                <div class="flex-1 min-w-0">
+                  <p id="edit-photo-preview-name" class="text-xs font-semibold text-gray-800 truncate"></p>
+                  <p class="text-[10px] text-green-600 font-bold">✓ Se subirá al guardar</p>
+                </div>
+                <button type="button" id="edit-photo-clear" class="text-gray-400 hover:text-red-500 text-lg transition">✕</button>
+              </div>
+            </div>
+            <!-- Opción B: URL directa -->
+            <details class="text-xs text-gray-500">
+              <summary class="cursor-pointer font-medium hover:text-indigo-600">O pegar URL directa</summary>
+              <input type="url" id="edit-url" value="${product.imagen_url || ''}" class="w-full mt-2 px-3 py-2 border-2 border-gray-300 rounded-lg text-sm">
+            </details>
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-700 mb-1">Depósito (Inventario):</label>
@@ -854,12 +1157,57 @@
       </div>
     `;
     document.body.appendChild(formDiv);
-    document.getElementById('edit-deposito').value = currentDeposito; // Ahora currentDeposito tiene el valor correcto
+    document.getElementById('edit-deposito').value = currentDeposito;
+
+    // Manejador preview de foto por archivo
+    const photoFileInput = document.getElementById('edit-photo-file');
+    const photoPreviewContainer = document.getElementById('edit-photo-preview-container');
+    const photoPreviewImg = document.getElementById('edit-photo-preview-img');
+    const photoPreviewName = document.getElementById('edit-photo-preview-name');
+    const photoFileLabel = document.getElementById('edit-file-label');
+    const photoClearBtn = document.getElementById('edit-photo-clear');
+
+    photoFileInput?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        photoPreviewImg.src = URL.createObjectURL(file);
+        photoPreviewName.textContent = `${file.name} (${Math.round(file.size/1024)} KB)`;
+        photoFileLabel.textContent = file.name;
+        photoPreviewContainer.classList.remove('hidden');
+      }
+    });
+
+    photoClearBtn?.addEventListener('click', () => {
+      photoFileInput.value = '';
+      photoPreviewContainer.classList.add('hidden');
+      photoFileLabel.textContent = 'Elegir imagen desde archivo...';
+    });
   }
 
   window.saveProductEdit = async function(productId, productCode) {
-    const { supabaseClient, allProducts } = getGlobalState();
-    
+    const { supabaseClient } = getGlobalState();
+
+    // Determinar imagen_url: si hay archivo seleccionado, subirlo primero
+    let imagenUrl = (document.getElementById('edit-url')?.value || '').trim();
+    const photoFileInput = document.getElementById('edit-photo-file');
+    const selectedPhotoFile = photoFileInput?.files?.[0];
+
+    // Botón guardar: feedback visual durante subida
+    const saveBtn = document.querySelector('.fixed .bg-indigo-600');
+    const originalBtnText = saveBtn ? saveBtn.textContent : '';
+    if (saveBtn) { saveBtn.textContent = '⏳ Guardando...'; saveBtn.disabled = true; }
+
+    try {
+      if (selectedPhotoFile) {
+        if (saveBtn) saveBtn.textContent = '⏳ Subiendo foto...';
+        imagenUrl = await uploadProductPhotoFile(selectedPhotoFile, productId);
+      }
+    } catch (uploadErr) {
+      if (saveBtn) { saveBtn.textContent = originalBtnText; saveBtn.disabled = false; }
+      alert('Error subiendo la foto: ' + uploadErr.message);
+      return;
+    }
+
     const updates = {
       codigo: document.getElementById('edit-codigo').value,
       nombre: document.getElementById('edit-nombre').value,
@@ -869,7 +1217,7 @@
       precio_mayor: parseFloat(document.getElementById('edit-precio-mayor').value) || 0,
       precio_gmayor: parseFloat(document.getElementById('edit-precio-gmayor').value) || 0,
       stock: parseInt(document.getElementById('edit-stock').value) || 0,
-      imagen_url: document.getElementById('edit-url').value
+      imagen_url: imagenUrl
     };
 
     const newDeposito = document.getElementById('edit-deposito').value || null;
@@ -903,15 +1251,44 @@
         }
       }
 
-      alert('✅ Producto actualizado correctamente');
+      // ✅ FIX: Actualizar solo el producto en memoria (evitar recargar todo el inventario)
+      if (window.allProducts) {
+        const idx = window.allProducts.findIndex(p => String(p.id) === String(productId));
+        if (idx !== -1) {
+          window.allProducts[idx] = { ...window.allProducts[idx], ...updates };
+          console.log('[EDIT] ✅ Producto actualizado en memoria:', updates.codigo);
+        }
+      }
+
+      // Cerrar modal inmediatamente
       document.querySelector('.fixed')?.remove();
-      await window.loadProducts();
-      window.renderProducts();
+
+      // Re-renderizar catálogo con los datos actualizados
+      if (window.renderProducts) window.renderProducts();
+
+      // Toast de éxito no bloqueante
+      _showEditSuccessToast('✅ Producto actualizado correctamente');
+
     } catch (error) {
+      if (saveBtn) { saveBtn.textContent = originalBtnText; saveBtn.disabled = false; }
       console.error('[EDIT] Error:', error);
       alert('Error: ' + error.message);
     }
   };
+
+  // Toast de éxito simple (no-blocking, reemplaza el alert)
+  function _showEditSuccessToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-2 transition-all';
+    toast.style.cssText = 'animation: slideUpFade 0.3s ease; pointer-events: none;';
+    toast.innerHTML = `<span>${message}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(-50%) translateY(10px)';
+      setTimeout(() => toast.remove(), 400);
+    }, 2800);
+  }
 
   // ============================================
   // CARGAR EXCEL DE PRECIOS - REDIRIGIDO
