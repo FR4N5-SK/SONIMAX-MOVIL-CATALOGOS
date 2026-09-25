@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v11"
+const CACHE_VERSION = "v12"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-permanent"
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -95,14 +95,23 @@ self.addEventListener("fetch", (event) => {
         // 1. Intentar servir desde caché local
         const cachedResponse = await cache.match(event.request, { ignoreSearch: false })
         if (cachedResponse) {
-          return cachedResponse
+          // Si la petición exige CORS y la respuesta cacheada es opaca, no entregarla para no romper la exportación
+          if (event.request.mode === "cors" && cachedResponse.type === "opaque") {
+            // Dejar pasar a red para obtener respuesta con CORS limpio
+          } else {
+            return cachedResponse
+          }
         }
 
         // Si la URL tiene parámetros, intentar match por URL limpia
         const cleanUrl = url.origin + url.pathname
         const cleanMatch = await cache.match(cleanUrl)
         if (cleanMatch) {
-          return cleanMatch
+          if (event.request.mode === "cors" && cleanMatch.type === "opaque") {
+            // Dejar pasar a red
+          } else {
+            return cleanMatch
+          }
         }
 
         // 2. Si no está en caché, descargar de la red y guardar copia

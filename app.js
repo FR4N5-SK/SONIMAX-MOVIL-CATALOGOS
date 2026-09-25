@@ -1357,6 +1357,7 @@ function initImageObserver() {
             const fullSrc = img.dataset.src
 
             if (fullSrc && fullSrc !== DEFAULT_PRODUCT_PLACEHOLDER && !fullSrc.startsWith("data:")) {
+              img.crossOrigin = "anonymous"
               img.src = fullSrc
               img.onload = () => {
                 img.classList.remove("image-loading")
@@ -3482,6 +3483,7 @@ function createProductCard(product) {
       </button>
       <img src="${placeholderUrl}"
            data-src="${optimizedUrl}"
+           crossorigin="anonymous"
            alt="${product.nombre}"
            class="product-image image-loading cursor-pointer hover:opacity-90 transition-opacity"
            loading="lazy">

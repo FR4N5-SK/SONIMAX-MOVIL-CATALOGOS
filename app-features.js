@@ -1360,59 +1360,207 @@
     }
   };
 
-  // Función auxiliar optimizada para convertir URL de imagen a base64 con timeout de seguridad
-  const imageUrlToBase64 = (url) => {
-    return new Promise((resolve) => {
-      if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:image/svg")) {
-        return resolve(null);
-      }
-      
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      
-      const TIMEOUT = 10000; // 10 segundos de timeout para no bloquear el PDF
-      const timeoutId = setTimeout(() => {
-        console.warn('[PDF] ⏱️ Timeout cargando imagen:', url);
-        resolve(null);
-      }, TIMEOUT);
+  // Cache en memoria para acceso ultrarrápido durante la exportación de PDFs
+  window._pdfImgMemoryCache = window._pdfImgMemoryCache || new Map();
 
+  // Convierte un Blob a DataURL redimensionado de forma 100% segura (CERO Tainted Canvas)
+  const blobToResizedDataUrl = (blob, maxDim = 320, quality = 0.72) => {
+    return new Promise((resolve) => {
+      if (!blob || blob.size === 0) return resolve(null);
+      const objectUrl = URL.createObjectURL(blob);
+      const img = new Image();
       img.onload = () => {
-        clearTimeout(timeoutId);
         try {
           const canvas = document.createElement('canvas');
-          // Redimensionar para optimizar tamaño y memoria del PDF
-          const MAX_DIM = 200; // Suficiente para miniaturas de tabla (25mm)
-          let width = img.width;
-          let height = img.height;
-          if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
-          else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
-
-          canvas.width = Math.max(1, Math.round(width));
-          canvas.height = Math.max(1, Math.round(height));
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+          if (width === 0 || height === 0) {
+            URL.revokeObjectURL(objectUrl);
+            return resolve(null);
+          }
+          if (width > height && width > maxDim) {
+            height = Math.round(height * maxDim / width);
+            width = maxDim;
+          } else if (height > maxDim) {
+            width = Math.round(width * maxDim / height);
+            height = maxDim;
+          }
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          // Calidad 0.6 para mantener el PDF ligero
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-          // Limpiar canvas de memoria
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
           canvas.width = 0;
           canvas.height = 0;
+          URL.revokeObjectURL(objectUrl);
           resolve(dataUrl);
-        } catch (canvasErr) {
-          console.warn('[PDF] Error en canvas:', canvasErr);
+        } catch (e) {
+          console.warn('[PDF] Error canvas en blob:', e);
+          URL.revokeObjectURL(objectUrl);
           resolve(null);
         }
       };
-      
       img.onerror = () => {
-        clearTimeout(timeoutId);
-        console.warn('[PDF] No se pudo cargar imagen:', url);
+        URL.revokeObjectURL(objectUrl);
         resolve(null);
       };
-      
-      // Usar URL optimizada
-      const optimizedUrl = typeof window.optimizeImageUrl === 'function' ? window.optimizeImageUrl(url, { width: 300, quality: 60 }) : url;
-      img.src = optimizedUrl;
+      img.src = objectUrl;
     });
+  };
+
+  // Helper para fetch con timeout y modo CORS
+  const fetchAsBlob = async (targetUrl, timeoutMs = 8000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(targetUrl, {
+        mode: 'cors',
+        credentials: 'omit',
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (resp.ok && resp.type !== 'opaque') {
+        const b = await resp.blob();
+        if (b && b.size > 0 && (b.type.startsWith('image/') || b.type === 'application/octet-stream')) {
+          return b;
+        }
+      }
+      return null;
+    } catch (_) {
+      clearTimeout(timer);
+      return null;
+    }
+  };
+
+  // Función multi-nivel infalible para convertir cualquier imagen a Base64 para el PDF
+  const imageUrlToBase64 = async (url) => {
+    if (!url || url === "/images/ProductImages.jpg" || url.startsWith("data:image/svg")) {
+      return null;
+    }
+
+    if (url.startsWith("data:image/")) {
+      return url;
+    }
+
+    // 1. Limpiar y normalizar URL
+    let rawUrl = url.split('?')[0].trim();
+    // Convertir transformaciones de Supabase a URL de objeto directo para no consumir cuotas
+    if (rawUrl.includes('/storage/v1/render/image/public/')) {
+      rawUrl = rawUrl.replace('/storage/v1/render/image/public/', '/storage/v1/object/public/');
+    }
+
+    // 2. Revisar caché en memoria RAM
+    if (window._pdfImgMemoryCache.has(rawUrl)) {
+      return window._pdfImgMemoryCache.get(rawUrl);
+    }
+
+    // 3. Revisar caché en sessionStorage
+    const cacheKey = 'pdf_img_' + rawUrl;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        window._pdfImgMemoryCache.set(rawUrl, cached);
+        return cached;
+      }
+    } catch (_) {}
+
+    // 4. Revisar si ya está en Cache API permanente local
+    if ('caches' in window) {
+      try {
+        const imgCache = await caches.open('sonimax-images-permanent');
+        const match = await imgCache.match(rawUrl);
+        if (match && match.type !== 'opaque') {
+          const cachedBlob = await match.blob();
+          if (cachedBlob && cachedBlob.size > 0) {
+            const dataUrl = await blobToResizedDataUrl(cachedBlob);
+            if (dataUrl) {
+              window._pdfImgMemoryCache.set(rawUrl, dataUrl);
+              try { sessionStorage.setItem(cacheKey, dataUrl); } catch (_) {}
+              return dataUrl;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    let resultDataUrl = null;
+
+    // 5. Intento directo con fetch (añadiendo ?pdf=1 para saltar respuestas opacas cacheadas)
+    const directFetchUrl = rawUrl.includes('?') ? `${rawUrl}&pdf=1` : `${rawUrl}?pdf=1`;
+    let blob = await fetchAsBlob(directFetchUrl, 6000);
+    if (blob) {
+      resultDataUrl = await blobToResizedDataUrl(blob);
+    }
+
+    // 6. Si falló (típico en ibb.co o servidores que no envían cabeceras CORS):
+    // Usar proxy Cloudflare CDN (weserv.nl) que añade CORS limpio y comprime
+    if (!resultDataUrl) {
+      const weservUrl = `https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}&w=320&output=jpg&q=75`;
+      blob = await fetchAsBlob(weservUrl, 8000);
+      if (blob) {
+        resultDataUrl = await blobToResizedDataUrl(blob);
+      }
+    }
+
+    // 7. Segundo proxy fallback (AllOrigins)
+    if (!resultDataUrl) {
+      const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rawUrl)}`;
+      blob = await fetchAsBlob(allOriginsUrl, 8000);
+      if (blob) {
+        resultDataUrl = await blobToResizedDataUrl(blob);
+      }
+    }
+
+    // 8. Fallback clásico con elemento <img> anónimo
+    if (!resultDataUrl) {
+      resultDataUrl = await new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const timer = setTimeout(() => resolve(null), 5000);
+        img.onload = () => {
+          clearTimeout(timer);
+          try {
+            const canvas = document.createElement('canvas');
+            const MAX_DIM = 320;
+            let width = img.naturalWidth || img.width;
+            let height = img.naturalHeight || img.height;
+            if (width === 0 || height === 0) return resolve(null);
+            if (width > height && width > MAX_DIM) {
+              height = Math.round(height * MAX_DIM / width);
+              width = MAX_DIM;
+            } else if (height > MAX_DIM) {
+              width = Math.round(width * MAX_DIM / height);
+              height = MAX_DIM;
+            }
+            canvas.width = Math.max(1, width);
+            canvas.height = Math.max(1, height);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const data = canvas.toDataURL('image/jpeg', 0.72);
+            canvas.width = 0;
+            canvas.height = 0;
+            resolve(data);
+          } catch (_) {
+            resolve(null);
+          }
+        };
+        img.onerror = () => {
+          clearTimeout(timer);
+          resolve(null);
+        };
+        img.src = rawUrl;
+      });
+    }
+
+    // Guardar en caché si se obtuvo con éxito
+    if (resultDataUrl) {
+      window._pdfImgMemoryCache.set(rawUrl, resultDataUrl);
+      try { sessionStorage.setItem(cacheKey, resultDataUrl); } catch (_) {}
+    } else {
+      console.warn('[PDF] ⚠️ Imagen no disponible para PDF tras todos los métodos:', rawUrl);
+    }
+
+    return resultDataUrl;
   };
 
   window.generatePdf = async function () {
@@ -1576,10 +1724,9 @@
         // Imagen del producto
         const imgData = assets[product.id];
         if (imgData) {
-          // NOTA: La calidad de la imagen y si tiene fondo o no depende de la URL de origen.
-          // Este código no puede eliminar fondos de imágenes.
           try {
-            doc.addImage(imgData, 'JPEG', x + 4, y + 4, w - 8, h * 0.5, undefined, 'FAST');
+            const format = imgData.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(imgData, format, x + 4, y + 4, w - 8, h * 0.5, undefined, 'FAST');
           } catch (e) {
             console.warn('[PDF] Error al añadir imagen para', product.codigo, e);
           }
