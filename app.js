@@ -1448,6 +1448,15 @@ function addRetryButton(imgElement, imageUrl) {
 // SISTEMA DE BANNERS (ROJO Y NEGRO)
 // ============================================
 
+// SISTEMA DE BANNERS (RESPONSIVE, FULL CALIDAD Y SUBIDA DIRECTA)
+const DEFAULT_HALLOWEEN_BANNER = {
+  id: "halloween-2026",
+  titulo: "¡SE DESATA EL TERROR CON SONIMAX MÓVIL!",
+  imagen_url: "./banner-halloween.png",
+  activo: true,
+  posicion: 0
+};
+
 async function loadBanners() {
   try {
     const { data, error } = await window.supabaseClient
@@ -1459,6 +1468,11 @@ async function loadBanners() {
     if (error) throw error
 
     banners = data || []
+
+    // Si no hay banners cargados en la base de datos, usar banner de Halloween por defecto
+    if (banners.length === 0) {
+      banners = [DEFAULT_HALLOWEEN_BANNER];
+    }
     
     // Guardar copia local de banners para funcionamiento offline
     try {
@@ -1467,15 +1481,13 @@ async function loadBanners() {
       console.warn("No se pudo guardar banners en caché local:", e);
     }
 
-    if (banners.length > 0) {
-      displayBanner(0)
-      startBannerAutoPlay()
-      renderBannerIndicators()
-    }
+    displayBanner(0)
+    startBannerAutoPlay()
+    renderBannerIndicators()
 
     console.log(`✅ ${banners.length} banners cargados`)
   } catch (error) {
-    console.error("❌ Error cargando banners:", error)
+    console.error("❌ Error cargando banners de Supabase:", error)
     
     // Intentar recuperar de caché local si está offline
     console.log("ℹ️ Intentando cargar banners desde caché local (offline)...");
@@ -1484,31 +1496,43 @@ async function loadBanners() {
       try {
         banners = JSON.parse(cachedBanners)
         console.log(`✅ ${banners.length} banners cargados desde caché local offline`)
-        if (banners.length > 0) {
-          displayBanner(0)
-          startBannerAutoPlay()
-          renderBannerIndicators()
-        }
       } catch (parseError) {
         console.error("❌ Error al parsear banners de caché:", parseError)
-        banners = []
+        banners = [DEFAULT_HALLOWEEN_BANNER]
       }
     } else {
-      banners = []
+      banners = [DEFAULT_HALLOWEEN_BANNER]
     }
+
+    if (banners.length === 0) {
+      banners = [DEFAULT_HALLOWEEN_BANNER]
+    }
+
+    displayBanner(0)
+    startBannerAutoPlay()
+    renderBannerIndicators()
   }
 }
 
 function displayBanner(index) {
-  if (banners.length === 0) return
+  if (!banners || banners.length === 0) {
+    banners = [DEFAULT_HALLOWEEN_BANNER]
+  }
 
   currentBannerIndex = index % banners.length
+  if (currentBannerIndex < 0) currentBannerIndex = banners.length - 1
   const banner = banners[currentBannerIndex]
 
   const bannerImage = document.getElementById("banner-image")
-  if (bannerImage) {
+  const bannerBgAmbient = document.getElementById("banner-bg-ambient")
+
+  if (bannerImage && banner) {
     bannerImage.src = banner.imagen_url
-    bannerImage.alt = banner.titulo
+    bannerImage.alt = banner.titulo || "Banner SONIMAX MÓVIL"
+  }
+
+  if (bannerBgAmbient && banner) {
+    bannerBgAmbient.src = banner.imagen_url
   }
 
   updateBannerIndicators()
@@ -1525,13 +1549,13 @@ function startBannerAutoPlay() {
 }
 
 function nextBanner() {
-  if (banners.length === 0) return
+  if (!banners || banners.length === 0) return
   displayBanner(currentBannerIndex + 1)
   restartBannerAutoPlay()
 }
 
 function previousBanner() {
-  if (banners.length === 0) return
+  if (!banners || banners.length === 0) return
   displayBanner(currentBannerIndex - 1)
   restartBannerAutoPlay()
 }
@@ -1545,6 +1569,8 @@ function renderBannerIndicators() {
   if (!container) return
 
   container.innerHTML = ""
+
+  if (!banners || banners.length <= 1) return;
 
   banners.forEach((_, index) => {
     const dot = document.createElement("button")
@@ -1579,34 +1605,39 @@ async function loadBannersForModal() {
       .select("id, titulo, imagen_url, activo, posicion")
       .order("posicion", { ascending: true })
 
-    if (error) throw error
+    if (error) {
+      console.warn("No se pudieron cargar banners de Supabase para modal:", error);
+    }
 
+    const currentList = (data && data.length > 0) ? data : banners;
     const list = document.getElementById("banners-list")
     const noMsg = document.getElementById("no-banners-msg")
 
-    if (!data || data.length === 0) {
+    if (!list) return;
+
+    if (!currentList || currentList.length === 0) {
       list.innerHTML = ""
-      noMsg.classList.remove("hidden")
+      noMsg?.classList.remove("hidden")
       return
     }
 
-    noMsg.classList.add("hidden")
+    noMsg?.classList.add("hidden")
     list.innerHTML = ""
 
-    data.forEach((banner) => {
+    currentList.forEach((banner) => {
       const item = document.createElement("div")
-      item.className = "p-4 border-2 border-gray-200 rounded-xl hover:border-red-400 transition-all"
+      item.className = "p-4 border-2 border-gray-200 dark:border-gray-700 rounded-xl hover:border-red-400 dark:hover:border-red-500 transition-all bg-white dark:bg-gray-800"
       item.innerHTML = `
         <div class="flex items-start gap-4">
-          <img src="${banner.imagen_url}" alt="${banner.titulo}" class="w-24 h-24 object-cover rounded-lg">
-          <div class="flex-1">
-            <h4 class="font-bold text-gray-800">${banner.titulo}</h4>
-            <p class="text-sm text-gray-600 mt-1 truncate">${banner.imagen_url}</p>
-            <div class="flex gap-2 mt-3">
-              <button class="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-all toggle-banner-btn" data-id="${banner.id}" data-active="${banner.activo}">
+          <img src="${banner.imagen_url}" alt="${banner.titulo}" class="w-24 h-16 sm:w-28 sm:h-20 object-contain bg-black/20 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div class="flex-1 min-w-0">
+            <h4 class="font-bold text-gray-800 dark:text-white truncate">${banner.titulo}</h4>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">${banner.imagen_url}</p>
+            <div class="flex flex-wrap gap-2 mt-3">
+              <button class="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold hover:bg-blue-200 transition-all toggle-banner-btn" data-id="${banner.id}" data-active="${banner.activo}">
                 ${banner.activo ? "✓ Activo" : "○ Inactivo"}
               </button>
-              <button class="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 transition-all delete-banner-btn" data-id="${banner.id}">
+              <button class="px-3 py-1.5 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg text-xs font-semibold hover:bg-red-200 transition-all delete-banner-btn" data-id="${banner.id}">
                 🗑️ Eliminar
               </button>
             </div>
@@ -1617,11 +1648,11 @@ async function loadBannersForModal() {
       const toggleBtn = item.querySelector(".toggle-banner-btn")
       const deleteBtn = item.querySelector(".delete-banner-btn")
 
-      toggleBtn.addEventListener("click", async () => {
+      toggleBtn?.addEventListener("click", async () => {
         await toggleBannerActive(banner.id, !banner.activo)
       })
 
-      deleteBtn.addEventListener("click", async () => {
+      deleteBtn?.addEventListener("click", async () => {
         if (confirm(`¿Eliminar banner "${banner.titulo}"?`)) {
           await deleteBanner(banner.id)
         }
@@ -1634,72 +1665,195 @@ async function loadBannersForModal() {
   }
 }
 
-async function addBanner() {
-  const title = document.getElementById("banner-title-input").value.trim()
-  const url = document.getElementById("banner-url-input").value.trim()
+// Sube el archivo original con 100% de calidad sin compresión destructiva
+async function uploadBannerFile(file) {
+  const storageClient = window.supabaseOldClient || window.supabaseClient;
+  const ext = file.name.split('.').pop().toLowerCase() || 'png';
+  const cleanName = file.name.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/\.[^.]+$/, '');
+  const filename = `banners/${cleanName}_${Date.now()}.${ext}`;
 
-  if (!title || !url) {
-    alert("Por favor completa todos los campos")
-    return
+  if (storageClient && storageClient.storage) {
+    try {
+      const { data, error: uploadErr } = await storageClient.storage
+        .from('product-images')
+        .upload(filename, file, {
+          contentType: file.type || 'image/png',
+          cacheControl: '31536000',
+          upsert: true
+        });
+
+      if (!uploadErr) {
+        const { data: urlData } = storageClient.storage.from('product-images').getPublicUrl(filename);
+        if (urlData && urlData.publicUrl) {
+          console.log("✅ Imagen de banner subida en Full Calidad a Storage:", urlData.publicUrl);
+          return urlData.publicUrl;
+        }
+      } else {
+        console.warn("Storage upload aviso:", uploadErr.message);
+      }
+    } catch (storageError) {
+      console.warn("Error con Supabase Storage, usando fallback:", storageError);
+    }
   }
 
-  if (!url.startsWith("http")) {
-    alert("Por favor ingresa una URL válida que comience con http:// o https://")
-    return
+  // Fallback seguro si no hay storage disponible: data URL en máxima calidad
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo local"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addBanner() {
+  const titleInput = document.getElementById("banner-title-input");
+  const urlInput = document.getElementById("banner-url-input");
+  const fileInput = document.getElementById("banner-file-input");
+  const addBtn = document.getElementById("add-banner-btn");
+
+  const title = (titleInput?.value || "").trim();
+  let url = (urlInput?.value || "").trim();
+  const file = fileInput?.files?.[0];
+
+  if (!title) {
+    alert("Por favor ingresa un título para el banner");
+    return;
+  }
+
+  if (!url && !file) {
+    alert("Por favor selecciona una imagen desde tu dispositivo o ingresa una URL válida");
+    return;
   }
 
   try {
-    const { data, error } = await window.supabaseClient
-      .from("banners")
-      .insert({
-        titulo: title,
-        imagen_url: url,
-        activo: true,
-        posicion: 0,
-      })
-      .select()
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = "⏳ Subiendo en Full Calidad...";
+    }
 
-    if (error) throw error
+    // 1. Si seleccionó un archivo local, subirlo en calidad original
+    if (file) {
+      url = await uploadBannerFile(file);
+    }
 
-    console.log("✅ Banner agregado:", data)
+    const newBanner = {
+      titulo: title,
+      imagen_url: url,
+      activo: true,
+      posicion: banners.length,
+    };
 
-    document.getElementById("banner-title-input").value = ""
-    document.getElementById("banner-url-input").value = ""
+    // 2. Insertar en tabla banners de Supabase
+    try {
+      const { data, error } = await window.supabaseClient
+        .from("banners")
+        .insert(newBanner)
+        .select();
 
-    loadBannersForModal()
-    loadBanners()
+      if (error) throw error;
+      console.log("✅ Banner agregado en Supabase:", data);
+    } catch (dbErr) {
+      console.warn("⚠️ Aviso guardando en Supabase (se activará localmente):", dbErr);
+    }
 
-    alert("¡Banner agregado exitosamente!")
+    // Actualizar lista en memoria y caché local
+    banners.unshift({ id: "banner_" + Date.now(), ...newBanner });
+    try {
+      localStorage.setItem("sonimax_banners", JSON.stringify(banners));
+    } catch (e) {}
+
+    // Limpiar formulario
+    if (titleInput) titleInput.value = "";
+    if (urlInput) urlInput.value = "";
+    if (fileInput) fileInput.value = "";
+    const prompt = document.getElementById("banner-upload-prompt");
+    const previewContainer = document.getElementById("banner-upload-preview-container");
+    if (prompt) prompt.classList.remove("hidden");
+    if (previewContainer) previewContainer.classList.add("hidden");
+
+    displayBanner(0);
+    renderBannerIndicators();
+    loadBannersForModal();
+
+    alert("¡Banner agregado y activado con éxito en Full Calidad!");
   } catch (error) {
-    console.error("❌ Error agregando banner:", error)
-    alert("Error al agregar banner: " + error.message)
+    console.error("❌ Error agregando banner:", error);
+    alert("Error al agregar banner: " + error.message);
+  } finally {
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = "Subir y Guardar Banner";
+    }
+  }
+}
+
+// Activa el banner de Halloween adjunto en máxima calidad con 1 solo clic
+async function activateHalloweenBannerDirectly() {
+  try {
+    const halloweenBanner = {
+      titulo: "¡SE DESATA EL TERROR CON SONIMAX MÓVIL!",
+      imagen_url: "https://tuqwzrsgczhgmfnfmryw.supabase.co/storage/v1/object/public/product-images/banners/banner_halloween.png",
+      activo: true,
+      posicion: 0
+    };
+
+    try {
+      await window.supabaseClient.from("banners").insert(halloweenBanner);
+    } catch (e) {
+      console.warn("Insert Supabase aviso:", e);
+    }
+
+    // Asegurar que esté activo primero
+    banners = banners.filter(b => !b.imagen_url.includes("banner_halloween") && !b.imagen_url.includes("banner-halloween"));
+    banners.unshift({ id: "halloween-" + Date.now(), ...halloweenBanner });
+
+    try {
+      localStorage.setItem("sonimax_banners", JSON.stringify(banners));
+    } catch (e) {}
+
+    displayBanner(0);
+    renderBannerIndicators();
+    loadBannersForModal();
+
+    alert("🎃 ¡Banner de Halloween activado en Full Calidad sin recortes!");
+    document.getElementById("banners-modal")?.classList.add("hidden");
+  } catch (err) {
+    console.error("Error activando banner Halloween:", err);
   }
 }
 
 async function toggleBannerActive(bannerId, active) {
   try {
-    const { error } = await window.supabaseClient.from("banners").update({ activo: active }).eq("id", bannerId)
+    try {
+      await window.supabaseClient.from("banners").update({ activo: active }).eq("id", bannerId)
+    } catch (e) {}
 
-    if (error) throw error
+    const b = banners.find(item => item.id == bannerId);
+    if (b) b.activo = active;
+    localStorage.setItem("sonimax_banners", JSON.stringify(banners));
 
-    console.log(`✅ Banner ${bannerId} actualizado`)
     loadBannersForModal()
     loadBanners()
   } catch (error) {
     console.error("❌ Error actualizando banner:", error)
-    alert("Error al actualizar banner")
   }
 }
 
 async function deleteBanner(bannerId) {
   try {
-    const { error } = await window.supabaseClient.from("banners").delete().eq("id", bannerId)
+    try {
+      await window.supabaseClient.from("banners").delete().eq("id", bannerId)
+    } catch (e) {}
 
-    if (error) throw error
+    banners = banners.filter(item => item.id != bannerId);
+    if (banners.length === 0) {
+      banners = [DEFAULT_HALLOWEEN_BANNER];
+    }
+    localStorage.setItem("sonimax_banners", JSON.stringify(banners));
 
-    console.log(`✅ Banner ${bannerId} eliminado`)
     loadBannersForModal()
-    loadBanners()
+    displayBanner(0)
+    renderBannerIndicators()
   } catch (error) {
     console.error("❌ Error eliminando banner:", error)
     alert("Error al eliminar banner")
@@ -2375,6 +2529,73 @@ function setupEventListeners() {
   })
 
   document.getElementById("add-banner-btn")?.addEventListener("click", addBanner)
+
+  // Subida de imagen directa para Banners
+  const bannerDropZone = document.getElementById("banner-drop-zone")
+  const bannerFileInput = document.getElementById("banner-file-input")
+  const bannerPrompt = document.getElementById("banner-upload-prompt")
+  const bannerPreviewContainer = document.getElementById("banner-upload-preview-container")
+  const bannerPreview = document.getElementById("banner-upload-preview")
+  const bannerFilename = document.getElementById("banner-upload-filename")
+  const removeBannerFileBtn = document.getElementById("remove-banner-file-btn")
+  const useHalloweenBtn = document.getElementById("use-halloween-banner-btn")
+
+  bannerDropZone?.addEventListener("click", (e) => {
+    if (e.target === removeBannerFileBtn) return
+    bannerFileInput?.click()
+  })
+
+  bannerFileInput?.addEventListener("change", (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = (loadEvent) => {
+        if (bannerPreview) bannerPreview.src = loadEvent.target.result
+        if (bannerFilename) bannerFilename.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`
+        bannerPrompt?.classList.add("hidden")
+        bannerPreviewContainer?.classList.remove("hidden")
+      }
+      reader.readAsDataURL(file)
+    }
+  })
+
+  removeBannerFileBtn?.addEventListener("click", (e) => {
+    e.stopPropagation()
+    if (bannerFileInput) bannerFileInput.value = ""
+    bannerPrompt?.classList.remove("hidden")
+    bannerPreviewContainer?.classList.add("hidden")
+  })
+
+  useHalloweenBtn?.addEventListener("click", async () => {
+    await activateHalloweenBannerDirectly()
+  })
+
+  // Clic en el Banner para ampliar en pantalla completa (Zoom HD)
+  const bannerImgEl = document.getElementById("banner-image")
+  const zoomModal = document.getElementById("image-zoom-modal")
+  const zoomContent = document.getElementById("image-zoom-content")
+  const zoomClose = document.getElementById("image-zoom-close")
+
+  bannerImgEl?.addEventListener("click", () => {
+    if (bannerImgEl.src && zoomModal && zoomContent) {
+      zoomContent.src = bannerImgEl.src
+      zoomContent.alt = bannerImgEl.alt || "Banner SONIMAX MÓVIL"
+      zoomModal.classList.remove("hidden")
+      zoomModal.classList.add("visible")
+    }
+  })
+
+  zoomClose?.addEventListener("click", () => {
+    zoomModal?.classList.add("hidden")
+    zoomModal?.classList.remove("visible")
+  })
+
+  zoomModal?.addEventListener("click", (e) => {
+    if (e.target === zoomModal) {
+      zoomModal.classList.add("hidden")
+      zoomModal.classList.remove("visible")
+    }
+  })
 
   document.getElementById("banner-prev")?.addEventListener("click", () => {
     previousBanner()

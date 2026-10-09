@@ -24,6 +24,7 @@ const APP_SHELL = [
   "./app-features.js",
   "./app-update-products.js",
   "./supabase-config.js",
+  "./banner-halloween.png",
 ]
 
 // ============================================================

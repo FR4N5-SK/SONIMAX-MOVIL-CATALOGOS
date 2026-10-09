@@ -37,115 +37,95 @@
         #image-zoom-modal.visible { display: flex; }
         #image-zoom-modal .zoom-content { animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-        /* SOLUCIÓN MEJORADA PARA BANNER RESPONSIVE Y ALTA CALIDAD */
+        /* SOLUCIÓN MEJORADA: BANNER 100% RESPONSIVE Y MÁXIMA CALIDAD (SIN RECORTES) */
         .banner-container {
             position: relative;
             width: 100%;
             overflow: hidden;
-            border-radius: 0.5rem;
-            background: #000;
-            /* Altura adaptativa según el dispositivo */
-            min-height: 180px;
+            border-radius: 1rem;
+            background: #09090d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
+            min-height: auto;
+            max-height: none;
+            transition: all 0.3s ease;
         }
         
-        /* Imagen del banner con máxima calidad */
-        .banner-image-hq {
-            width: 100%;
-            height: 100%;
-            display: block;
-            /* object-fit: cover mantiene la proporción y cubre todo el contenedor */
+        /* Fondo ambiental difuminado para pantallas ultra-anchas */
+        .banner-bg-ambient {
+            position: absolute;
+            inset: -25px;
+            width: calc(100% + 50px);
+            height: calc(100% + 50px);
             object-fit: cover;
-            object-position: center;
-            /* Máxima calidad de renderizado */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
-            /* Prevenir antialiasing que causa borrosidad */
-            -webkit-font-smoothing: subpixel-antialiased;
-            -moz-osx-font-smoothing: auto;
-            /* Transición suave solo para opacity */
-            transition: opacity 0.5s ease;
+            filter: blur(28px) brightness(0.35);
+            -webkit-filter: blur(28px) brightness(0.35);
+            opacity: 0.75;
+            pointer-events: none;
+            z-index: 1;
+            transform: scale(1.1);
+            transition: opacity 0.4s ease;
         }
-        
+
+        /* Imagen del banner: Calidad nativa HD sin pixelado y proporción 100% visible */
+        .banner-image-hq {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: auto;
+            max-height: 460px;
+            display: block;
+            /* object-fit: contain asegura que NUNCA se corte ningún elemento, texto ni personajes */
+            object-fit: contain;
+            object-position: center;
+            /* Renderizado suave de alta definición sin dientes de sierra ni crisp-edges pixelados */
+            image-rendering: auto;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            transition: opacity 0.4s ease, transform 0.2s ease;
+            cursor: pointer;
+        }
+
         /* Móviles pequeños (hasta 640px) */
         @media (max-width: 640px) {
             .banner-container {
-                min-height: 160px;
-                max-height: 200px;
+                border-radius: 0.75rem;
+                min-height: 90px;
             }
             .banner-image-hq {
-                height: 100%;
-                min-height: 160px;
+                width: 100%;
+                height: auto;
+                max-height: 220px;
             }
         }
         
-        /* Móviles medianos y tablets pequeñas (641px - 768px) */
-        @media (min-width: 641px) and (max-width: 768px) {
+        /* Tablets y pantallas medianas (641px - 1023px) */
+        @media (min-width: 641px) and (max-width: 1023px) {
+            .banner-container {
+                min-height: 160px;
+            }
+            .banner-image-hq {
+                max-height: 320px;
+            }
+        }
+        
+        /* Laptops y pantallas grandes (1024px+) */
+        @media (min-width: 1024px) {
             .banner-container {
                 min-height: 220px;
-                max-height: 280px;
             }
             .banner-image-hq {
-                height: 100%;
-                min-height: 220px;
-            }
-        }
-        
-        /* Tablets (769px - 1023px) */
-        @media (min-width: 769px) and (max-width: 1023px) {
-            .banner-container {
-                min-height: 280px;
-                max-height: 350px;
-            }
-            .banner-image-hq {
-                height: 100%;
-                min-height: 280px;
-            }
-        }
-        
-        /* Laptops y pantallas medianas (1024px - 1279px) */
-        @media (min-width: 1024px) and (max-width: 1279px) {
-            .banner-container {
-                max-height: 380px;
-            }
-            .banner-image-hq {
-                height: 380px;
-            }
-        }
-        
-        /* Pantallas grandes (1280px - 1535px) */
-        @media (min-width: 1280px) and (max-width: 1535px) {
-            .banner-container {
                 max-height: 420px;
             }
-            .banner-image-hq {
-                height: 420px;
-            }
         }
         
-        /* Pantallas extra grandes (1536px+) */
-        @media (min-width: 1536px) {
-            .banner-container {
-                max-height: 480px;
-            }
-            .banner-image-hq {
-                height: 480px;
-            }
-        }
-        
-        /* Prevenir cualquier filtro que pueda degradar la imagen */
+        /* Prevenir cualquier filtro que degrade la imagen principal */
         .no-filter {
             filter: none !important;
             -webkit-filter: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
-        
-        /* Optimización para imágenes de alta resolución en pantallas Retina */
-        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
-            .banner-image-hq {
-                image-rendering: -webkit-optimize-contrast;
-            }
         }
 
         /* [NUEVO] Forzar texto negro en badges de estado (Stock, Agotado, Oferta) en modo oscuro */
@@ -461,29 +441,38 @@
             <div class="container mx-auto">
                 <!-- Banner Carrusel -->
                 <div id="banner-carousel" class="relative banner-container shadow-xl">
-                    <!-- Imagen Principal - RESPONSIVE Y ALTA CALIDAD -->
+                    <!-- Fondo ambiental difuminado para pantallas ultra-anchas -->
+                    <img id="banner-bg-ambient" 
+                         src="./banner-halloween.png" 
+                         alt="" 
+                         aria-hidden="true" 
+                         class="banner-bg-ambient">
+
+                    <!-- Imagen Principal - 100% VISIBLE SIN RECORTES Y MÁXIMA CALIDAD -->
                     <img id="banner-image" 
-                         alt="Banner SONIMAX MÓVIL - Tecnología al alcance de tus manos" 
+                         src="./banner-halloween.png" 
+                         alt="Banner SONIMAX MÓVIL - Especial Halloween" 
                          class="banner-image-hq no-filter"
                          loading="eager"
                          decoding="sync"
-                         fetchpriority="high">
-                    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/5 pointer-events-none"></div>
+                         fetchpriority="high"
+                         title="Clic para ampliar banner en pantalla completa">
+                    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10 pointer-events-none z-[3]"></div>
 
                     <!-- Botones Navegación -->
-                    <button id="banner-prev" class="absolute left-4 top-1/2 -translate-y-1/2 bg-red-600 hover:bg-red-700 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
+                    <button id="banner-prev" class="absolute left-3 top-1/2 -translate-y-1/2 bg-red-600/90 hover:bg-red-600 text-white w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                         </svg>
                     </button>
-                    <button id="banner-next" class="absolute right-4 top-1/2 -translate-y-1/2 bg-red-600 hover:bg-red-700 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
+                    <button id="banner-next" class="absolute right-3 top-1/2 -translate-y-1/2 bg-red-600/90 hover:bg-red-600 text-white w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shadow-lg z-10 hidden md:flex">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                         </svg>
                     </button>
 
                     <!-- Indicadores (Puntos) -->
-                    <div id="banner-indicators" class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 z-10"></div>
+                    <div id="banner-indicators" class="absolute bottom-2.5 left-1/2 -translate-x-1/2 flex gap-2 z-10"></div>
                 </div>
 
                 <!-- Botón Gestionar Banners (Solo Admin) -->
@@ -536,46 +525,74 @@
 
         <!-- Modal para Gestionar Banners -->
         <div id="banners-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-w-2xl w-full p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
                 <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-black text-gray-800">Gestionar Banners</h2>
-                    <button id="close-banners-modal" class="p-2 hover:bg-gray-100 rounded-xl transition-all">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <h2 class="text-2xl font-black text-gray-800 dark:text-white">Gestionar Banners</h2>
+                    <button id="close-banners-modal" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all">
+                        <svg class="w-6 h-6 text-gray-500 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                         </svg>
                     </button>
                 </div>
 
                 <!-- Formulario Agregar Banner -->
-                <div class="mb-6 p-4 bg-gradient-to-r from-red-50 to-black/5 rounded-xl border-2 border-red-200">
-                    <h3 class="font-bold text-lg text-gray-800 mb-4">Agregar Nuevo Banner</h3>
+                <div class="mb-6 p-4 sm:p-5 bg-gradient-to-r from-red-50 to-black/5 dark:from-red-950/30 dark:to-gray-900 rounded-2xl border-2 border-red-200 dark:border-red-900/50">
+                    <h3 class="font-bold text-lg text-gray-800 dark:text-white mb-4">Agregar Nuevo Banner</h3>
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-gray-700 font-bold mb-2">Título del Banner</label>
+                            <label class="block text-gray-700 dark:text-gray-300 font-bold mb-2">Título del Banner</label>
                             <input type="text" id="banner-title-input" 
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
-                                placeholder="Ej: Promoción de Navidad">
+                                class="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white rounded-xl focus:outline-none focus:border-red-500 transition-all"
+                                placeholder="Ej: Especial Halloween 2026">
                         </div>
+
+                        <!-- Selector de Archivo Directo -->
                         <div>
-                            <label class="block text-gray-700 font-bold mb-2">URL de la Imagen</label>
-                            <input type="url" id="banner-url-input" 
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-red-500 transition-all"
-                                placeholder="/images/highqualityimage.jpg">
-                            <p class="text-sm text-gray-600 mt-2">💡 <strong>RECOMENDACIÓN:</strong> Para mejor visualización en todos los dispositivos, usa imágenes de <strong>mínimo 1920x600px</strong> en formato PNG o JPG de alta calidad. La imagen se adaptará automáticamente a cada tamaño de pantalla sin perder calidad.</p>
+                            <label class="block text-gray-700 dark:text-gray-300 font-bold mb-2">Subir Imagen desde el Dispositivo</label>
+                            <div id="banner-drop-zone" class="border-2 border-dashed border-red-300 dark:border-red-700/60 rounded-2xl p-4 text-center bg-white/70 dark:bg-gray-800/70 hover:border-red-500 transition-all cursor-pointer">
+                                <input type="file" id="banner-file-input" accept="image/*" class="hidden">
+                                <div id="banner-upload-prompt" class="flex flex-col items-center gap-1.5 py-2">
+                                    <span class="text-3xl">📸</span>
+                                    <p class="font-bold text-sm text-gray-800 dark:text-white">Haz clic aquí para seleccionar imagen desde tu galería o archivos</p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">PNG o JPG de alta calidad (se sube en resolución original sin pixelado)</p>
+                                    <span class="mt-2 inline-block px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow transition-all">Seleccionar Archivo</span>
+                                </div>
+                                <div id="banner-upload-preview-container" class="hidden mt-2">
+                                    <img id="banner-upload-preview" class="max-h-36 mx-auto rounded-xl shadow-md object-contain border border-gray-200 dark:border-gray-700" alt="Vista previa">
+                                    <div class="flex items-center justify-center gap-3 mt-2">
+                                        <p id="banner-upload-filename" class="text-xs font-semibold text-gray-700 dark:text-gray-300"></p>
+                                        <button type="button" id="remove-banner-file-btn" class="text-xs text-red-600 hover:underline font-bold">Cambiar imagen</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <button id="add-banner-btn" class="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg">
-                            Agregar Banner
-                        </button>
+
+                        <!-- URL Alternativa -->
+                        <div>
+                            <label class="block text-gray-700 dark:text-gray-300 font-bold mb-2">O ingresa URL de Imagen</label>
+                            <input type="text" id="banner-url-input" 
+                                class="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white rounded-xl focus:outline-none focus:border-red-500 transition-all text-sm"
+                                placeholder="https://... o ./banner-halloween.png">
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row gap-2 pt-2">
+                            <button id="add-banner-btn" class="flex-1 bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-3 rounded-xl hover:from-red-700 hover:to-red-800 transition-all shadow-lg text-center">
+                                Subir y Guardar Banner
+                            </button>
+                            <button type="button" id="use-halloween-banner-btn" class="px-5 py-3 bg-gradient-to-r from-orange-600 to-red-600 text-white font-bold rounded-xl hover:from-orange-700 hover:to-red-700 transition-all shadow-lg text-sm flex items-center justify-center gap-1.5" title="Activar directamente el banner de Halloween en Full Calidad">
+                                <span>🎃</span> Activar Halloween
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Lista de Banners -->
                 <div>
-                    <h3 class="font-bold text-lg text-gray-800 mb-4">Banners Activos</h3>
+                    <h3 class="font-bold text-lg text-gray-800 dark:text-white mb-4">Banners Activos</h3>
                     <div id="banners-list" class="space-y-3 max-h-[40vh] overflow-y-auto">
                         <!-- Se cargarán dinámicamente -->
                     </div>
-                    <div id="no-banners-msg" class="text-center py-8 text-gray-500">
+                    <div id="no-banners-msg" class="text-center py-8 text-gray-500 dark:text-gray-400">
                         <p>No hay banners agregados. ¡Agrega uno para comenzar!</p>
                     </div>
                 </div>
