@@ -763,9 +763,9 @@
 
               <!-- Barra de selección múltiple -->
               <div class="mt-2.5 pt-2 border-t border-sky-200/60 dark:border-sky-900/40 flex items-center justify-between text-xs">
-                <label class="flex items-center gap-2 cursor-pointer font-bold text-gray-700 dark:text-gray-300">
+                <label class="flex items-center gap-2 cursor-pointer font-bold text-gray-700 dark:text-gray-300 select-none">
                   <input type="checkbox" id="valery-select-all-checkbox" class="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-gray-300">
-                  <span>Seleccionar Todos (<span id="valery-visible-count">0</span>)</span>
+                  <span id="valery-select-all-label">Seleccionar Todos (<span id="valery-visible-count">0</span>)</span>
                 </label>
 
                 <button type="button" id="valery-add-selected-btn" class="hidden px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow transition-all flex items-center gap-1">
@@ -1076,16 +1076,30 @@
     const selectAllCb = document.getElementById('valery-select-all-checkbox');
     if (!selectAllCb) return;
 
-    const visible = getFilteredProducts();
-    if (visible.length === 0) {
+    const allFiltered = getFilteredProducts();
+    const totalProducts = allFiltered.length;
+    const startIdx = (currentProductPage - 1) * PRODUCTS_PER_PAGE;
+    const endIdx = Math.min(startIdx + PRODUCTS_PER_PAGE, totalProducts);
+    const pageProducts = allFiltered.slice(startIdx, endIdx);
+
+    const labelEl = document.getElementById('valery-select-all-label');
+    if (labelEl) {
+      if (totalProducts <= PRODUCTS_PER_PAGE) {
+        labelEl.innerHTML = `Seleccionar Todos (<span id="valery-visible-count">${totalProducts}</span>)`;
+      } else {
+        labelEl.innerHTML = `Seleccionar esta Página (${pageProducts.length} de <span id="valery-visible-count">${totalProducts}</span>)`;
+      }
+    }
+
+    if (pageProducts.length === 0) {
       selectAllCb.checked = false;
       selectAllCb.indeterminate = false;
       return;
     }
 
-    const selectedVisibleCount = visible.filter((p) => selectedProductIds.has(p.id)).length;
-    selectAllCb.checked = selectedVisibleCount === visible.length;
-    selectAllCb.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
+    const selectedInPageCount = pageProducts.filter((p) => selectedProductIds.has(p.id)).length;
+    selectAllCb.checked = selectedInPageCount === pageProducts.length;
+    selectAllCb.indeterminate = selectedInPageCount > 0 && selectedInPageCount < pageProducts.length;
   }
 
   function updateSelectedBadge() {
@@ -1167,11 +1181,11 @@
       const queueQty = inQueue ? inQueue.quantity : 0;
 
       html += `
-        <div class="flex items-center justify-between p-2 rounded-2xl border transition-all ${
+        <div class="valery-product-row flex items-center justify-between p-2 rounded-2xl border transition-all cursor-pointer select-none ${
           isChecked
             ? 'bg-sky-50/90 border-sky-300 dark:bg-sky-950/40 dark:border-sky-800'
-            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-sky-300'
-        }">
+            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-sky-300 hover:bg-sky-50/30'
+        }" data-row-product-id="${p.id}">
           
           <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
             <input type="checkbox" data-product-id="${p.id}" class="valery-product-cb w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-gray-300 cursor-pointer flex-shrink-0" ${
@@ -1260,15 +1274,56 @@
     if (prevBtnBottom) prevBtnBottom.addEventListener('click', goToPrevPage);
     if (nextBtnBottom) nextBtnBottom.addEventListener('click', goToNextPage);
 
-    // ---- EVENT LISTENERS: CHECKBOXES ----
+    // ---- EVENT LISTENERS: FILA COMPLETA Y CHECKBOXES (SELECCIONAR CON CLIC EN CUALQUIER PARTE) ----
+    listContainer.querySelectorAll('.valery-product-row').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        // Si el clic fue en un botón de acción (+ Lista, Imprimir), no seleccionar
+        if (e.target.closest('button')) return;
+
+        const pId = row.getAttribute('data-row-product-id');
+        if (!pId) return;
+
+        const cb = row.querySelector('.valery-product-cb');
+
+        // Si el clic fue directamente en el checkbox, dejamos que su evento change lo procese
+        if (e.target === cb) return;
+
+        // Clic en cualquier otra parte de la fila: alternar selección
+        const willBeChecked = !selectedProductIds.has(pId);
+        if (willBeChecked) {
+          selectedProductIds.add(pId);
+          if (cb) cb.checked = true;
+          row.classList.add('bg-sky-50/90', 'border-sky-300', 'dark:bg-sky-950/40', 'dark:border-sky-800');
+          row.classList.remove('bg-white', 'dark:bg-gray-800', 'border-gray-200', 'dark:border-gray-700');
+        } else {
+          selectedProductIds.delete(pId);
+          if (cb) cb.checked = false;
+          row.classList.remove('bg-sky-50/90', 'border-sky-300', 'dark:bg-sky-950/40', 'dark:border-sky-800');
+          row.classList.add('bg-white', 'dark:bg-gray-800', 'border-gray-200', 'dark:border-gray-700');
+        }
+
+        updateSelectAllCheckboxState();
+        updateSelectedBadge();
+      });
+    });
+
     listContainer.querySelectorAll('.valery-product-cb').forEach((cb) => {
       cb.addEventListener('change', () => {
         const pId = cb.getAttribute('data-product-id');
         if (!pId) return;
+        const row = cb.closest('.valery-product-row');
         if (cb.checked) {
           selectedProductIds.add(pId);
+          if (row) {
+            row.classList.add('bg-sky-50/90', 'border-sky-300', 'dark:bg-sky-950/40', 'dark:border-sky-800');
+            row.classList.remove('bg-white', 'dark:bg-gray-800', 'border-gray-200', 'dark:border-gray-700');
+          }
         } else {
           selectedProductIds.delete(pId);
+          if (row) {
+            row.classList.remove('bg-sky-50/90', 'border-sky-300', 'dark:bg-sky-950/40', 'dark:border-sky-800');
+            row.classList.add('bg-white', 'dark:bg-gray-800', 'border-gray-200', 'dark:border-gray-700');
+          }
         }
         updateSelectAllCheckboxState();
         updateSelectedBadge();
