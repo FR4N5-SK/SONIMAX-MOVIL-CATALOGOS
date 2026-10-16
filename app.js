@@ -2347,6 +2347,8 @@ async function updateUIForRole() {
       }
     }
 
+  const headerValeryBtn = document.getElementById("header-valery-prices-btn");
+
   if (window.currentUserRole === "admin") {
     adminSection?.classList.remove("hidden")
     // Asegurar que todos los botones sean visibles
@@ -2355,14 +2357,15 @@ async function updateUIForRole() {
 
     gestorSection?.classList.remove("hidden")
     manageBannersBtn?.classList.remove("hidden")
+    headerValeryBtn?.classList.remove("hidden")
   } else if (window.currentUserRole === "gestor") {
     gestorSection?.classList.remove("hidden")
 
-    // Mostrar admin-section pero solo el botón de PDF
+    // Mostrar admin-section con el botón de PDF y Sacar Precios Valery
     adminSection?.classList.remove("hidden")
     const adminButtons = adminSection.querySelectorAll("button")
     adminButtons.forEach((btn) => {
-      if (btn.id === "export-pdf-button") {
+      if (btn.id === "export-pdf-button" || btn.id === "valery-prices-button") {
         btn.classList.remove("hidden")
       } else {
         btn.classList.add("hidden")
@@ -2370,11 +2373,13 @@ async function updateUIForRole() {
     })
 
     manageBannersBtn?.classList.add("hidden")
+    headerValeryBtn?.classList.remove("hidden")
   } else if (window.currentUserRole === "inventario") {
     // ROL INVENTARIO
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
     manageBannersBtn?.classList.add("hidden")
+    headerValeryBtn?.classList.add("hidden")
     if(mainGrid) mainGrid.parentElement.classList.remove("hidden"); // [MODIFICADO] Mostrar grid normal
     inventorySection?.classList.add("hidden"); // [MODIFICADO] Ocultar sección vieja
     // initInventoryRole(); // Ya no usamos la lógica vieja de lista
@@ -2382,6 +2387,7 @@ async function updateUIForRole() {
     adminSection?.classList.add("hidden")
     gestorSection?.classList.add("hidden")
     manageBannersBtn?.classList.add("hidden")
+    headerValeryBtn?.classList.add("hidden")
   }
 
   // [CORREGIDO] Cargar la configuración de inventario para TODOS los roles, ya que afecta la visibilidad del stock para todos.

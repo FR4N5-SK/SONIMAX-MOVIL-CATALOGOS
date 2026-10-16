@@ -2,7 +2,7 @@
 // SONIMAX MÓVIL - Service Worker con Soporte Offline Completo
 // ============================================================
 
-const CACHE_VERSION = "v12"
+const CACHE_VERSION = "v15"
 const APP_CACHE = "sonimax-app-" + CACHE_VERSION
 const IMAGE_CACHE = "sonimax-images-permanent"
 const API_CACHE = "sonimax-api-" + CACHE_VERSION
@@ -23,6 +23,7 @@ const APP_SHELL = [
   "./app.js",
   "./app-features.js",
   "./app-update-products.js",
+  "./app-valery-prices.js",
   "./supabase-config.js",
   "./banner-halloween.png",
 ]

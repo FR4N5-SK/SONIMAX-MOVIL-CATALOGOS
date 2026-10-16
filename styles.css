@@ -581,6 +581,10 @@ body {
   background: linear-gradient(135deg, #14B8A6, #0D9488);
   box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
 }
+.btn-sky {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+}
 .btn-purple {
   background: linear-gradient(135deg, #8B5CF6, #7C3AED);
   box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
