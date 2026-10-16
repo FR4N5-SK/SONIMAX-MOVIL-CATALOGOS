@@ -532,7 +532,6 @@
         }
 
         @page {
-          size: 80mm auto;
           margin: 0mm !important;
         }
 
@@ -835,7 +834,7 @@
                 <span>IMPRIMIR LISTA (<span id="valery-total-print-count">0</span>)</span>
               </button>
               <p class="text-[10px] text-center text-gray-400 dark:text-gray-500">
-                Se abrirá el selector de tu PC para que elijas tu impresora de 80mm
+                Se abrirá el selector de tu PC. <span class="font-bold text-sky-600 dark:text-sky-400">Tip en red:</span> Si tu navegador da error, presiona <kbd class="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded font-mono text-[9px] text-gray-700 dark:text-gray-200">Ctrl + Mayús + P</kbd>
               </p>
             </div>
 
@@ -1715,8 +1714,10 @@
     });
 
     printContainer.innerHTML = printHtml;
-    // Abre el cuadro de diálogo nativo de Windows donde el usuario escoge su impresora
-    window.print();
+    // Dar un breve tiempo al navegador para computar el DOM antes de abrir el diálogo de impresión
+    setTimeout(() => {
+      window.print();
+    }, 100);
   }
 
   // Imprimir etiqueta individual (sin modificar la lista activa)
@@ -1751,7 +1752,9 @@
     }
 
     printContainer.innerHTML = printHtml;
-    window.print();
+    setTimeout(() => {
+      window.print();
+    }, 100);
   }
 
   // Imprimir todo un departamento directamente
@@ -1792,7 +1795,9 @@
     });
 
     printContainer.innerHTML = printHtml;
-    window.print();
+    setTimeout(() => {
+      window.print();
+    }, 100);
   }
 
   // Limpiar el contenedor de impresión tras cerrar el diálogo
