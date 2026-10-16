@@ -118,11 +118,50 @@
     }
   }
 
+  let activeSbClient = null;
+
+  async function getValerySupabaseClient() {
+    if (activeSbClient) return activeSbClient;
+
+    // 1. Probar supabaseOldClient (donde el usuario creó la tabla en Supabase Plan Pro)
+    if (window.supabaseOldClient) {
+      try {
+        const { error } = await window.supabaseOldClient
+          .from('valery_price_lists')
+          .select('id')
+          .limit(1);
+        if (!error) {
+          activeSbClient = window.supabaseOldClient;
+          return activeSbClient;
+        }
+      } catch (e) {}
+    }
+
+    // 2. Probar supabaseClient principal
+    if (window.supabaseClient) {
+      try {
+        const { error } = await window.supabaseClient
+          .from('valery_price_lists')
+          .select('id')
+          .limit(1);
+        if (!error) {
+          activeSbClient = window.supabaseClient;
+          return activeSbClient;
+        }
+      } catch (e) {}
+    }
+
+    // Si aún no responde, retornar el que esté disponible
+    return window.supabaseOldClient || window.supabaseClient;
+  }
+
   async function syncListsFromSupabase(force = false) {
-    if (!window.supabaseClient) return;
+    const sb = await getValerySupabaseClient();
+    if (!sb) return;
+
     try {
       updateSyncStatusUI('saving');
-      const { data, error } = await window.supabaseClient
+      const { data, error } = await sb
         .from('valery_price_lists')
         .select('*')
         .order('created_at', { ascending: true });
@@ -173,7 +212,8 @@
   }
 
   async function uploadLocalListsToSupabase(showToast = true) {
-    if (!window.supabaseClient) {
+    const sb = await getValerySupabaseClient();
+    if (!sb) {
       alert('⚠️ Cliente de Supabase no disponible.');
       return;
     }
@@ -194,20 +234,20 @@
         updated_at: new Date().toISOString()
       }));
 
-      const { error } = await window.supabaseClient
+      const { error } = await sb
         .from('valery_price_lists')
         .upsert(rows);
 
       if (error) {
         console.error('[VALERY SUPABASE] Error subiendo listas:', error);
-        alert('❌ Error al subir a Supabase:\n' + (error.message || JSON.stringify(error)) + '\n\nRecuerda haber ejecutado el script SQL en Supabase para crear la tabla.');
+        alert('❌ Error al subir a Supabase:\n' + (error.message || JSON.stringify(error)));
         updateSyncStatusUI('error');
         return;
       }
 
       updateSyncStatusUI('cloud');
       if (showToast) {
-        alert(`☁️ ¡Listas subidas a Supabase con éxito!\n\nSe subieron ${rows.length} lista(s) a la base de datos.\nAhora puedes abrir SONIMAX en la computadora donde está la impresora y verás estas listas listas para imprimir.`);
+        alert(`☁️ ¡Listas subidas a Supabase con éxito!\n\nSe subieron ${rows.length} lista(s) a la base de datos.\nAhora puedes abrir SONIMAX en cualquier computadora y verás estas listas listas para imprimir.`);
       }
     } catch (e) {
       console.error('[VALERY SUPABASE] Excepción al subir:', e);
@@ -227,14 +267,15 @@
     }
 
     // Sincronizar automáticamente la lista activa con Supabase
-    if (syncRemote && window.supabaseClient) {
+    if (syncRemote && (window.supabaseClient || window.supabaseOldClient)) {
       clearTimeout(syncDebounceTimer);
       updateSyncStatusUI('saving');
       syncDebounceTimer = setTimeout(async () => {
         try {
+          const sb = await getValerySupabaseClient();
           const list = getActiveList();
-          if (list) {
-            await window.supabaseClient.from('valery_price_lists').upsert({
+          if (sb && list) {
+            await sb.from('valery_price_lists').upsert({
               id: list.id,
               name: list.name,
               items: list.items,
@@ -294,11 +335,13 @@
     activeListId = savedLists[0].id;
     saveListsToStorage(false);
 
-    if (window.supabaseClient) {
-      window.supabaseClient.from('valery_price_lists').delete().eq('id', listIdToDelete).then(() => {
-        updateSyncStatusUI('cloud');
-      });
-    }
+    getValerySupabaseClient().then((sb) => {
+      if (sb) {
+        sb.from('valery_price_lists').delete().eq('id', listIdToDelete).then(() => {
+          updateSyncStatusUI('cloud');
+        });
+      }
+    });
 
     renderListsDropdown();
     renderQueueList();

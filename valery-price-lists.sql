@@ -43,3 +43,6 @@ USING (true);
 
 -- 4. Índice para agilizar el ordenamiento por fecha de creación
 CREATE INDEX IF NOT EXISTS idx_valery_price_lists_created_at ON valery_price_lists(created_at);
+
+-- 5. Recargar la caché de la API de Supabase para que reconozca la tabla de inmediato
+NOTIFY pgrst, 'reload schema';
