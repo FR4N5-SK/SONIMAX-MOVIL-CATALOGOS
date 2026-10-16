@@ -34,6 +34,8 @@
   let deptSearchQuery = '';
   let selectedProductIds = new Set();
   let currentPreviewIndex = 0;
+  let currentProductPage = 1;
+  const PRODUCTS_PER_PAGE = 100;
 
   // Helper para fecha en formato DD/MM/YYYY
   function getTodayFormatted() {
@@ -914,6 +916,7 @@
     if (globalInput) {
       globalInput.addEventListener('input', () => {
         globalSearchQuery = globalInput.value.trim();
+        currentProductPage = 1;
         if (clearGlobalBtn) {
           clearGlobalBtn.classList.toggle('hidden', !globalSearchQuery);
         }
@@ -941,6 +944,7 @@
     if (deptSelect) {
       deptSelect.addEventListener('change', () => {
         selectedDepartment = deptSelect.value;
+        currentProductPage = 1;
         selectedProductIds.clear();
         updateSelectAllCheckboxState();
         renderAvailableProducts();
@@ -951,6 +955,7 @@
     if (deptSearchInput) {
       deptSearchInput.addEventListener('input', () => {
         deptSearchQuery = deptSearchInput.value.trim();
+        currentProductPage = 1;
         renderAvailableProducts();
       });
     }
@@ -966,11 +971,14 @@
     const selectAllCb = modal.querySelector('#valery-select-all-checkbox');
     if (selectAllCb) {
       selectAllCb.addEventListener('change', () => {
-        const visibleProducts = getFilteredProducts();
+        // Seleccionar/deseleccionar solo los de la PÁGINA ACTUAL
+        const allFiltered = getFilteredProducts();
+        const startIdx = (currentProductPage - 1) * PRODUCTS_PER_PAGE;
+        const pageProducts = allFiltered.slice(startIdx, startIdx + PRODUCTS_PER_PAGE);
         if (selectAllCb.checked) {
-          visibleProducts.forEach((p) => selectedProductIds.add(p.id));
+          pageProducts.forEach((p) => selectedProductIds.add(p.id));
         } else {
-          visibleProducts.forEach((p) => selectedProductIds.delete(p.id));
+          pageProducts.forEach((p) => selectedProductIds.delete(p.id));
         }
         updateSelectedBadge();
         renderAvailableProducts();
@@ -1021,6 +1029,9 @@
     const dQuery = deptSearchQuery.toLowerCase().trim();
 
     return all.filter((product) => {
+      // FILTRO: Solo productos con stock > 0
+      if ((product.stock || 0) <= 0) return false;
+
       if (selectedDepartment !== 'all') {
         const dept = (product.departamento || '').trim();
         if (dept.toUpperCase() !== selectedDepartment.toUpperCase()) return false;
@@ -1096,26 +1107,55 @@
     const visibleCountEl = document.getElementById('valery-visible-count');
     if (!listContainer) return;
 
-    const products = getFilteredProducts();
-    if (visibleCountEl) visibleCountEl.textContent = products.length.toString();
+    const allFiltered = getFilteredProducts();
+    const totalProducts = allFiltered.length;
+    const totalPages = Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE));
 
-    if (products.length === 0) {
+    // Asegurar que la página actual no exceda el total
+    if (currentProductPage > totalPages) currentProductPage = totalPages;
+    if (currentProductPage < 1) currentProductPage = 1;
+
+    if (visibleCountEl) visibleCountEl.textContent = totalProducts.toString();
+
+    if (totalProducts === 0) {
       listContainer.innerHTML = `
         <div class="text-center py-10 text-gray-400 dark:text-gray-500">
           <p class="text-2xl mb-1">🔍</p>
-          <p class="text-sm font-semibold">No se encontraron productos</p>
-          <p class="text-xs">Prueba cambiando el departamento o la búsqueda</p>
+          <p class="text-sm font-semibold">No se encontraron productos con stock</p>
+          <p class="text-xs">Solo se muestran productos con stock mayor a 0. Prueba cambiando el departamento o la búsqueda.</p>
         </div>
       `;
       return;
     }
 
+    // Paginación: extraer solo los de la página actual
+    const startIdx = (currentProductPage - 1) * PRODUCTS_PER_PAGE;
+    const endIdx = Math.min(startIdx + PRODUCTS_PER_PAGE, totalProducts);
+    const pageProducts = allFiltered.slice(startIdx, endIdx);
+
     const activeList = getActiveList();
     let html = '';
-    const maxShow = 120;
-    const showProducts = products.slice(0, maxShow);
 
-    showProducts.forEach((p) => {
+    // ---- BARRA DE PAGINACIÓN SUPERIOR ----
+    if (totalPages > 1) {
+      html += `
+        <div class="flex items-center justify-between py-2 px-1 mb-2 bg-sky-50/80 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800">
+          <button type="button" id="valery-page-prev" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1" ${currentProductPage <= 1 ? 'disabled' : ''}>
+            ◀ Anterior
+          </button>
+          <div class="text-center">
+            <span class="text-xs font-black text-sky-800 dark:text-sky-200">Página ${currentProductPage} de ${totalPages}</span>
+            <span class="text-[10px] text-sky-600 dark:text-sky-400 block">Mostrando ${startIdx + 1}-${endIdx} de ${totalProducts} productos</span>
+          </div>
+          <button type="button" id="valery-page-next" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1" ${currentProductPage >= totalPages ? 'disabled' : ''}>
+            Siguiente ▶
+          </button>
+        </div>
+      `;
+    }
+
+    // ---- PRODUCTOS DE LA PÁGINA ACTUAL ----
+    pageProducts.forEach((p) => {
       const isChecked = selectedProductIds.has(p.id);
       const priceVal = getProductDetalPrice(p);
       const priceFormatted = formatPriceNumber(priceVal);
@@ -1177,16 +1217,50 @@
       `;
     });
 
-    if (products.length > maxShow) {
+    // ---- BARRA DE PAGINACIÓN INFERIOR (si hay más de 1 página) ----
+    if (totalPages > 1) {
       html += `
-        <div class="text-center py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-          Mostrando los primeros ${maxShow} de ${products.length} productos. Usa el buscador para filtrar más específicamente.
+        <div class="flex items-center justify-between py-2 px-1 mt-2 bg-sky-50/80 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800">
+          <button type="button" id="valery-page-prev-bottom" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1" ${currentProductPage <= 1 ? 'disabled' : ''}>
+            ◀ Anterior
+          </button>
+          <span class="text-xs font-black text-sky-800 dark:text-sky-200">Pág. ${currentProductPage}/${totalPages} · ${startIdx + 1}-${endIdx} de ${totalProducts}</span>
+          <button type="button" id="valery-page-next-bottom" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1" ${currentProductPage >= totalPages ? 'disabled' : ''}>
+            Siguiente ▶
+          </button>
         </div>
       `;
     }
 
     listContainer.innerHTML = html;
 
+    // ---- EVENT LISTENERS: PAGINACIÓN ----
+    const prevBtn = listContainer.querySelector('#valery-page-prev');
+    const nextBtn = listContainer.querySelector('#valery-page-next');
+    const prevBtnBottom = listContainer.querySelector('#valery-page-prev-bottom');
+    const nextBtnBottom = listContainer.querySelector('#valery-page-next-bottom');
+
+    const goToPrevPage = () => {
+      if (currentProductPage > 1) {
+        currentProductPage--;
+        renderAvailableProducts();
+        listContainer.scrollTop = 0;
+      }
+    };
+    const goToNextPage = () => {
+      if (currentProductPage < totalPages) {
+        currentProductPage++;
+        renderAvailableProducts();
+        listContainer.scrollTop = 0;
+      }
+    };
+
+    if (prevBtn) prevBtn.addEventListener('click', goToPrevPage);
+    if (nextBtn) nextBtn.addEventListener('click', goToNextPage);
+    if (prevBtnBottom) prevBtnBottom.addEventListener('click', goToPrevPage);
+    if (nextBtnBottom) nextBtnBottom.addEventListener('click', goToNextPage);
+
+    // ---- EVENT LISTENERS: CHECKBOXES ----
     listContainer.querySelectorAll('.valery-product-cb').forEach((cb) => {
       cb.addEventListener('change', () => {
         const pId = cb.getAttribute('data-product-id');
@@ -1204,7 +1278,7 @@
     listContainer.querySelectorAll('.valery-quick-add-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const pId = btn.getAttribute('data-add-id');
-        const product = products.find((p) => p.id === pId);
+        const product = allFiltered.find((p) => p.id === pId);
         if (product) {
           addProductToActiveList(product);
         }
@@ -1214,7 +1288,7 @@
     listContainer.querySelectorAll('.valery-print-single-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const pId = btn.getAttribute('data-print-single-id');
-        const product = products.find((p) => p.id === pId);
+        const product = allFiltered.find((p) => p.id === pId);
         if (product) {
           printSingleProduct(product);
         }
@@ -1270,17 +1344,19 @@
   function addDepartmentToQueue(department) {
     const all = getAllProducts();
     const deptProducts = all.filter((p) => {
+      // Solo productos con stock > 0
+      if ((p.stock || 0) <= 0) return false;
       if (department === 'all') return true;
       return (p.departamento || '').trim().toUpperCase() === department.trim().toUpperCase();
     });
 
     if (deptProducts.length === 0) {
-      alert('No hay productos en este departamento');
+      alert('No hay productos con stock en este departamento');
       return;
     }
 
     const list = getActiveList();
-    if (!confirm(`¿Deseas agregar los ${deptProducts.length} productos del departamento "${department}" a la lista "${list.name}"?`)) {
+    if (!confirm(`¿Deseas agregar los ${deptProducts.length} productos (con stock) del departamento "${department}" a la lista "${list.name}"?`)) {
       return;
     }
 
@@ -1627,6 +1703,8 @@
   function directPrintDepartment(department) {
     const all = getAllProducts();
     const deptProducts = all.filter((p) => {
+      // Solo productos con stock > 0
+      if ((p.stock || 0) <= 0) return false;
       if (department === 'all') return true;
       return (p.departamento || '').trim().toUpperCase() === department.trim().toUpperCase();
     });
