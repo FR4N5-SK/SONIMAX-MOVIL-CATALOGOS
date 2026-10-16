@@ -64,6 +64,31 @@
   // GESTIÓN DE LISTAS GUARDADAS (LOCALSTORAGE)
   // ============================================================
 
+  // ============================================================
+  // GESTIÓN Y SINCRONIZACIÓN CON SUPABASE & LOCALSTORAGE
+  // ============================================================
+  let syncDebounceTimer = null;
+
+  function updateSyncStatusUI(status) {
+    const icon = document.getElementById('valery-cloud-status-icon');
+    const text = document.getElementById('valery-cloud-status-text');
+    if (!icon || !text) return;
+
+    if (status === 'saving') {
+      icon.textContent = '⏳';
+      text.textContent = 'Guardando...';
+    } else if (status === 'cloud') {
+      icon.textContent = '☁️';
+      text.textContent = 'En la Nube';
+    } else if (status === 'error') {
+      icon.textContent = '⚠️';
+      text.textContent = 'Error Nube';
+    } else {
+      icon.textContent = '☁️';
+      text.textContent = 'Nube';
+    }
+  }
+
   function loadSavedLists() {
     try {
       const raw = localStorage.getItem(STORAGE_LISTS_KEY);
@@ -71,7 +96,7 @@
         savedLists = JSON.parse(raw);
       }
     } catch (e) {
-      console.warn('[VALERY] Error cargando listas guardadas:', e);
+      console.warn('[VALERY] Error cargando listas locales:', e);
       savedLists = [];
     }
 
@@ -84,7 +109,7 @@
       };
       savedLists = [defaultList];
       activeListId = defaultList.id;
-      saveListsToStorage();
+      saveListsToStorage(false);
     } else {
       activeListId = localStorage.getItem(STORAGE_ACTIVE_LIST_ID) || savedLists[0].id;
       if (!savedLists.some(l => l.id === activeListId)) {
@@ -93,7 +118,105 @@
     }
   }
 
-  function saveListsToStorage() {
+  async function syncListsFromSupabase(force = false) {
+    if (!window.supabaseClient) return;
+    try {
+      updateSyncStatusUI('saving');
+      const { data, error } = await window.supabaseClient
+        .from('valery_price_lists')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.warn('[VALERY SUPABASE] Error cargando listas:', error);
+        updateSyncStatusUI('error');
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const remoteLists = data.map((row) => ({
+          id: row.id,
+          name: row.name,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          items: Array.isArray(row.items) ? row.items : []
+        }));
+
+        savedLists = remoteLists;
+        if (!savedLists.some((l) => l.id === activeListId)) {
+          activeListId = savedLists[0].id;
+        }
+
+        localStorage.setItem(STORAGE_LISTS_KEY, JSON.stringify(savedLists));
+        localStorage.setItem(STORAGE_ACTIVE_LIST_ID, activeListId);
+
+        renderListsDropdown();
+        renderQueueList();
+        renderAvailableProducts();
+        updateLivePreview();
+        updateSyncStatusUI('cloud');
+
+        if (force) {
+          alert(`✅ Sincronización exitosa: Se cargaron ${remoteLists.length} lista(s) desde Supabase.`);
+        }
+      } else {
+        updateSyncStatusUI('cloud');
+        // Si Supabase está vacío y el usuario ya tiene productos en su lista local, subirlos automáticamente
+        if (savedLists.length > 0 && savedLists.some(l => l.items && l.items.length > 0)) {
+          await uploadLocalListsToSupabase(false);
+        }
+      }
+    } catch (e) {
+      console.warn('[VALERY SUPABASE] Excepción en sync:', e);
+      updateSyncStatusUI('error');
+    }
+  }
+
+  async function uploadLocalListsToSupabase(showToast = true) {
+    if (!window.supabaseClient) {
+      alert('⚠️ Cliente de Supabase no disponible.');
+      return;
+    }
+
+    try {
+      updateSyncStatusUI('saving');
+      loadSavedLists();
+
+      if (!savedLists || savedLists.length === 0) {
+        alert('No hay listas en este navegador para subir.');
+        return;
+      }
+
+      const rows = savedLists.map((l) => ({
+        id: l.id || ('list_' + Date.now()),
+        name: l.name || 'Lista',
+        items: l.items || [],
+        updated_at: new Date().toISOString()
+      }));
+
+      const { error } = await window.supabaseClient
+        .from('valery_price_lists')
+        .upsert(rows);
+
+      if (error) {
+        console.error('[VALERY SUPABASE] Error subiendo listas:', error);
+        alert('❌ Error al subir a Supabase:\n' + (error.message || JSON.stringify(error)) + '\n\nRecuerda haber ejecutado el script SQL en Supabase para crear la tabla.');
+        updateSyncStatusUI('error');
+        return;
+      }
+
+      updateSyncStatusUI('cloud');
+      if (showToast) {
+        alert(`☁️ ¡Listas subidas a Supabase con éxito!\n\nSe subieron ${rows.length} lista(s) a la base de datos.\nAhora puedes abrir SONIMAX en la computadora donde está la impresora y verás estas listas listas para imprimir.`);
+      }
+    } catch (e) {
+      console.error('[VALERY SUPABASE] Excepción al subir:', e);
+      alert('Error inesperado al conectar con Supabase: ' + e.message);
+      updateSyncStatusUI('error');
+    }
+  }
+
+  function saveListsToStorage(syncRemote = true) {
     try {
       localStorage.setItem(STORAGE_LISTS_KEY, JSON.stringify(savedLists));
       if (activeListId) {
@@ -101,6 +224,29 @@
       }
     } catch (e) {
       console.warn('[VALERY] Error guardando listas:', e);
+    }
+
+    // Sincronizar automáticamente la lista activa con Supabase
+    if (syncRemote && window.supabaseClient) {
+      clearTimeout(syncDebounceTimer);
+      updateSyncStatusUI('saving');
+      syncDebounceTimer = setTimeout(async () => {
+        try {
+          const list = getActiveList();
+          if (list) {
+            await window.supabaseClient.from('valery_price_lists').upsert({
+              id: list.id,
+              name: list.name,
+              items: list.items,
+              updated_at: new Date().toISOString()
+            });
+            updateSyncStatusUI('cloud');
+          }
+        } catch (err) {
+          console.warn('[VALERY] Error guardando en Supabase:', err);
+          updateSyncStatusUI('error');
+        }
+      }, 700);
     }
   }
 
@@ -118,7 +264,7 @@
     };
     savedLists.push(newList);
     activeListId = newList.id;
-    saveListsToStorage();
+    saveListsToStorage(true);
     renderListsDropdown();
     renderQueueList();
     updateLivePreview();
@@ -130,7 +276,7 @@
     const cleanName = (newName || '').trim();
     if (cleanName) {
       list.name = cleanName;
-      saveListsToStorage();
+      saveListsToStorage(true);
       renderListsDropdown();
     }
   }
@@ -143,9 +289,17 @@
     const list = getActiveList();
     if (!confirm(`¿Eliminar la lista "${list.name}" y sus productos?`)) return;
 
-    savedLists = savedLists.filter(l => l.id !== list.id);
+    const listIdToDelete = list.id;
+    savedLists = savedLists.filter(l => l.id !== listIdToDelete);
     activeListId = savedLists[0].id;
-    saveListsToStorage();
+    saveListsToStorage(false);
+
+    if (window.supabaseClient) {
+      window.supabaseClient.from('valery_price_lists').delete().eq('id', listIdToDelete).then(() => {
+        updateSyncStatusUI('cloud');
+      });
+    }
+
     renderListsDropdown();
     renderQueueList();
     renderAvailableProducts();
@@ -685,6 +839,16 @@
             <button type="button" id="valery-delete-list-btn" class="p-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-300 rounded-xl text-xs font-bold transition-all" title="Eliminar esta lista">
               🗑️
             </button>
+
+            <div class="h-5 w-[1px] bg-gray-300 dark:bg-gray-700 mx-0.5 hidden sm:block"></div>
+
+            <button type="button" id="valery-sync-cloud-btn" class="px-2.5 py-1.5 bg-sky-100 hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900/80 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shadow-xs" title="Sincronizar y recargar listas desde Supabase">
+              <span id="valery-cloud-status-icon">☁️</span>
+              <span id="valery-cloud-status-text">Nube</span>
+            </button>
+            <button type="button" id="valery-upload-local-btn" class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1" title="Subir las listas guardadas en este navegador a Supabase para verlas en otras computadoras">
+              <span>⬆️ Subir a Nube</span>
+            </button>
           </div>
 
           <!-- Selector de Formato (58mm, 80mm, Peq) & Fecha -->
@@ -901,6 +1065,14 @@
     });
 
     modal.querySelector('#valery-delete-list-btn')?.addEventListener('click', deleteActiveList);
+
+    modal.querySelector('#valery-sync-cloud-btn')?.addEventListener('click', () => {
+      syncListsFromSupabase(true);
+    });
+
+    modal.querySelector('#valery-upload-local-btn')?.addEventListener('click', () => {
+      uploadLocalListsToSupabase(true);
+    });
 
     const dateInput = modal.querySelector('#valery-date-input');
     if (dateInput) {
@@ -1854,6 +2026,7 @@
     renderAvailableProducts();
     renderQueueList();
     updateLivePreview();
+    syncListsFromSupabase();
 
     const modal = document.getElementById('valery-prices-modal');
     if (modal) {
