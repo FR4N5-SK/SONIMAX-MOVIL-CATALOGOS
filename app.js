@@ -205,8 +205,8 @@ let inventoryShowStockMode = false; // NUEVO
 let stockVisibilityConfig = {
   admin: true,
   gestor: true,
-  distribuidor: true,
-  cliente: true,
+  distribuidor: false,
+  cliente: false,
   inventario: false
 };
 
@@ -3588,16 +3588,16 @@ function createProductCard(product) {
   // [MODIFICADO] Lógica de visibilidad de stock
   // Ahora depende de la configuración global por rol Y del permiso individual del usuario
   const userRole = window.currentUserRole || 'cliente';
-  // Verificar permiso en config global. Si no existe la key, por defecto true salvo inventario.
+  // Verificar permiso en config global. Si no existe la key, por defecto true salvo inventario y distribuidor.
   const roleCanSeeStock = (stockVisibilityConfig && typeof stockVisibilityConfig[userRole] !== 'undefined') 
                       ? stockVisibilityConfig[userRole] 
-                      : (userRole !== 'inventario');
+                      : (userRole !== 'inventario' && userRole !== 'distribuidor');
   // [NUEVO] Verificar permiso individual del usuario (can_see_stock). Si el campo no existe, se asume true.
   const userCanSeeStock = (currentUser && typeof currentUser.can_see_stock !== 'undefined') 
                       ? currentUser.can_see_stock 
                       : true;
-  // El usuario ve stock SOLO si ambas condiciones se cumplen
-  const canSeeStock = roleCanSeeStock && userCanSeeStock;
+  // El usuario ve stock SOLO si ambas condiciones se cumplen (distribuidor/mayorista ve sin cantidad)
+  const canSeeStock = (userRole === 'distribuidor' ? false : roleCanSeeStock) && userCanSeeStock;
 
   // LOG PARA DEPURACIÓN (Solo visible en consola)
   if (stock > 0 && !canSeeStock) {
@@ -3897,6 +3897,7 @@ function getPriceForRole(product) {
   labelGmayor: "G.Mayor",
   }
   case "gestor":
+  case "distribuidor":
   return {
   display: "triple",
   priceCliente: product.precio_cliente || 0,
@@ -3905,12 +3906,6 @@ function getPriceForRole(product) {
   labelCliente: "Detal",
   labelMayor: "Mayor",
   labelGmayor: "G.Mayor",
-  }
-  case "distribuidor":
-  return {
-  display: "single",
-  price: product.precio_mayor || 0,
-  label: "Mayor",
   }
   case "cliente":
   default:
@@ -4084,6 +4079,7 @@ function openQuantityModal(product) {
       </div>
     `
   } else if (priceInfo.display === "triple") {
+    const isMayorista = (currentUserRole || window.currentUserRole) === "distribuidor";
     priceHTML = `
       <div class="space-y-2 mb-4">
         <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
@@ -4091,14 +4087,14 @@ function openQuantityModal(product) {
             <span class="font-semibold text-gray-700">Precio Detal</span>
             <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
+          <input type="radio" name="price-option" value="cliente" ${isMayorista ? "" : "checked"} class="w-5 h-5">
         </label>
         <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
           <div>
             <span class="font-semibold text-gray-700">Precio Mayor</span>
             <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
+          <input type="radio" name="price-option" value="mayor" ${isMayorista ? "checked" : ""} class="w-5 h-5">
         </label>
         <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 transition-all">
           <div>
@@ -4297,7 +4293,7 @@ function renderCart() {
 
   let totalHTML = ""
 
-  if (window.currentUserRole === "gestor") {
+  if (window.currentUserRole === "gestor" || window.currentUserRole === "distribuidor") {
     totalHTML = `
       <div class="space-y-2">
         <div class="flex justify-between items-center">
@@ -4315,9 +4311,6 @@ function renderCart() {
       </div>
     `
     cartTotal.innerHTML = totalHTML
-  } else if (window.currentUserRole === "distribuidor") {
-    totalHTML = `$${totalMayor.toFixed(2)}`
-    cartTotal.textContent = totalHTML
   } else if (window.currentUserRole === "admin") {
     totalHTML = `$${totalGmayor.toFixed(2)}`
     cartTotal.textContent = totalHTML
@@ -4628,22 +4621,18 @@ async function sendWhatsAppOrder() {
     }
 
     const salePrice =
-      currentUserRole === "gestor"
+      (currentUserRole === "gestor" || currentUserRole === "distribuidor")
         ? item.price
-        : currentUserRole === "distribuidor"
-          ? product?.precio_mayor || 0
-          : product?.precio_gmayor || 0
+        : product?.precio_gmayor || 0
     recordSaleToDatabase(item.id, item.quantity, salePrice)
   })
 
   message += `\n\n*TOTALES:*\n`
 
-  if (window.currentUserRole === "gestor") {
+  if (window.currentUserRole === "gestor" || window.currentUserRole === "distribuidor") {
     message += `Total Detal: $${totalDetal.toFixed(2)}\n`
     message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
     message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
-  } else if (window.currentUserRole === "distribuidor") {
-    message += `Total Mayor: $${totalMayor.toFixed(2)}`
   } else {
     message += `Total Detal: $${totalDetal.toFixed(2)}`
   }
