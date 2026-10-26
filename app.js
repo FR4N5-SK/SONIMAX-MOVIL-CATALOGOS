@@ -2728,6 +2728,19 @@ function setupEventListeners() {
 
   document.getElementById("confirm-quantity")?.addEventListener("click", async () => await confirmQuantity())
 
+  document.getElementById("quantity-input")?.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      await confirmQuantity()
+    }
+  })
+
+  document.getElementById("quantity-modal")?.addEventListener("click", (e) => {
+    if (e.target === document.getElementById("quantity-modal")) {
+      document.getElementById("quantity-modal").classList.add("hidden")
+    }
+  })
+
   // [NUEVO] Event listeners para filtros de precio
   document.getElementById("price-filter-btn")?.addEventListener("click", () => filterByDepartment(currentDepartment));
 
@@ -4054,62 +4067,77 @@ function openQuantityModal(product) {
   const quantityInput = document.getElementById("quantity-input")
   const observationInput = document.getElementById("observation-input")
 
+  const role = (currentUserRole || window.currentUserRole || (currentUser && currentUser.role) || '').toLowerCase();
+  const isMayorista = role === "distribuidor" || role === "mayorista";
+
   const priceInfo = getPriceForRole(product)
 
   let priceHTML = ""
-  if (priceInfo.display === "single") {
-    priceHTML = `<p class="text-green-600 font-black text-xl">$${priceInfo.price.toFixed(2)}</p>`
+  if (isMayorista) {
+    // Para el rol Mayorista: NO mostrar selector de 3 precios para ahorrar espacio vertical en móvil
+    const pMayor = parseFloat(product.precio_mayor) || (priceInfo && parseFloat(priceInfo.priceMayor)) || parseFloat(product.precio_cliente) || 0;
+    priceHTML = `
+      <div class="flex items-center justify-between p-2.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-1">
+        <span class="font-bold text-gray-700 dark:text-gray-200 text-sm">Precio Mayor:</span>
+        <span class="text-emerald-600 dark:text-emerald-400 font-black text-xl">$${pMayor.toFixed(2)}</span>
+      </div>
+    `
+  } else if (priceInfo.display === "single") {
+    priceHTML = `<p class="text-green-600 dark:text-green-400 font-black text-xl mb-1">$${priceInfo.price.toFixed(2)}</p>`
   } else if (priceInfo.display === "dual") {
     priceHTML = `
-      <div class="space-y-2 mb-4">
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
+      <div class="space-y-2 mb-3">
+        <label class="flex items-center justify-between p-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-red-500 transition-all">
           <div>
-            <span class="font-semibold text-gray-700">Precio Detal</span>
-            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
+            <span class="font-semibold text-gray-700 dark:text-gray-200 text-sm">Precio Detal</span>
+            <span class="text-red-600 dark:text-red-400 font-black text-base ml-2">$${priceInfo.priceCliente.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="cliente" checked class="w-5 h-5">
+          <input type="radio" name="price-option" value="cliente" checked class="w-4 h-4">
         </label>
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
+        <label class="flex items-center justify-between p-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-green-500 transition-all">
           <div>
-            <span class="font-semibold text-gray-700">Precio Mayor</span>
-            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
+            <span class="font-semibold text-gray-700 dark:text-gray-200 text-sm">Precio Mayor</span>
+            <span class="text-green-600 dark:text-green-400 font-black text-base ml-2">$${priceInfo.priceMayor.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="mayor" class="w-5 h-5">
+          <input type="radio" name="price-option" value="mayor" class="w-4 h-4">
         </label>
       </div>
     `
   } else if (priceInfo.display === "triple") {
-    const isMayorista = (currentUserRole || window.currentUserRole) === "distribuidor";
     priceHTML = `
-      <div class="space-y-2 mb-4">
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-red-500 transition-all">
+      <div class="space-y-2 mb-3">
+        <label class="flex items-center justify-between p-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-red-500 transition-all">
           <div>
-            <span class="font-semibold text-gray-700">Precio Detal</span>
-            <span class="text-red-600 font-black text-lg ml-3">$${priceInfo.priceCliente.toFixed(2)}</span>
+            <span class="font-semibold text-gray-700 dark:text-gray-200 text-sm">Precio Detal</span>
+            <span class="text-red-600 dark:text-red-400 font-black text-base ml-2">$${priceInfo.priceCliente.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="cliente" ${isMayorista ? "" : "checked"} class="w-5 h-5">
+          <input type="radio" name="price-option" value="cliente" checked class="w-4 h-4">
         </label>
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-green-500 transition-all">
+        <label class="flex items-center justify-between p-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-green-500 transition-all">
           <div>
-            <span class="font-semibold text-gray-700">Precio Mayor</span>
-            <span class="text-green-600 font-black text-lg ml-3">$${priceInfo.priceMayor.toFixed(2)}</span>
+            <span class="font-semibold text-gray-700 dark:text-gray-200 text-sm">Precio Mayor</span>
+            <span class="text-green-600 dark:text-green-400 font-black text-base ml-2">$${priceInfo.priceMayor.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="mayor" ${isMayorista ? "checked" : ""} class="w-5 h-5">
+          <input type="radio" name="price-option" value="mayor" class="w-4 h-4">
         </label>
-        <label class="flex items-center justify-between p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 transition-all">
+        <label class="flex items-center justify-between p-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:border-blue-500 transition-all">
           <div>
-            <span class="font-semibold text-gray-700">Precio G.Mayor</span>
-            <span class="text-blue-600 font-black text-lg ml-3">$${priceInfo.priceGmayor.toFixed(2)}</span>
+            <span class="font-semibold text-gray-700 dark:text-gray-200 text-sm">Precio G.Mayor</span>
+            <span class="text-blue-600 dark:text-blue-400 font-black text-base ml-2">$${priceInfo.priceGmayor.toFixed(2)}</span>
           </div>
-          <input type="radio" name="price-option" value="gmayor" class="w-5 h-5">
+          <input type="radio" name="price-option" value="gmayor" class="w-4 h-4">
         </label>
       </div>
     `
   }
 
+  const descHTML = product.descripcion && product.descripcion.trim()
+    ? `<p class="text-gray-600 dark:text-gray-300 text-xs mb-2 line-clamp-2">${product.descripcion.trim()}</p>`
+    : ""
+
   productInfo.innerHTML = `
-    <h3 class="font-bold text-lg text-gray-800 mb-2">${product.nombre}</h3>
-    <p class="text-gray-600 text-sm mb-3">${product.descripcion || ""}</p>
+    <h3 class="font-bold text-base sm:text-lg text-gray-800 dark:text-gray-100 mb-1 line-clamp-2">${product.nombre}</h3>
+    ${descHTML}
     ${priceHTML}
   `
 
@@ -4123,7 +4151,7 @@ async function confirmQuantity() {
   const quantity = Number.parseInt(document.getElementById("quantity-input").value)
   const observation = document.getElementById("observation-input").value.trim()
 
-  if (quantity < 1) {
+  if (quantity < 1 || isNaN(quantity)) {
     alert("La cantidad debe ser al menos 1")
     return
   }
@@ -4138,10 +4166,16 @@ async function confirmQuantity() {
     return
   }
 
+  const role = (currentUserRole || window.currentUserRole || (currentUser && currentUser.role) || '').toLowerCase();
+  const isMayorista = role === "distribuidor" || role === "mayorista";
+
   const priceInfo = getPriceForRole(selectedProductForQuantity)
   let selectedPrice
 
-  if (priceInfo.display === "dual" || priceInfo.display === "triple") {
+  if (isMayorista) {
+    // Para Mayorista asigna directamente el precio mayor sin requerir selector en modal
+    selectedPrice = parseFloat(selectedProductForQuantity.precio_mayor) || (priceInfo && parseFloat(priceInfo.priceMayor)) || parseFloat(selectedProductForQuantity.precio_cliente) || 0
+  } else if (priceInfo.display === "dual" || priceInfo.display === "triple") {
     const priceOption = document.querySelector('input[name="price-option"]:checked')?.value
     if (priceOption === "mayor") {
       selectedPrice = priceInfo.priceMayor
@@ -4292,26 +4326,28 @@ function renderCart() {
   })
 
   let totalHTML = ""
+  const userRole = (currentUserRole || window.currentUserRole || (currentUser && currentUser.role) || '').toLowerCase();
+  const isDistribuidorOrGestor = userRole === "gestor" || userRole === "distribuidor" || userRole === "mayorista";
 
-  if (window.currentUserRole === "gestor" || window.currentUserRole === "distribuidor") {
+  if (isDistribuidorOrGestor) {
     totalHTML = `
       <div class="space-y-2">
         <div class="flex justify-between items-center">
-          <span class="text-sm font-semibold text-gray-600">Total Detal:</span>
-          <span class="text-lg font-black text-red-600">$${totalDetal.toFixed(2)}</span>
+          <span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Total Detal:</span>
+          <span class="text-lg font-black text-red-600 dark:text-red-400">$${totalDetal.toFixed(2)}</span>
         </div>
         <div class="flex justify-between items-center">
-          <span class="text-sm font-semibold text-gray-600">Total Mayor:</span>
-          <span class="text-lg font-black text-green-600">$${totalMayor.toFixed(2)}</span>
+          <span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Total Mayor:</span>
+          <span class="text-lg font-black text-green-600 dark:text-green-400">$${totalMayor.toFixed(2)}</span>
         </div>
         <div class="flex justify-between items-center">
-          <span class="text-sm font-semibold text-gray-600">Total G.Mayor:</span>
-          <span class="text-lg font-black text-blue-600">$${totalGmayor.toFixed(2)}</span>
+          <span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Total G.Mayor:</span>
+          <span class="text-lg font-black text-blue-600 dark:text-blue-400">$${totalGmayor.toFixed(2)}</span>
         </div>
       </div>
     `
     cartTotal.innerHTML = totalHTML
-  } else if (window.currentUserRole === "admin") {
+  } else if (userRole === "admin") {
     totalHTML = `$${totalGmayor.toFixed(2)}`
     cartTotal.textContent = totalHTML
   } else {
@@ -4602,7 +4638,10 @@ async function sendWhatsAppOrder() {
   cart.forEach((item, index) => {
     const product = allProducts.find((p) => p.id === item.id)
     const codigo = product ? product.codigo || "S/C" : "S/C"
-    const subtotal = item.price * item.quantity
+    const itemPrice = typeof item.price === "number" && !isNaN(item.price) && item.price > 0
+      ? item.price
+      : (product ? (parseFloat(product.precio_mayor) || parseFloat(product.precio_cliente) || 0) : 0);
+    const subtotal = itemPrice * item.quantity
 
     message += `${item.quantity} - *${codigo}* - ${item.nombre} - $${subtotal.toFixed(2)}`
     if (item.observation) {
@@ -4615,26 +4654,29 @@ async function sendWhatsAppOrder() {
     }
 
     if (product) {
-      totalDetal += (product.precio_cliente || 0) * item.quantity
-      totalMayor += (product.precio_mayor || 0) * item.quantity
-      totalGmayor += (product.precio_gmayor || 0) * item.quantity
+      totalDetal += (Number(product.precio_cliente) || 0) * item.quantity
+      totalMayor += (Number(product.precio_mayor) || 0) * item.quantity
+      totalGmayor += (Number(product.precio_gmayor) || 0) * item.quantity
     }
 
-    const salePrice =
-      (currentUserRole === "gestor" || currentUserRole === "distribuidor")
-        ? item.price
-        : product?.precio_gmayor || 0
+    const currentRoleLower = (currentUserRole || window.currentUserRole || (currentUser && currentUser.role) || '').toLowerCase();
+    const isMayoristaOrGestorRole = currentRoleLower === "gestor" || currentRoleLower === "distribuidor" || currentRoleLower === "mayorista";
+
+    const salePrice = isMayoristaOrGestorRole ? item.price : product?.precio_gmayor || 0
     recordSaleToDatabase(item.id, item.quantity, salePrice)
   })
 
   message += `\n\n*TOTALES:*\n`
 
-  if (window.currentUserRole === "gestor" || window.currentUserRole === "distribuidor") {
-    message += `Total Detal: $${totalDetal.toFixed(2)}\n`
-    message += `Total Mayor: $${totalMayor.toFixed(2)}\n`
-    message += `Total G.Mayor: $${totalGmayor.toFixed(2)}`
+  const currentRoleLower = (currentUserRole || window.currentUserRole || (currentUser && currentUser.role) || '').toLowerCase();
+  const isMayoristaOrGestorRole = currentRoleLower === "gestor" || currentRoleLower === "distribuidor" || currentRoleLower === "mayorista";
+
+  if (isMayoristaOrGestorRole) {
+    message += `*Total Detal:* $${totalDetal.toFixed(2)}\n`
+    message += `*Total Mayor:* $${totalMayor.toFixed(2)}\n`
+    message += `*Total G.Mayor:* $${totalGmayor.toFixed(2)}`
   } else {
-    message += `Total Detal: $${totalDetal.toFixed(2)}`
+    message += `*Total Detal:* $${totalDetal.toFixed(2)}`
   }
 
   console.log("Mensaje generado:", message)
