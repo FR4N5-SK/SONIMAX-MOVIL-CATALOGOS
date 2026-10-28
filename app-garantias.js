@@ -25,6 +25,7 @@
   const STORAGE_PIN_KEY = 'sonimax_garantias_pin';
   const STORAGE_CACHE_KEY = 'sonimax_garantias_cache_v1';
   const STORAGE_SESSION_UNLOCKED = 'sonimax_garantias_unlocked_session';
+  const STORAGE_DRAFT_KEY = 'sonimax_garantias_form_draft_v1';
 
   // Claves predeterminadas aceptadas inicialmente (se pueden cambiar por el admin)
   const DEFAULT_PINS = ['1234', 'sonimax2026', 'admin2026'];
@@ -1059,6 +1060,18 @@
     // Botón exportar excel en cabecera de tabs
     document.getElementById('garantias-quick-excel-btn').onclick = exportFilteredGarantiasToExcel;
 
+    // Auto-guardar borrador cuando el usuario escribe en los campos del formulario
+    ['garantia-input-cliente', 'garantia-input-telefono', 'garantia-input-observaciones', 'garantia-failure-desc-input'].forEach(inputId => {
+      const el = document.getElementById(inputId);
+      if (el) {
+        el.addEventListener('input', () => {
+          // Debounce: guardar 500ms después de dejar de escribir
+          clearTimeout(el._draftTimer);
+          el._draftTimer = setTimeout(saveFormDraft, 500);
+        });
+      }
+    });
+
     // Renderizar tags rápidos de fallas
     const tagsContainer = document.getElementById('garantia-quick-failure-tags');
     if (tagsContainer) {
@@ -1207,6 +1220,7 @@
       qtyInput.value = '1';
 
       renderCurrentWarrantyItems();
+      saveFormDraft(); // Auto-guardar borrador al agregar producto
     };
 
     // Limpiar formulario completo
@@ -1452,6 +1466,7 @@
         const idx = parseInt(btn.dataset.index);
         currentWarrantyItems.splice(idx, 1);
         renderCurrentWarrantyItems();
+        saveFormDraft(); // Auto-guardar borrador al quitar producto
       };
     });
   }
@@ -1476,6 +1491,146 @@
     // Actualizar preview de ticket nuevo
     const previewTicket = document.getElementById('garantias-preview-ticket');
     if (previewTicket) previewTicket.textContent = generateTicketCode();
+
+    // Limpiar borrador guardado
+    clearFormDraft();
+  }
+
+  // ============================================================
+  // BORRADOR AUTO-PERSISTIDO EN LOCALSTORAGE
+  // Evita la pérdida de datos si el usuario recarga la página
+  // antes de enviar la solicitud de garantía.
+  // ============================================================
+  function saveFormDraft() {
+    try {
+      const draft = {
+        items: currentWarrantyItems,
+        ticketCode: document.getElementById('garantias-preview-ticket')?.textContent || '',
+        cliente: document.getElementById('garantia-input-cliente')?.value || '',
+        telefono: document.getElementById('garantia-input-telefono')?.value || '',
+        observaciones: document.getElementById('garantia-input-observaciones')?.value || '',
+        fallaDesc: document.getElementById('garantia-failure-desc-input')?.value || '',
+        savedAt: new Date().toISOString()
+      };
+
+      // Solo guardar si hay algún dato real
+      const hasData = draft.items.length > 0 ||
+        draft.cliente.trim() !== '' ||
+        draft.telefono.trim() !== '' ||
+        draft.observaciones.trim() !== '' ||
+        draft.fallaDesc.trim() !== '';
+
+      if (hasData) {
+        localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(draft));
+        console.log(`[GARANTIAS-DRAFT] 💾 Borrador guardado: ${draft.items.length} producto(s)`);
+      } else {
+        localStorage.removeItem(STORAGE_DRAFT_KEY);
+      }
+    } catch (e) {
+      console.warn('[GARANTIAS-DRAFT] Error guardando borrador:', e);
+    }
+  }
+
+  function clearFormDraft() {
+    try {
+      localStorage.removeItem(STORAGE_DRAFT_KEY);
+      // Ocultar aviso de borrador restaurado si existe
+      const notice = document.getElementById('garantia-draft-notice');
+      if (notice) notice.remove();
+      console.log('[GARANTIAS-DRAFT] 🗑️ Borrador eliminado');
+    } catch (e) {
+      console.warn('[GARANTIAS-DRAFT] Error limpiando borrador:', e);
+    }
+  }
+
+  function restoreFormDraft() {
+    try {
+      const raw = localStorage.getItem(STORAGE_DRAFT_KEY);
+      if (!raw) return false;
+
+      const draft = JSON.parse(raw);
+      if (!draft || typeof draft !== 'object') return false;
+
+      // Restaurar items
+      if (Array.isArray(draft.items) && draft.items.length > 0) {
+        currentWarrantyItems = draft.items;
+      }
+
+      // Restaurar ticket code si existe
+      if (draft.ticketCode && draft.ticketCode.startsWith('GAR-')) {
+        const previewTicket = document.getElementById('garantias-preview-ticket');
+        if (previewTicket) previewTicket.textContent = draft.ticketCode;
+      }
+
+      // Restaurar campos de texto
+      const clienteInput = document.getElementById('garantia-input-cliente');
+      if (clienteInput && draft.cliente) clienteInput.value = draft.cliente;
+
+      const telInput = document.getElementById('garantia-input-telefono');
+      if (telInput && draft.telefono) telInput.value = draft.telefono;
+
+      const obsInput = document.getElementById('garantia-input-observaciones');
+      if (obsInput && draft.observaciones) obsInput.value = draft.observaciones;
+
+      const descInput = document.getElementById('garantia-failure-desc-input');
+      if (descInput && draft.fallaDesc) descInput.value = draft.fallaDesc;
+
+      // Renderizar items restaurados
+      renderCurrentWarrantyItems();
+
+      // Mostrar aviso de borrador restaurado
+      const hasRealData = currentWarrantyItems.length > 0 ||
+        (draft.cliente || '').trim() !== '' ||
+        (draft.telefono || '').trim() !== '' ||
+        (draft.observaciones || '').trim() !== '';
+
+      if (hasRealData) {
+        showDraftRestoredNotice(draft.savedAt);
+        console.log(`[GARANTIAS-DRAFT] ✅ Borrador restaurado: ${currentWarrantyItems.length} producto(s)`);
+      }
+
+      return hasRealData;
+    } catch (e) {
+      console.warn('[GARANTIAS-DRAFT] Error restaurando borrador:', e);
+      return false;
+    }
+  }
+
+  function showDraftRestoredNotice(savedAt) {
+    // Eliminar aviso anterior si existe
+    const existing = document.getElementById('garantia-draft-notice');
+    if (existing) existing.remove();
+
+    const timeStr = savedAt ? formatDateTime(savedAt) : 'hace poco';
+    const notice = document.createElement('div');
+    notice.id = 'garantia-draft-notice';
+    notice.className = 'bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-2xl p-3 flex items-center justify-between gap-3 animate-g-fade';
+    notice.innerHTML = `
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-lg flex-shrink-0">📝</span>
+        <div class="min-w-0">
+          <span class="font-bold text-xs text-amber-800 dark:text-amber-300">Borrador restaurado automáticamente</span>
+          <p class="text-[11px] text-amber-700 dark:text-amber-400 truncate">Se recuperaron ${currentWarrantyItems.length} producto(s) · Guardado: ${timeStr}</p>
+        </div>
+      </div>
+      <button type="button" id="garantia-discard-draft-btn" class="flex-shrink-0 px-3 py-1.5 bg-amber-200 hover:bg-amber-300 dark:bg-amber-800/60 dark:hover:bg-amber-700/80 text-amber-900 dark:text-amber-200 rounded-xl text-xs font-bold transition-all">
+        🗑️ Descartar
+      </button>
+    `;
+
+    // Insertar justo debajo del banner de ticket
+    const formTab = document.getElementById('garantias-tab-form');
+    if (formTab && formTab.firstChild) {
+      formTab.insertBefore(notice, formTab.children[1] || null);
+    }
+
+    // Botón descartar borrador
+    document.getElementById('garantia-discard-draft-btn')?.addEventListener('click', () => {
+      if (confirm('¿Deseas descartar el borrador guardado y empezar de cero?')) {
+        resetForm();
+        notice.remove();
+      }
+    });
   }
 
   // ============================================================
@@ -1534,8 +1689,8 @@
       // Mostrar pantalla de éxito
       showSuccessModal(payload);
 
-      // Limpiar formulario y regenerar ticket
-      resetForm();
+      // Limpiar formulario, borrador y regenerar ticket
+      resetForm(); // resetForm ya llama a clearFormDraft()
       fetchGarantiasFromDatabase().then(() => renderHistoryList());
 
     } catch (e) {
@@ -2250,7 +2405,12 @@
     if (userBadge) userBadge.textContent = `${currentUser.name} (${role.toUpperCase()})`;
     if (previewUser) previewUser.textContent = `${currentUser.name} (${role.toUpperCase()})`;
     if (previewTime) previewTime.textContent = formatDateTime(new Date().toISOString());
-    if (previewTicket) previewTicket.textContent = generateTicketCode();
+
+    // Restaurar borrador si existe, sino generar ticket nuevo
+    const draftRestored = restoreFormDraft();
+    if (!draftRestored && previewTicket) {
+      previewTicket.textContent = generateTicketCode();
+    }
 
     // Cargar datos acumulados de Supabase de inmediato
     fetchGarantiasFromDatabase().then(() => {
@@ -2308,6 +2468,20 @@
   window.openGarantiasModal = promptPinOrOpen;
   window.closeGarantiasModal = closeGarantiasModal;
   window.exportGarantiasExcel = exportFilteredGarantiasToExcel;
+
+  // Auto-guardar borrador al cerrar/recargar la página
+  window.addEventListener('beforeunload', () => {
+    if (currentWarrantyItems.length > 0) {
+      saveFormDraft();
+    }
+  });
+
+  // Backup: guardar al cambiar de pestaña/minimizar
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && currentWarrantyItems.length > 0) {
+      saveFormDraft();
+    }
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
