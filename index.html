@@ -321,6 +321,12 @@
                             <span class="hidden sm:inline">Precios Valery</span>
                         </button>
 
+                        <!-- Botón Garantía (Solo Gestor y Admin) -->
+                        <button id="header-garantias-btn" class="hidden px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md flex items-center gap-1.5 transition-all" title="Módulo de Garantías (Gestor y Admin)">
+                            <span class="text-base">🛡️</span>
+                            <span class="hidden sm:inline">Garantía</span>
+                        </button>
+
                         <!-- Botón Modo Oscuro/Claro -->
                         <button id="theme-toggle-btn" class="p-2 sm:p-3 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all group">
                             <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5 sm:w-6 sm:h-6 text-gray-800 dark:text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -721,6 +727,14 @@
                     </svg>
                     <span>⚠️ Bajo Stock (1-5)</span>
                 </button>
+
+                <!-- Botón Garantías en Admin Section -->
+                <button id="garantias-button" class="admin-btn" style="background: linear-gradient(135deg, #059669, #0d9488); color: white;">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                    </svg>
+                    <span>🛡️ Gestión de Garantías</span>
+                </button>
             </div>
         </div>
 
@@ -741,6 +755,13 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
                         </svg>
                         <span>🏷️ Sacar Precios (Estilo Valery)</span>
+                    </button>
+                    <!-- Botón Garantías en Gestor Section -->
+                    <button id="gestor-garantias-button" class="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-xl hover:from-emerald-700 hover:to-teal-800 transition-all font-semibold shadow-lg flex items-center space-x-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                        <span>🛡️ Garantía</span>
                     </button>
                 </div>
             </div>
@@ -1441,6 +1462,7 @@
         <script src="app-features.js"></script>
         <script src="app-update-products.js"></script>
         <script src="app-valery-prices.js"></script>
+        <script src="app-garantias.js"></script>
 
         <script>
             document.addEventListener('DOMContentLoaded', () => {
