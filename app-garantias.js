@@ -10,8 +10,9 @@
  * 3. Lista acumulada para Admin y Gestores con identificación de usuario, rol, fecha y hora.
  * 4. Actualización de estados por parte del Administrador (Pendiente, En Revisión, Aprobada, Rechazada).
  * 5. Exportación a Excel (.xlsx) por mes o general con SheetJS (XLSX).
- * 6. Persistencia dual: Base de datos Supabase (tabla 'garantias') con sincronización
- *    y almacenamiento de respaldo automático en localStorage.
+ * 6. Sincronización multi-servidor automática: Se comunica simultáneamente con
+ *    el servidor Principal y el servidor Secundario (Plan Pro), garantizando
+ *    visibilidad instantánea entre diferentes PCs y dispositivos.
  * 7. Envío formateado por WhatsApp del ticket y generación de comprobante de entrega imprimible.
  */
 
@@ -81,14 +82,13 @@
   let allGarantias = [];
   let isSessionUnlocked = sessionStorage.getItem(STORAGE_SESSION_UNLOCKED) === 'true';
 
-  // Filtros de la lista acumulada
+  // Filtros de la lista acumulada (por defecto 'all' para ver todo lo recibido entre PCs)
   const currentDate = new Date();
-  let filterMonth = String(currentDate.getMonth() + 1).padStart(2, '0'); // ej: "10"
+  let filterMonth = 'all'; // Todos los meses por defecto para ver todos los acumulados
   let filterYear = String(currentDate.getFullYear()); // ej: "2026"
   let filterStatus = 'all';
   let filterUser = 'all';
   let searchQuery = '';
-  let onlyMyWarranties = false;
 
   // ============================================================
   // HELPERS GENERALES
@@ -107,7 +107,7 @@
   }
 
   function isAuthorized() {
-    const role = getActiveRole();
+    const role = (getActiveRole() || '').toLowerCase();
     return role === 'admin' || role === 'gestor';
   }
 
@@ -165,7 +165,35 @@
   }
 
   // ============================================================
-  // PERSISTENCIA: LOCALSTORAGE + SUPABASE
+  // SERVIDORES SUPABASE (MULTI-CLIENTE AUTOMÁTICO)
+  // Permite sincronizar sin importar en qué servidor se corrió el SQL
+  // ============================================================
+  function getAllSupabaseClients() {
+    const clients = [];
+
+    // 1. Servidor Secundario / Puente de Respaldo (Plan Pro - tuqwzrsgczhgmfnfmryw)
+    if (window.supabaseOldClient) {
+      clients.push({
+        id: 'old',
+        name: 'Supabase Plan Pro (tuqwzrsgczhgmfnfmryw)',
+        client: window.supabaseOldClient
+      });
+    }
+
+    // 2. Servidor Principal (Catálogo al día - gvaitosnfotnkrpjojqn)
+    if (window.supabaseClient) {
+      clients.push({
+        id: 'main',
+        name: 'Supabase Principal (gvaitosnfotnkrpjojqn)',
+        client: window.supabaseClient
+      });
+    }
+
+    return clients;
+  }
+
+  // ============================================================
+  // PERSISTENCIA: LOCALSTORAGE + SUPABASE MULTI-CLIENTE
   // ============================================================
   function loadLocalCache() {
     try {
@@ -185,64 +213,109 @@
     }
   }
 
+  /**
+   * Consulta ambos servidores de Supabase para obtener todas las solicitudes
+   * registradas desde cualquier PC y las fusiona con la caché local.
+   */
   async function fetchGarantiasFromDatabase() {
-    allGarantias = loadLocalCache();
+    const clients = getAllSupabaseClients();
+    const map = new Map();
+    let anySuccess = false;
 
-    if (!window.supabaseClient) {
-      console.warn('[GARANTIAS] Supabase no disponible, usando caché local');
-      return allGarantias;
+    for (const c of clients) {
+      try {
+        const { data, error } = await c.client
+          .from('garantias')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+          anySuccess = true;
+          data.forEach(item => {
+            if (item && item.codigo_ticket) {
+              map.set(item.codigo_ticket, item);
+            }
+          });
+          console.log(`[GARANTIAS] 📥 Recibidas ${data.length} garantías desde ${c.name}`);
+        } else if (error) {
+          console.warn(`[GARANTIAS] No se pudo leer de ${c.name}:`, error.message);
+        }
+      } catch (err) {
+        console.warn(`[GARANTIAS] Excepción leyendo de ${c.name}:`, err);
+      }
     }
 
-    try {
-      const { data, error } = await window.supabaseClient
-        .from('garantias')
-        .select('*')
-        .order('created_at', { ascending: false });
+    if (anySuccess) {
+      // También incluir cualquier garantía guardada localmente que aún no esté en la nube
+      const localList = loadLocalCache();
+      localList.forEach(localItem => {
+        if (!map.has(localItem.codigo_ticket)) {
+          map.set(localItem.codigo_ticket, localItem);
+        }
+      });
 
-      if (error) {
-        console.warn('[GARANTIAS] Aviso al consultar Supabase (puede requerir ejecutar supabase-garantias.sql):', error.message);
-        return allGarantias;
-      }
-
-      if (data && Array.isArray(data)) {
-        allGarantias = data;
-        saveLocalCache(data);
-      }
-    } catch (e) {
-      console.warn('[GARANTIAS] Error de red o tabla no creada aún en Supabase:', e);
+      allGarantias = Array.from(map.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      saveLocalCache(allGarantias);
+    } else {
+      allGarantias = loadLocalCache();
     }
 
     return allGarantias;
   }
 
+  /**
+   * Guarda la garantía en TODOS los servidores de Supabase configurados
+   * para que cualquier PC conectada la reciba de inmediato.
+   */
   async function saveGarantiaToDatabase(garantia) {
-    // 1. Guardar primero en el caché local para disponibilidad inmediata
-    const list = loadLocalCache();
-    list.unshift(garantia);
-    saveLocalCache(list);
-    allGarantias = list;
+    const clients = getAllSupabaseClients();
+    const savedInServers = [];
+    const errors = [];
 
-    // 2. Intentar guardar en Supabase
-    if (window.supabaseClient) {
+    for (const c of clients) {
       try {
-        const { error } = await window.supabaseClient
+        const { error } = await c.client
           .from('garantias')
           .insert([garantia]);
 
-        if (error) {
-          console.warn('[GARANTIAS] Guardado localmente. En Supabase devolvió:', error.message);
+        if (!error) {
+          savedInServers.push(c.name);
+          console.log(`[GARANTIAS] ✅ Guardado exitoso en ${c.name}`);
         } else {
-          console.log('[GARANTIAS] ✅ Guardado exitoso en Supabase');
+          errors.push(`${c.name}: ${error.message}`);
+          console.warn(`[GARANTIAS] Error en ${c.name}:`, error.message);
         }
-      } catch (e) {
-        console.warn('[GARANTIAS] Error sincronizando con Supabase:', e);
+      } catch (err) {
+        errors.push(`${c.name}: ${err.message}`);
+        console.warn(`[GARANTIAS] Excepción guardando en ${c.name}:`, err);
       }
+    }
+
+    // 1. Guardar siempre en caché local de esta máquina
+    const list = loadLocalCache();
+    const existingIdx = list.findIndex(g => g.codigo_ticket === garantia.codigo_ticket);
+    if (existingIdx !== -1) {
+      list[existingIdx] = garantia;
+    } else {
+      list.unshift(garantia);
+    }
+    saveLocalCache(list);
+    allGarantias = list;
+
+    // 2. Si no se pudo guardar en ningún servidor remoto, avisar claramente
+    if (savedInServers.length === 0) {
+      const msg = `⚠️ ATENCIÓN: La garantía se guardó en esta PC, pero NO se pudo sincronizar con la nube de Supabase.\n\nMotivo:\n${errors.join('\n')}\n\n👉 Ejecuta el archivo "supabase-garantias.sql" en tu panel de Supabase para que la otra PC (Admin) pueda ver esta solicitud.`;
+      console.error(msg);
+      alert(msg);
+    } else {
+      console.log(`[GARANTIAS] 🚀 Sincronizado en línea con: ${savedInServers.join(' Y ')}`);
     }
 
     return garantia;
   }
 
   async function updateGarantiaStatusInDB(ticketCode, newStatus, adminNote) {
+    // Actualizar en memoria local
     const list = loadLocalCache();
     const item = list.find(g => g.codigo_ticket === ticketCode);
     if (item) {
@@ -253,7 +326,9 @@
       allGarantias = list;
     }
 
-    if (window.supabaseClient) {
+    // Actualizar en servidores Supabase
+    const clients = getAllSupabaseClients();
+    for (const c of clients) {
       try {
         const updates = {
           estado: newStatus,
@@ -261,12 +336,12 @@
         };
         if (adminNote !== undefined) updates.notas_admin = adminNote;
 
-        await window.supabaseClient
+        await c.client
           .from('garantias')
           .update(updates)
           .eq('codigo_ticket', ticketCode);
       } catch (e) {
-        console.warn('[GARANTIAS] Error actualizando en Supabase:', e);
+        console.warn(`[GARANTIAS] Error actualizando estado en ${c.name}:`, e);
       }
     }
   }
@@ -276,14 +351,15 @@
     saveLocalCache(list);
     allGarantias = list;
 
-    if (window.supabaseClient) {
+    const clients = getAllSupabaseClients();
+    for (const c of clients) {
       try {
-        await window.supabaseClient
+        await c.client
           .from('garantias')
           .delete()
           .eq('codigo_ticket', ticketCode);
       } catch (e) {
-        console.warn('[GARANTIAS] Error eliminando en Supabase:', e);
+        console.warn(`[GARANTIAS] Error eliminando en ${c.name}:`, e);
       }
     }
   }
@@ -511,7 +587,7 @@
                 <span id="garantias-user-badge" class="bg-white/25 text-white text-xs px-2.5 py-0.5 rounded-full font-bold"></span>
               </h2>
               <p class="text-xs text-emerald-100 flex items-center gap-1.5 mt-0.5">
-                <span>Registro de productos defectuosos, acumulación de pedidos y reportes mensuales</span>
+                <span>Registro de productos defectuosos, pedidos a admin y exportación en Excel</span>
                 <span class="hidden sm:inline font-mono opacity-80" id="garantias-clock"></span>
               </p>
             </div>
@@ -533,18 +609,18 @@
         <!-- TABS DE NAVEGACIÓN -->
         <div class="bg-gray-50 dark:bg-gray-800/80 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 flex-shrink-0 items-center justify-between">
           <div class="flex gap-2">
-            <button id="garantias-tab-form-btn" class="garantia-tab-btn active px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 text-gray-700 dark:text-gray-300">
+            <button id="garantias-tab-form-btn" class="garantia-tab-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 text-gray-700 dark:text-gray-300">
               <span>📝</span>
               <span>Nueva Garantía</span>
             </button>
-            <button id="garantias-tab-history-btn" class="garantia-tab-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 text-gray-700 dark:text-gray-300">
+            <button id="garantias-tab-history-btn" class="garantia-tab-btn active px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 text-gray-700 dark:text-gray-300">
               <span>📋</span>
               <span>Garantías Registradas</span>
               <span id="garantias-history-count" class="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs px-2 py-0.5 rounded-full font-bold">0</span>
             </button>
             <button id="garantias-tab-config-btn" class="garantia-tab-btn px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
               <span>⚙️</span>
-              <span class="hidden sm:inline">Configuración</span>
+              <span class="hidden sm:inline">Configuración y Diagnóstico</span>
             </button>
           </div>
 
@@ -561,7 +637,7 @@
           <!-- ========================================== -->
           <!-- PESTAÑA 1: FORMULARIO DE NUEVA GARANTÍA -->
           <!-- ========================================== -->
-          <div id="garantias-tab-form" class="space-y-6">
+          <div id="garantias-tab-form" class="hidden space-y-6">
             
             <!-- Banner informativo con Ticket y Solicitante -->
             <div class="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 flex flex-wrap items-center justify-between gap-3">
@@ -738,7 +814,7 @@
           <!-- ========================================== -->
           <!-- PESTAÑA 2: LISTA ACUMULADA Y GESTIÓN -->
           <!-- ========================================== -->
-          <div id="garantias-tab-history" class="hidden space-y-6">
+          <div id="garantias-tab-history" class="space-y-6">
             
             <!-- TARJETAS DE ESTADÍSTICAS (KPIs) -->
             <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
@@ -772,7 +848,7 @@
                 <div>
                   <label class="block text-[11px] font-bold uppercase text-gray-500 mb-1">📅 Mes</label>
                   <select id="garantias-filter-month" class="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-bold text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500">
-                    <option value="all">Todos los Meses</option>
+                    <option value="all" selected>Todos los Meses</option>
                     <option value="01">Enero</option>
                     <option value="02">Febrero</option>
                     <option value="03">Marzo</option>
@@ -792,8 +868,9 @@
                 <div>
                   <label class="block text-[11px] font-bold uppercase text-gray-500 mb-1">📆 Año</label>
                   <select id="garantias-filter-year" class="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-bold text-gray-800 dark:text-white focus:outline-none focus:border-emerald-500">
+                    <option value="all">Todos los Años</option>
                     <option value="2025">2025</option>
-                    <option value="2026">2026</option>
+                    <option value="2026" selected>2026</option>
                     <option value="2027">2027</option>
                   </select>
                 </div>
@@ -832,9 +909,9 @@
                 <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <button type="button" id="garantias-export-excel-btn" class="flex-1 sm:flex-initial px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 whitespace-nowrap">
                     <span>📊</span>
-                    <span id="garantias-export-label">Exportar Mes a Excel</span>
+                    <span id="garantias-export-label">Exportar a Excel</span>
                   </button>
-                  <button type="button" id="garantias-refresh-btn" class="p-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all" title="Recargar lista">
+                  <button type="button" id="garantias-refresh-btn" class="p-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all" title="Recargar lista de Supabase">
                     🔄
                   </button>
                 </div>
@@ -851,11 +928,14 @@
               <span class="text-4xl block mb-2">🔍</span>
               <p class="font-bold text-gray-800 dark:text-white text-base">No se encontraron garantías registradas</p>
               <p class="text-xs text-gray-500 mt-1">Prueba cambiando el mes o los filtros de búsqueda.</p>
+              <button type="button" id="empty-reset-filters-btn" class="mt-3 px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 transition-all">
+                Ver Todas las Garantías
+              </button>
             </div>
           </div>
 
           <!-- ========================================== -->
-          <!-- PESTAÑA 3: CONFIGURACIÓN (Solo Admin) -->
+          <!-- PESTAÑA 3: CONFIGURACIÓN Y DIAGNÓSTICO -->
           <!-- ========================================== -->
           <div id="garantias-tab-config" class="hidden space-y-6">
             <div class="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-3xl border border-gray-200 dark:border-gray-700 space-y-6 max-w-xl mx-auto">
@@ -863,7 +943,7 @@
               <div>
                 <h3 class="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
                   <span>🔐</span>
-                  <span>Cambiar Clave de Acceso a Garantías</span>
+                  <span>Clave de Acceso al Módulo</span>
                 </h3>
                 <p class="text-xs text-gray-500 mt-1">
                   Esta clave será solicitada a Gestores y Administradores para abrir el formulario de Garantías.
@@ -889,24 +969,23 @@
               <div>
                 <h4 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
                   <span>🗄️</span>
-                  <span>Estado de la Base de Datos (Supabase)</span>
+                  <span>Diagnóstico y Sincronización Multi-PC (Supabase)</span>
                 </h4>
                 <p class="text-xs text-gray-500 mt-1">
-                  Tabla requerida: <code class="font-mono text-emerald-600 dark:text-emerald-400">public.garantias</code>.
-                  Si no la has creado aún en el Editor SQL de Supabase, puedes ejecutar el script <code class="font-mono text-gray-700 dark:text-gray-300">supabase-garantias.sql</code>.
-                  Mientras tanto, tus datos se guardan de forma 100% segura en la memoria y caché local.
+                  Comprueba si la tabla <code class="font-mono text-emerald-600 dark:text-emerald-400 font-bold">public.garantias</code> está respondiendo en tus servidores Supabase para que las solicitudes viajen entre PCs en tiempo real.
                 </p>
               </div>
 
-              <div class="flex gap-2">
-                <button type="button" id="config-test-db-btn" class="flex-1 py-2 px-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-xs font-bold rounded-xl transition-all">
-                  🔍 Probar Conexión con Supabase
+              <div class="flex flex-col sm:flex-row gap-2">
+                <button type="button" id="config-test-db-btn" class="flex-1 py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-all">
+                  🔍 Probar Conexión en Ambos Supabase
                 </button>
-                <button type="button" id="config-sync-cache-btn" class="flex-1 py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition-all">
-                  🔄 Sincronizar Registros Locales
+                <button type="button" id="config-sync-cache-btn" class="flex-1 py-2.5 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow-md transition-all">
+                  🔄 Subir Registros Locales a la Nube
                 </button>
               </div>
-              <div id="config-db-status" class="hidden text-xs text-center font-bold py-2 px-3 rounded-xl"></div>
+
+              <div id="config-db-status" class="hidden text-xs py-3 px-4 rounded-2xl border space-y-1"></div>
             </div>
           </div>
 
@@ -964,7 +1043,7 @@
       } else if (tab === 'history') {
         tabHistoryBtn?.classList.add('active');
         tabHistory?.classList.remove('hidden');
-        renderHistoryList();
+        fetchGarantiasFromDatabase().then(() => renderHistoryList());
       } else if (tab === 'config') {
         tabConfigBtn?.classList.add('active');
         tabConfig?.classList.remove('hidden');
@@ -1162,7 +1241,7 @@
       const label = document.getElementById('garantias-export-label');
       if (label) {
         if (filterMonth === 'all') {
-          label.textContent = `Exportar Año ${filterYear} a Excel`;
+          label.textContent = `Exportar Todo a Excel`;
         } else {
           const mIndex = parseInt(filterMonth) - 1;
           label.textContent = `Exportar ${MONTH_NAMES[mIndex]} a Excel`;
@@ -1178,6 +1257,18 @@
     filterUserEl.onchange = onFilterChange;
     searchHistoryEl.oninput = onFilterChange;
 
+    const resetFilterBtn = document.getElementById('empty-reset-filters-btn');
+    if (resetFilterBtn) {
+      resetFilterBtn.onclick = () => {
+        filterMonthEl.value = 'all';
+        filterStatusEl.value = 'all';
+        filterUserEl.value = 'all';
+        searchHistoryEl.value = '';
+        onFilterChange();
+      };
+    }
+
+    // Botón refrescar
     document.getElementById('garantias-refresh-btn').onclick = async () => {
       const btn = document.getElementById('garantias-refresh-btn');
       btn.classList.add('animate-spin');
@@ -1188,7 +1279,7 @@
 
     document.getElementById('garantias-export-excel-btn').onclick = exportFilteredGarantiasToExcel;
 
-    // Pestaña Configuración
+    // Pestaña Configuración: Guardar PIN
     document.getElementById('config-save-pin-btn').onclick = () => {
       const newPin = document.getElementById('config-new-pin-input')?.value?.trim();
       const statusEl = document.getElementById('config-pin-status');
@@ -1204,33 +1295,68 @@
       statusEl.classList.remove('hidden');
     };
 
+    // Diagnóstico exhaustivo de ambos servidores Supabase
     document.getElementById('config-test-db-btn').onclick = async () => {
       const statusEl = document.getElementById('config-db-status');
-      statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-blue-100 text-blue-800';
-      statusEl.textContent = 'Probando conexión con Supabase...';
+      statusEl.className = 'text-xs py-3 px-4 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 border border-blue-200 dark:border-blue-800 space-y-2 text-left';
+      statusEl.innerHTML = '<b>🔍 Probando conexión en ambos servidores Supabase...</b>';
       statusEl.classList.remove('hidden');
 
-      if (!window.supabaseClient) {
-        statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-amber-100 text-amber-800';
-        statusEl.textContent = '⚠️ Cliente de Supabase no inicializado en supabase-config.js';
+      const clients = getAllSupabaseClients();
+      if (clients.length === 0) {
+        statusEl.innerHTML = '<span class="text-red-500 font-bold">❌ No hay clientes de Supabase configurados en supabase-config.js</span>';
         return;
       }
 
-      try {
-        const { data, error } = await window.supabaseClient.from('garantias').select('id').limit(1);
-        if (error) {
-          statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-amber-100 text-amber-800';
-          statusEl.textContent = `⚠️ Tabla 'garantias' no detectada aún: ${error.message}. Por favor ejecuta supabase-garantias.sql en Supabase.`;
-        } else {
-          statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-emerald-100 text-emerald-800';
-          statusEl.textContent = `✅ ¡Conexión con Supabase verificada! Tabla 'garantias' activa y funcionando.`;
+      let resultsHtml = '';
+      let anyWorking = false;
+
+      for (const c of clients) {
+        try {
+          const { data, error } = await c.client.from('garantias').select('id, codigo_ticket, created_at').limit(5);
+          if (error) {
+            resultsHtml += `
+              <div class="p-2.5 rounded-xl bg-amber-100/70 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 space-y-1">
+                <div class="font-bold flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>${c.name}</span>
+                </div>
+                <div class="text-[11px] font-mono text-red-700 dark:text-red-300">Error: ${error.message}</div>
+                <div class="text-[11px] opacity-90">
+                  👉 <b>Solución:</b> Ve a Supabase de este servidor y ejecuta el script <code>supabase-garantias.sql</code>.
+                </div>
+              </div>
+            `;
+          } else {
+            anyWorking = true;
+            resultsHtml += `
+              <div class="p-2.5 rounded-xl bg-emerald-100/70 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200">
+                <div class="font-bold flex items-center gap-1.5">
+                  <span>✅</span>
+                  <span>${c.name}</span>
+                </div>
+                <div class="text-[11px] mt-0.5">
+                  ¡Tabla <code>public.garantias</code> conectada y lista! (${data.length} registros de prueba consultados).
+                </div>
+              </div>
+            `;
+          }
+        } catch (e) {
+          resultsHtml += `
+            <div class="p-2.5 rounded-xl bg-red-100/70 dark:bg-red-950/50 text-red-900 dark:text-red-200">
+              <span class="font-bold">❌ ${c.name}:</span> Error de conexión (${e.message}).
+            </div>
+          `;
         }
-      } catch (e) {
-        statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-red-100 text-red-800';
-        statusEl.textContent = `Error al conectar: ${e.message}`;
       }
+
+      statusEl.innerHTML = `
+        <div class="font-bold text-sm mb-1">${anyWorking ? '✅ Diagnóstico Multi-PC Finalizado' : '⚠️ Atención: Se requiere ejecutar el SQL en Supabase'}</div>
+        ${resultsHtml}
+      `;
     };
 
+    // Subir registros locales a la nube
     document.getElementById('config-sync-cache-btn').onclick = async () => {
       const statusEl = document.getElementById('config-db-status');
       statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-blue-100 text-blue-800';
@@ -1238,19 +1364,27 @@
       statusEl.classList.remove('hidden');
 
       const localList = loadLocalCache();
-      if (!window.supabaseClient || localList.length === 0) {
-        statusEl.textContent = `No hay registros nuevos o Supabase no está conectado. (${localList.length} en caché)`;
+      const clients = getAllSupabaseClients();
+
+      if (clients.length === 0 || localList.length === 0) {
+        statusEl.textContent = `No hay registros en caché o Supabase no está conectado. (${localList.length} en caché local)`;
         return;
       }
 
       try {
         let synced = 0;
         for (const item of localList) {
-          const { error } = await window.supabaseClient.from('garantias').upsert([item]);
-          if (!error) synced++;
+          for (const c of clients) {
+            try {
+              const { error } = await c.client.from('garantias').upsert([item]);
+              if (!error) synced++;
+            } catch (err) {}
+          }
         }
         statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-emerald-100 text-emerald-800';
-        statusEl.textContent = `✅ ¡Sincronización completada! ${synced} de ${localList.length} registros actualizados en Supabase.`;
+        statusEl.textContent = `✅ ¡Sincronización completada! Registros actualizados en la nube. Ya la otra PC puede verlos.`;
+        await fetchGarantiasFromDatabase();
+        renderHistoryList();
       } catch (e) {
         statusEl.className = 'text-xs text-center font-bold py-2 px-3 rounded-xl bg-red-100 text-red-800';
         statusEl.textContent = `Error en sincronización: ${e.message}`;
@@ -1355,7 +1489,7 @@
 
     const submitBtn = document.getElementById('garantia-submit-order-btn');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span>⏳</span><span>Guardando solicitud...</span>';
+    submitBtn.innerHTML = '<span>⏳</span><span>Guardando solicitud en la nube...</span>';
 
     try {
       const ticketCode = document.getElementById('garantias-preview-ticket')?.textContent || generateTicketCode();
@@ -1370,11 +1504,19 @@
 
       const totalItems = currentWarrantyItems.reduce((acc, it) => acc + (it.cantidad || 0), 0);
 
+      // Limpiar user_id para evitar problemas de tipos si no es UUID
+      let cleanUserId = null;
+      if (currentUser && currentUser.auth_id && typeof currentUser.auth_id === 'string' && currentUser.auth_id.trim() !== '') {
+        cleanUserId = currentUser.auth_id.trim();
+      } else if (currentUser && currentUser.id && typeof currentUser.id === 'string' && currentUser.id.trim() !== '') {
+        cleanUserId = currentUser.id.trim();
+      }
+
       const payload = {
         codigo_ticket: ticketCode,
-        user_id: currentUser.auth_id || currentUser.id || null,
-        user_name: currentUser.name || 'Gestor',
-        user_role: role,
+        user_id: cleanUserId,
+        user_name: (currentUser && currentUser.name) ? currentUser.name : 'Gestor',
+        user_role: (role || 'gestor').toLowerCase().trim(),
         cliente_nombre: cliente,
         cliente_telefono: telefono,
         items: currentWarrantyItems,
@@ -1413,7 +1555,7 @@
     successDiv.id = 'garantia-success-modal';
     successDiv.className = 'fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-g-fade';
 
-    const itemsSummaryHtml = garantia.items.map(it => `
+    const itemsSummaryHtml = (garantia.items || []).map(it => `
       <li class="flex items-center justify-between py-1 border-b border-gray-100 dark:border-gray-800 text-xs">
         <span class="font-bold text-gray-800 dark:text-gray-200">${it.cantidad}x ${it.codigo} - ${it.nombre}</span>
         <span class="text-amber-600 dark:text-amber-400 italic">(${it.falla})</span>
@@ -1431,7 +1573,7 @@
           <span class="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">¡Garantía Registrada con Éxito!</span>
           <h3 class="text-2xl font-black font-mono text-gray-900 dark:text-white mt-1">${garantia.codigo_ticket}</h3>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Se ha guardado en la base de datos y acumulado para revisión del Administrador.
+            Se ha guardado en la base de datos y acumulado para revisión del Administrador en cualquier PC.
           </p>
         </div>
 
@@ -1500,13 +1642,13 @@
     let msg = `🛡️ *SOLICITUD DE GARANTÍA SONIMAX* 🛡️\n\n`;
     msg += `*Ticket:* ${g.codigo_ticket}\n`;
     msg += `*Fecha:* ${formatDateTime(g.created_at)}\n`;
-    msg += `*Registrado por:* ${g.user_name} (${g.user_role.toUpperCase()})\n`;
+    msg += `*Registrado por:* ${g.user_name} (${(g.user_role || '').toUpperCase()})\n`;
     if (g.cliente_nombre) msg += `*Cliente/Tienda:* ${g.cliente_nombre}\n`;
     if (g.cliente_telefono) msg += `*Teléfono:* ${g.cliente_telefono}\n`;
     msg += `*Estado:* ${STATUS_CONFIG[g.estado]?.label || g.estado}\n\n`;
 
     msg += `*PRODUCTOS EN GARANTÍA:*\n`;
-    g.items.forEach((item, index) => {
+    (g.items || []).forEach((item, index) => {
       msg += `${index + 1}. *[${item.codigo}]* ${item.nombre}\n`;
       msg += `   • *Cantidad:* ${item.cantidad} unidad(es)\n`;
       msg += `   • *Falla:* ${item.falla}\n\n`;
@@ -1566,7 +1708,7 @@
             </tr>
           </thead>
           <tbody>
-            ${g.items.map(it => `
+            ${(g.items || []).map(it => `
               <tr>
                 <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${it.cantidad}</td>
                 <td style="padding: 6px; border: 1px solid #ddd; font-family: monospace;">${it.codigo}</td>
@@ -1667,7 +1809,7 @@
 
     // Actualizar contador del tab
     const tabBadge = document.getElementById('garantias-history-count');
-    if (tabBadge) tabBadge.textContent = filtered.length;
+    if (tabBadge) tabBadge.textContent = allGarantias.length;
 
     if (filtered.length === 0) {
       emptyEl?.classList.remove('hidden');
@@ -1951,7 +2093,7 @@
       return;
     }
 
-    const monthLabel = filterMonth === 'all' ? `Todo el Año ${filterYear}` : `${MONTH_NAMES[parseInt(filterMonth) - 1]} ${filterYear}`;
+    const monthLabel = filterMonth === 'all' ? `General_${filterYear}` : `${MONTH_NAMES[parseInt(filterMonth) - 1]}_${filterYear}`;
 
     // Construcción de filas de datos
     const rows = [];
@@ -2005,7 +2147,6 @@
           ]);
         });
       } else {
-        // En caso de que no tenga items estructurados
         rows.push([
           g.codigo_ticket,
           fecha,
@@ -2051,11 +2192,45 @@
     window.XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
 
     // Nombre de archivo
-    const cleanMonthStr = filterMonth === 'all' ? `Anual_${filterYear}` : `${MONTH_NAMES[parseInt(filterMonth) - 1]}_${filterYear}`;
+    const cleanMonthStr = filterMonth === 'all' ? `General_${filterYear}` : `${MONTH_NAMES[parseInt(filterMonth) - 1]}_${filterYear}`;
     const fileName = `Garantias_SONIMAX_${cleanMonthStr}.xlsx`;
 
     window.XLSX.writeFile(wb, fileName);
     console.log(`[GARANTIAS] ✅ Excel exportado con éxito: ${fileName}`);
+  }
+
+  // ============================================================
+  // AUTO-REFRESCO Y TIEMPO REAL ENTRE PCS
+  // ============================================================
+  function setupRealtimeAndPolling() {
+    // 1. Polling cada 8 segundos si el modal está abierto en la lista de historial
+    setInterval(() => {
+      const modal = document.getElementById('garantias-main-modal');
+      if (modal && !modal.classList.contains('hidden') && currentActiveTab === 'history') {
+        fetchGarantiasFromDatabase().then(() => {
+          renderHistoryList();
+        });
+      }
+    }, 8000);
+
+    // 2. Canales en tiempo real de Supabase
+    const clients = getAllSupabaseClients();
+    clients.forEach(c => {
+      try {
+        if (c.client && typeof c.client.channel === 'function') {
+          c.client.channel('garantias_realtime_ch_' + c.id)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'garantias' }, (payload) => {
+              console.log(`[GARANTIAS] ⚡ ¡Cambio recibido en tiempo real de ${c.name}!`, payload);
+              fetchGarantiasFromDatabase().then(() => {
+                renderHistoryList();
+              });
+            })
+            .subscribe();
+        }
+      } catch (err) {
+        console.warn(`[GARANTIAS] Realtime no disponible en ${c.name}:`, err);
+      }
+    });
   }
 
   // ============================================================
@@ -2070,14 +2245,14 @@
     const previewTicket = document.getElementById('garantias-preview-ticket');
 
     const currentUser = getCurrentUser();
-    const role = getActiveRole();
+    const role = (getActiveRole() || '').toLowerCase();
 
     if (userBadge) userBadge.textContent = `${currentUser.name} (${role.toUpperCase()})`;
     if (previewUser) previewUser.textContent = `${currentUser.name} (${role.toUpperCase()})`;
     if (previewTime) previewTime.textContent = formatDateTime(new Date().toISOString());
     if (previewTicket) previewTicket.textContent = generateTicketCode();
 
-    // Cargar datos acumulados de base de datos
+    // Cargar datos acumulados de Supabase de inmediato
     fetchGarantiasFromDatabase().then(() => {
       renderHistoryList();
     });
@@ -2086,8 +2261,13 @@
     modal?.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
-    // Iniciar en tab de formulario
-    document.getElementById('garantias-tab-form-btn')?.click();
+    // Si es Administrador, abrir directamente en la pestaña de historial
+    // Si es Gestor, abrir en el formulario de registro
+    if (role === 'admin') {
+      document.getElementById('garantias-tab-history-btn')?.click();
+    } else {
+      document.getElementById('garantias-tab-form-btn')?.click();
+    }
   }
 
   function closeGarantiasModal() {
@@ -2121,7 +2301,7 @@
       adminBtn.onclick = promptPinOrOpen;
     }
 
-    console.log('[GARANTIAS] ✅ Módulo de Garantías y Devoluciones cargado e inicializado correctamente.');
+    console.log('[GARANTIAS] ✅ Módulo de Garantías y Devoluciones (Multi-PC) activo.');
   }
 
   // Exportar funciones globales
@@ -2130,9 +2310,13 @@
   window.exportGarantiasExcel = exportFilteredGarantiasToExcel;
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeButtons);
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeButtons();
+      setupRealtimeAndPolling();
+    });
   } else {
     initializeButtons();
+    setupRealtimeAndPolling();
   }
 
   setTimeout(initializeButtons, 800);
