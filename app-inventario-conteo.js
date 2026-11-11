@@ -27,6 +27,7 @@
     maxPrice: null,
     minStock: 1, // Por defecto filtrar agotados
     maxStock: null,
+    minTotalValue: 0, // [NUEVO] Sumatoria de cantidad * precio GMayor >= monto (ej. $700)
     deposits: ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA']
   };
 
@@ -103,16 +104,22 @@
             currentFilterConfig.maxStock = data.filter_max_stock ? parseInt(data.filter_max_stock) : null;
             updated = true;
           }
+          if (typeof data.filter_min_total_value !== 'undefined' && data.filter_min_total_value !== null) {
+            currentFilterConfig.minTotalValue = parseFloat(data.filter_min_total_value) || 0;
+            updated = true;
+          }
           if (data.filter_deposits && Array.isArray(data.filter_deposits)) {
             currentFilterConfig.deposits = data.filter_deposits;
             updated = true;
-          } else if (data.filter_settings && typeof data.filter_settings === 'object') {
+          }
+          if (data.filter_settings && typeof data.filter_settings === 'object') {
             currentFilterConfig = { ...currentFilterConfig, ...data.filter_settings };
             updated = true;
           }
 
           if (updated) {
             localStorage.setItem(STORAGE_FILTER_KEY, JSON.stringify(currentFilterConfig));
+            console.log('[INV-FILTER] ☁️ Configuración cargada desde Supabase:', currentFilterConfig);
           }
         }
       }
@@ -133,30 +140,36 @@
       if (window.supabaseClient) {
         const payload = {
           id: 1,
-          filter_active: currentFilterConfig.active,
-          filter_min_price: currentFilterConfig.minPrice,
-          filter_max_price: currentFilterConfig.maxPrice,
-          filter_min_stock: currentFilterConfig.minStock,
-          filter_max_stock: currentFilterConfig.maxStock,
+          filter_active: Boolean(currentFilterConfig.active),
+          filter_min_price: currentFilterConfig.minPrice || 0,
+          filter_max_price: currentFilterConfig.maxPrice || null,
+          filter_min_stock: currentFilterConfig.minStock !== null ? currentFilterConfig.minStock : null,
+          filter_max_stock: currentFilterConfig.maxStock || null,
+          filter_min_total_value: currentFilterConfig.minTotalValue || 0,
           filter_deposits: currentFilterConfig.deposits,
           filter_settings: currentFilterConfig
         };
 
         const { error } = await window.supabaseClient
           .from('inventory_config')
-          .upsert(payload);
+          .upsert(payload, { onConflict: 'id' });
 
         if (error) {
           console.warn('[INV-FILTER] Upsert directo falló, intentando con filter_settings:', error);
-          await window.supabaseClient
+          const { error: err2 } = await window.supabaseClient
             .from('inventory_config')
-            .upsert({ id: 1, filter_settings: currentFilterConfig });
+            .upsert({ id: 1, filter_settings: currentFilterConfig }, { onConflict: 'id' });
+          if (err2) {
+            throw err2;
+          }
         }
+        console.log('[INV-FILTER] ✅ Configuración guardada y sincronizada en Supabase');
+        return { success: true, cloudSaved: true };
       }
-      return { success: true };
+      return { success: true, cloudSaved: false };
     } catch (err) {
       console.error('[INV-FILTER] Error guardando configuración en nube:', err);
-      return { success: false, error: err.message };
+      return { success: true, cloudSaved: false, error: err.message || err.details || 'Error sincronizando con Supabase' };
     }
   }
 
@@ -164,12 +177,22 @@
    * Verifica si un producto cumple con los filtros activos fijados por Admin para el rol inventario
    */
   function isProductEligibleForInventory(product) {
+    const stock = parseInt(product.stock || 0);
+    const precioGMayor = parseFloat(product.precio_gmayor || 0);
+
     if (!currentFilterConfig.active) {
-      return (product.stock || 0) > 0;
+      return stock > 0;
     }
 
-    // 1. Filtro por Precio GMayor
-    const precioGMayor = parseFloat(product.precio_gmayor || 0);
+    // 1. Filtro por Stock / Cantidad
+    if (currentFilterConfig.minStock !== null && stock < currentFilterConfig.minStock) {
+      return false;
+    }
+    if (currentFilterConfig.maxStock !== null && stock > currentFilterConfig.maxStock) {
+      return false;
+    }
+
+    // 2. Filtro por Precio GMayor
     if (currentFilterConfig.minPrice > 0 && precioGMayor < currentFilterConfig.minPrice) {
       return false;
     }
@@ -177,13 +200,13 @@
       return false;
     }
 
-    // 2. Filtro por Stock / Cantidad
-    const stock = parseInt(product.stock || 0);
-    if (currentFilterConfig.minStock !== null && stock < currentFilterConfig.minStock) {
-      return false;
-    }
-    if (currentFilterConfig.maxStock !== null && stock > currentFilterConfig.maxStock) {
-      return false;
+    // 3. [NUEVO] Filtro por Sumatoria de Cantidades por Precio (Valor Total de Inventario = stock * precio_gmayor)
+    const minTotal = parseFloat(currentFilterConfig.minTotalValue || 0);
+    if (minTotal > 0) {
+      const totalValue = stock * precioGMayor;
+      if (totalValue < minTotal) {
+        return false;
+      }
     }
 
     return true;
@@ -519,6 +542,7 @@
         if (testConfig.maxPrice > 0 && precioG > testConfig.maxPrice) return false;
         if (testConfig.minStock !== null && stock < testConfig.minStock) return false;
         if (testConfig.maxStock !== null && stock > testConfig.maxStock) return false;
+        if (testConfig.minTotalValue > 0 && (stock * precioG) < testConfig.minTotalValue) return false;
         return true;
       }).length;
     }
@@ -561,7 +585,7 @@
           <div class="space-y-3">
             <div class="flex items-center justify-between">
               <label class="font-bold text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                <span>💰</span> Precio Mínimo (G.Mayor):
+                <span>💰</span> Precio Mínimo Unitario (G.Mayor):
               </label>
               <span class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold">Productos más caros</span>
             </div>
@@ -574,6 +598,26 @@
             </div>
             <p class="text-[11px] text-gray-500 dark:text-gray-400">
               Ejemplo: Si colocas <strong>$50.00</strong>, todos los productos de $50 hacia arriba saldrán al rol de inventario y los económicos quedarán ocultos.
+            </p>
+          </div>
+
+          <!-- [NUEVO] Filtro por Sumatoria / Valor Total del Producto (Stock x Precio GMayor) -->
+          <div class="space-y-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-blue-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>💎</span> Valor Total Mínimo en Inventario (Stock × Precio G.Mayor):
+              </label>
+              <span class="text-xs text-blue-600 dark:text-blue-400 font-bold">Sumatoria total</span>
+            </div>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-lg">$</span>
+              <input type="number" id="inv-filter-min-total-value" min="0" step="10" 
+                value="${config.minTotalValue || 0}" 
+                placeholder="Ej. 700"
+                class="w-full pl-9 pr-4 py-3 bg-white dark:bg-gray-700 border-2 border-blue-300 dark:border-gray-500 rounded-xl font-black text-gray-800 dark:text-white outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 text-lg transition-all">
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Si colocas <strong>$700</strong>, solo saldrán productos cuyo valor total acumulado (existencia actual × precio G.Mayor) sea igual o mayor a $700. Los de menor valor quedarán ocultos.
             </p>
           </div>
 
@@ -639,7 +683,7 @@
         <div class="p-6 bg-gray-50 dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
           <button id="save-inv-filter-btn" class="flex-1 py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-500/25 flex items-center justify-center space-x-2">
             <span>💾</span>
-            <span>Guardar y Aplicar Filtros</span>
+            <span>Guardar y Sincronizar Filtros</span>
           </button>
           <button class="modal-close-btn px-6 py-3.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold rounded-2xl hover:bg-gray-300 transition-colors">
             Cancelar
@@ -658,6 +702,7 @@
     const minPriceInput = modal.querySelector('#inv-filter-min-price');
     const minStockInput = modal.querySelector('#inv-filter-min-stock');
     const maxStockInput = modal.querySelector('#inv-filter-max-stock');
+    const minTotalValueInput = modal.querySelector('#inv-filter-min-total-value');
     const matchCountSpan = modal.querySelector('#inv-filter-match-count');
     const depositCheckboxes = modal.querySelectorAll('.deposit-checkbox');
     const selectAllBtn = modal.querySelector('#select-all-deposits-btn');
@@ -667,7 +712,8 @@
         minPrice: parseFloat(minPriceInput.value) || 0,
         maxPrice: null,
         minStock: minStockInput.value !== '' ? parseInt(minStockInput.value) : null,
-        maxStock: maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null
+        maxStock: maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null,
+        minTotalValue: parseFloat(minTotalValueInput.value) || 0
       };
       const count = calculateMatchingCount(testConfig);
       matchCountSpan.textContent = `${count} productos`;
@@ -676,6 +722,7 @@
     minPriceInput.addEventListener('input', updateMatchMeter);
     minStockInput.addEventListener('input', updateMatchMeter);
     maxStockInput.addEventListener('input', updateMatchMeter);
+    minTotalValueInput.addEventListener('input', updateMatchMeter);
 
     selectAllBtn.addEventListener('click', () => {
       const allChecked = Array.from(depositCheckboxes).every(cb => cb.checked);
@@ -686,7 +733,7 @@
     modal.querySelector('#save-inv-filter-btn').addEventListener('click', async () => {
       const saveBtn = modal.querySelector('#save-inv-filter-btn');
       saveBtn.disabled = true;
-      saveBtn.innerHTML = '<span class="loading-spinner"></span> Guardando...';
+      saveBtn.innerHTML = '<span class="loading-spinner"></span> Guardando en Supabase...';
 
       const selectedDeposits = Array.from(depositCheckboxes)
         .filter(cb => cb.checked)
@@ -698,13 +745,26 @@
         maxPrice: null,
         minStock: minStockInput.value !== '' ? parseInt(minStockInput.value) : 1,
         maxStock: maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null,
+        minTotalValue: parseFloat(minTotalValueInput.value) || 0,
         deposits: selectedDeposits.length > 0 ? selectedDeposits : allDeposits
       };
 
       const result = await saveInventoryFilterConfig(newConfig);
 
       if (result.success) {
-        alert(`✅ Configuración guardada exitosamente.\n\nFiltro Restrictivo: ${newConfig.active ? 'ACTIVADO' : 'DESACTIVADO'}\nPrecio G.Mayor Mínimo: $${newConfig.minPrice}\nStock Mínimo: ${newConfig.minStock}`);
+        let msg = `✅ Configuración guardada exitosamente.\n\n` +
+          `• Filtro Restrictivo: ${newConfig.active ? 'ACTIVADO' : 'DESACTIVADO'}\n` +
+          `• Precio G.Mayor Mínimo: $${newConfig.minPrice}\n` +
+          `• Valor Total Mínimo (Cant × Precio): $${newConfig.minTotalValue}\n` +
+          `• Stock Mínimo: ${newConfig.minStock}\n` +
+          `• Depósitos: ${newConfig.deposits.join(', ')}`;
+        
+        if (result.cloudSaved) {
+          msg += `\n\n☁️ Sincronizado en Supabase: Todos los dispositivos recibirán estos filtros.`;
+        } else {
+          msg += `\n\n⚠️ Guardado en este equipo. (Nota: Para sincronizar entre todos los dispositivos, asegúrate de ejecutar el script SQL en Supabase).`;
+        }
+        alert(msg);
         modal.remove();
 
         if (window.renderDepartments) window.renderDepartments();
@@ -712,11 +772,71 @@
           window.filterByDepartment(window.currentDepartment);
         }
       } else {
-        alert('⚠️ Guardado localmente, pero ocurrió un aviso en la nube: ' + (result.error || ''));
+        alert('⚠️ Aviso: ' + (result.error || 'No se pudo guardar'));
         modal.remove();
         if (window.renderDepartments) window.renderDepartments();
       }
     });
+  }
+
+  // ============================================================
+  // UI: BARRA FLOTANTE FIJA DE ACCESO RÁPIDO A LISTOS / ENVIAR
+  // ============================================================
+  function renderInventoryFloatingBar(currentDep, readyCount, totalPiezas) {
+    if (window.currentUserRole !== 'inventario') {
+      const existing = document.getElementById('inventory-floating-bottom-bar');
+      if (existing) existing.remove();
+      return;
+    }
+
+    let bar = document.getElementById('inventory-floating-bottom-bar');
+    if (readyCount === 0 || currentDep === 'UNASSIGNED') {
+      if (bar) bar.remove();
+      return;
+    }
+
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'inventory-floating-bottom-bar';
+      bar.className = 'fixed bottom-4 left-4 right-4 max-w-xl mx-auto z-40';
+      document.body.appendChild(bar);
+    }
+
+    const isReadyView = currentActiveTab === 'ready';
+
+    bar.innerHTML = `
+      <div class="bg-gray-900/95 backdrop-blur-md text-white px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl shadow-2xl border border-emerald-500/60 flex flex-wrap items-center justify-between gap-3 animate-fade-in">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-xl font-black shadow-inner">
+            ${isReadyView ? '📋' : '✅'}
+          </div>
+          <div>
+            <p class="font-black text-xs sm:text-sm">
+              Depósito ${currentDep}: <span class="text-emerald-400 font-mono">${readyCount} ${readyCount === 1 ? 'producto listo' : 'productos listos'}</span>
+            </p>
+            <p class="text-[11px] text-gray-300">${totalPiezas} piezas contadas en total</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          ${!isReadyView ? `
+            <button onclick="window.SonimaxInventoryConteo.switchToReadyTab('${currentDep}')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-1.5">
+              <span>👀</span>
+              <span>Ver Listos (${readyCount})</span>
+            </button>
+          ` : `
+            <button onclick="window.SonimaxInventoryConteo.switchToPendingTab('${currentDep}')" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-1.5">
+              <span>📋</span>
+              <span>Volver a Pendientes</span>
+            </button>
+          `}
+          <button onclick="window.SonimaxInventoryConteo.openSubmitModal('${currentDep}')" class="px-4 py-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-500/30 transition-all flex items-center space-x-1.5">
+            <span>📤</span>
+            <span>Enviar del Día</span>
+          </button>
+        </div>
+      </div>
+    `;
   }
 
   // ============================================================
@@ -738,12 +858,16 @@
 
     const readyProducts = getReadyProductsForDeposit(currentDep);
     const readyCount = readyProducts.length;
+    const totalPiezas = readyProducts.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
 
     // Calcular cuántos pendientes hay
     const pendingList = getPendingProductsForDeposit(currentDep);
     const pendingCount = pendingList.length;
     const totalDeposit = pendingCount + readyCount;
     const percent = totalDeposit > 0 ? Math.round((readyCount / totalDeposit) * 100) : 0;
+
+    // Actualizar barra flotante inferior fija
+    renderInventoryFloatingBar(currentDep, readyCount, totalPiezas);
 
     if (!headerBar) {
       headerBar = document.createElement('div');
@@ -768,8 +892,14 @@
       return;
     }
 
-    const filterInfo = currentFilterConfig.active
-      ? `⚡ Filtro Admin Activo: G.Mayor ≥ $${currentFilterConfig.minPrice} | Stock ≥ ${currentFilterConfig.minStock}`
+    let filterDescParts = [];
+    if (currentFilterConfig.active) {
+      if (currentFilterConfig.minPrice > 0) filterDescParts.push(`G.Mayor ≥ $${currentFilterConfig.minPrice}`);
+      if (currentFilterConfig.minTotalValue > 0) filterDescParts.push(`Valor Tot ≥ $${currentFilterConfig.minTotalValue}`);
+      if (currentFilterConfig.minStock !== null) filterDescParts.push(`Stock ≥ ${currentFilterConfig.minStock}`);
+    }
+    const filterInfo = filterDescParts.length > 0
+      ? `⚡ Filtro Admin: ${filterDescParts.join(' | ')}`
       : `📋 Todos los productos del depósito`;
 
     headerBar.innerHTML = `
@@ -860,43 +990,26 @@
       readyContainer.classList.add('hidden');
       mainGrid.classList.remove('hidden');
 
-      // Si estamos en un depósito específico y no quedan pendientes, mostrar tarjeta amigable
+      // Si estamos en un depósito específico y no quedan pendientes pero sí hay listos, cambiar a listos
       const pendingList = getPendingProductsForDeposit(currentDep);
       const readyList = getReadyProductsForDeposit(currentDep);
 
       if (currentDep !== 'UNASSIGNED' && pendingList.length === 0) {
         if (noProductsDiv) noProductsDiv.classList.add('hidden');
         if (readyList.length > 0) {
-          mainGrid.innerHTML = `
-            <div class="col-span-full bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border-2 border-emerald-300 dark:border-emerald-700/60 rounded-3xl p-8 text-center space-y-4 shadow-xl">
-              <div class="w-20 h-20 rounded-3xl bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 flex items-center justify-center text-4xl mx-auto shadow-inner">
-                🎉
-              </div>
-              <div class="space-y-1">
-                <h3 class="text-2xl font-black text-gray-800 dark:text-white">¡No hay productos pendientes en Depósito ${currentDep}!</h3>
-                <p class="text-sm text-gray-600 dark:text-gray-300 max-w-md mx-auto">
-                  Todos los productos asignados a este depósito ya tienen su cantidad física y están en el apartado de <strong>Productos Listos (${readyList.length})</strong>.
-                </p>
-              </div>
-              <div class="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-                <button onclick="window.SonimaxInventoryConteo.switchToReadyTab('${currentDep}')" class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center space-x-2">
-                  <span>✅</span>
-                  <span>Ver Productos Listos (${readyList.length})</span>
-                </button>
-                <button onclick="window.SonimaxInventoryConteo.openSubmitModal('${currentDep}')" class="px-8 py-3.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 text-white font-black text-sm rounded-2xl shadow-lg flex items-center justify-center space-x-2">
-                  <span>📤</span>
-                  <span>Enviar Cantidades del Día</span>
-                </button>
-              </div>
-            </div>
-          `;
+          // Cambiar automáticamente a la vista de Listos para que vean sus conteos y puedan enviar
+          currentActiveTab = 'ready';
+          mainGrid.classList.add('hidden');
+          readyContainer.classList.remove('hidden');
+          renderReadySectionContent(readyContainer, currentDep);
+          return;
         } else {
           mainGrid.innerHTML = `
             <div class="col-span-full bg-white dark:bg-gray-800 rounded-3xl p-10 text-center shadow border border-gray-100 dark:border-gray-700 space-y-3">
               <p class="text-3xl">📦</p>
-              <h4 class="text-lg font-bold text-gray-800 dark:text-white">No hay productos en Depósito ${currentDep}</h4>
+              <h4 class="text-lg font-bold text-gray-800 dark:text-white">No hay productos en Depósito ${currentDep} con los filtros actuales</h4>
               <p class="text-xs text-gray-500 max-w-sm mx-auto">
-                Ve a la pestaña <strong>"⚠️ Por Asignar"</strong> para enviar productos a este depósito.
+                Revisa los filtros fijados por el Administrador o asigna productos desde <strong>"⚠️ Por Asignar"</strong>.
               </p>
             </div>
           `;
@@ -1751,6 +1864,12 @@
   function switchToReadyTab(dep) {
     if (dep) {
       window.currentDepartment = `inv_${dep}`;
+      document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.dept === `inv_${dep}`) {
+          btn.classList.add('active');
+        }
+      });
     }
     currentActiveTab = 'ready';
     renderInventoryViews();
@@ -1759,6 +1878,12 @@
   function switchToPendingTab(dep) {
     if (dep) {
       window.currentDepartment = `inv_${dep}`;
+      document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.dept === `inv_${dep}`) {
+          btn.classList.add('active');
+        }
+      });
     }
     currentActiveTab = 'pending';
     renderInventoryViews();

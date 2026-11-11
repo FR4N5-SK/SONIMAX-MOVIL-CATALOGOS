@@ -4018,13 +4018,23 @@ window.enviarProductoAListos = async function (productCode, deposito) {
             const idx = filteredProducts.findIndex(p => (p.codigo || '').trim().toUpperCase() === pCode);
             if (idx > -1) filteredProducts.splice(idx, 1);
 
+            const grid = document.getElementById("products-grid");
+            const remainingCards = grid ? grid.querySelectorAll('.product-card') : [];
+
             if (window.SonimaxInventoryConteo) {
-                window.SonimaxInventoryConteo.renderViews();
+                if (remainingCards.length === 0) {
+                    // Si ya no quedan productos pendientes por contar en este depósito, pasar directamente a Listos
+                    window.SonimaxInventoryConteo.switchToReadyTab(deposito);
+                } else {
+                    window.SonimaxInventoryConteo.renderViews();
+                }
             }
 
-            const grid = document.getElementById("products-grid");
-            if (grid && grid.children.length === 0) {
-                document.getElementById("no-products")?.classList.remove("hidden");
+            // Para rol inventario, mantener no-products oculto (lo maneja renderViews)
+            if (window.currentUserRole !== 'inventario') {
+                if (grid && grid.children.length === 0) {
+                    document.getElementById("no-products")?.classList.remove("hidden");
+                }
             }
         }, 350);
     }
