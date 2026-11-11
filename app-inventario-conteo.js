@@ -55,6 +55,18 @@
   }
 
   // ============================================================
+  // CLIENTES DE SUPABASE ACTIVOS (SOPORTE MULTI-SERVIDOR / PLAN PRO)
+  // ============================================================
+  function getActiveSupabaseClients() {
+    const clients = [];
+    if (window.supabaseClient) clients.push(window.supabaseClient);
+    if (window.supabaseOldClient && window.supabaseOldClient !== window.supabaseClient) {
+      clients.push(window.supabaseOldClient);
+    }
+    return clients;
+  }
+
+  // ============================================================
   // GESTIÓN DE CONFIGURACIÓN DE FILTROS (ADMIN)
   // ============================================================
 
@@ -74,53 +86,59 @@
         }
       }
 
-      // 2. Intentar cargar desde Supabase
-      if (window.supabaseClient) {
-        const { data, error } = await window.supabaseClient
-          .from('inventory_config')
-          .select('*')
-          .eq('id', 1)
-          .maybeSingle();
+      // 2. Intentar cargar desde Supabase (probar clientes principal y secundario)
+      const clients = getActiveSupabaseClients();
+      for (const client of clients) {
+        try {
+          const { data, error } = await client
+            .from('inventory_config')
+            .select('*')
+            .eq('id', 1)
+            .maybeSingle();
 
-        if (!error && data) {
-          let updated = false;
-          if (typeof data.filter_active !== 'undefined' && data.filter_active !== null) {
-            currentFilterConfig.active = Boolean(data.filter_active);
-            updated = true;
-          }
-          if (typeof data.filter_min_price !== 'undefined' && data.filter_min_price !== null) {
-            currentFilterConfig.minPrice = parseFloat(data.filter_min_price) || 0;
-            updated = true;
-          }
-          if (typeof data.filter_max_price !== 'undefined' && data.filter_max_price !== null) {
-            currentFilterConfig.maxPrice = data.filter_max_price ? parseFloat(data.filter_max_price) : null;
-            updated = true;
-          }
-          if (typeof data.filter_min_stock !== 'undefined' && data.filter_min_stock !== null) {
-            currentFilterConfig.minStock = parseInt(data.filter_min_stock) || 0;
-            updated = true;
-          }
-          if (typeof data.filter_max_stock !== 'undefined' && data.filter_max_stock !== null) {
-            currentFilterConfig.maxStock = data.filter_max_stock ? parseInt(data.filter_max_stock) : null;
-            updated = true;
-          }
-          if (typeof data.filter_min_total_value !== 'undefined' && data.filter_min_total_value !== null) {
-            currentFilterConfig.minTotalValue = parseFloat(data.filter_min_total_value) || 0;
-            updated = true;
-          }
-          if (data.filter_deposits && Array.isArray(data.filter_deposits)) {
-            currentFilterConfig.deposits = data.filter_deposits;
-            updated = true;
-          }
-          if (data.filter_settings && typeof data.filter_settings === 'object') {
-            currentFilterConfig = { ...currentFilterConfig, ...data.filter_settings };
-            updated = true;
-          }
+          if (!error && data) {
+            let updated = false;
+            if (typeof data.filter_active !== 'undefined' && data.filter_active !== null) {
+              currentFilterConfig.active = Boolean(data.filter_active);
+              updated = true;
+            }
+            if (typeof data.filter_min_price !== 'undefined' && data.filter_min_price !== null) {
+              currentFilterConfig.minPrice = parseFloat(data.filter_min_price) || 0;
+              updated = true;
+            }
+            if (typeof data.filter_max_price !== 'undefined' && data.filter_max_price !== null) {
+              currentFilterConfig.maxPrice = data.filter_max_price ? parseFloat(data.filter_max_price) : null;
+              updated = true;
+            }
+            if (typeof data.filter_min_stock !== 'undefined' && data.filter_min_stock !== null) {
+              currentFilterConfig.minStock = parseInt(data.filter_min_stock) || 0;
+              updated = true;
+            }
+            if (typeof data.filter_max_stock !== 'undefined' && data.filter_max_stock !== null) {
+              currentFilterConfig.maxStock = data.filter_max_stock ? parseInt(data.filter_max_stock) : null;
+              updated = true;
+            }
+            if (typeof data.filter_min_total_value !== 'undefined' && data.filter_min_total_value !== null) {
+              currentFilterConfig.minTotalValue = parseFloat(data.filter_min_total_value) || 0;
+              updated = true;
+            }
+            if (data.filter_deposits && Array.isArray(data.filter_deposits)) {
+              currentFilterConfig.deposits = data.filter_deposits;
+              updated = true;
+            }
+            if (data.filter_settings && typeof data.filter_settings === 'object') {
+              currentFilterConfig = { ...currentFilterConfig, ...data.filter_settings };
+              updated = true;
+            }
 
-          if (updated) {
-            localStorage.setItem(STORAGE_FILTER_KEY, JSON.stringify(currentFilterConfig));
-            console.log('[INV-FILTER] ☁️ Configuración cargada desde Supabase:', currentFilterConfig);
+            if (updated) {
+              localStorage.setItem(STORAGE_FILTER_KEY, JSON.stringify(currentFilterConfig));
+              console.log('[INV-FILTER] ☁️ Configuración cargada desde Supabase:', currentFilterConfig);
+              break; // Cargada exitosamente de un servidor
+            }
           }
+        } catch (clientErr) {
+          console.warn('[INV-FILTER] Aviso probando cliente Supabase:', clientErr);
         }
       }
     } catch (err) {
@@ -136,40 +154,54 @@
     currentFilterConfig = { ...currentFilterConfig, ...newConfig };
     localStorage.setItem(STORAGE_FILTER_KEY, JSON.stringify(currentFilterConfig));
 
-    try {
-      if (window.supabaseClient) {
-        const payload = {
-          id: 1,
-          filter_active: Boolean(currentFilterConfig.active),
-          filter_min_price: currentFilterConfig.minPrice || 0,
-          filter_max_price: currentFilterConfig.maxPrice || null,
-          filter_min_stock: currentFilterConfig.minStock !== null ? currentFilterConfig.minStock : null,
-          filter_max_stock: currentFilterConfig.maxStock || null,
-          filter_min_total_value: currentFilterConfig.minTotalValue || 0,
-          filter_deposits: currentFilterConfig.deposits,
-          filter_settings: currentFilterConfig
-        };
+    const payload = {
+      id: 1,
+      filter_active: Boolean(currentFilterConfig.active),
+      filter_min_price: currentFilterConfig.minPrice || 0,
+      filter_max_price: currentFilterConfig.maxPrice || null,
+      filter_min_stock: currentFilterConfig.minStock !== null ? currentFilterConfig.minStock : null,
+      filter_max_stock: currentFilterConfig.maxStock || null,
+      filter_min_total_value: currentFilterConfig.minTotalValue || 0,
+      filter_deposits: currentFilterConfig.deposits,
+      filter_settings: currentFilterConfig
+    };
 
-        const { error } = await window.supabaseClient
+    let cloudSaved = false;
+    let lastError = null;
+    const clients = getActiveSupabaseClients();
+
+    for (const client of clients) {
+      try {
+        const { error } = await client
           .from('inventory_config')
           .upsert(payload, { onConflict: 'id' });
 
-        if (error) {
-          console.warn('[INV-FILTER] Upsert directo falló, intentando con filter_settings:', error);
-          const { error: err2 } = await window.supabaseClient
+        if (!error) {
+          cloudSaved = true;
+          console.log('[INV-FILTER] ✅ Guardado en servidor Supabase');
+        } else {
+          lastError = error;
+          console.warn('[INV-FILTER] Upsert directo falló en un servidor, intentando filter_settings:', error);
+          const { error: err2 } = await client
             .from('inventory_config')
             .upsert({ id: 1, filter_settings: currentFilterConfig }, { onConflict: 'id' });
-          if (err2) {
-            throw err2;
-          }
+          if (!err2) cloudSaved = true;
         }
-        console.log('[INV-FILTER] ✅ Configuración guardada y sincronizada en Supabase');
-        return { success: true, cloudSaved: true };
+      } catch (err) {
+        lastError = err;
       }
-      return { success: true, cloudSaved: false };
-    } catch (err) {
-      console.error('[INV-FILTER] Error guardando configuración en nube:', err);
-      return { success: true, cloudSaved: false, error: err.message || err.details || 'Error sincronizando con Supabase' };
+    }
+
+    if (cloudSaved) {
+      console.log('[INV-FILTER] ✅ Configuración guardada y sincronizada en Supabase con éxito');
+      return { success: true, cloudSaved: true };
+    } else {
+      console.warn('[INV-FILTER] Error guardando en nube:', lastError);
+      return { 
+        success: true, 
+        cloudSaved: false, 
+        error: lastError ? (lastError.message || lastError.details || JSON.stringify(lastError)) : 'Error de permisos o tabla inexistente' 
+      };
     }
   }
 
@@ -453,30 +485,32 @@
     // Guardar en respaldo local siempre
     saveSessionToLocalBackup(sessionData);
 
-    // Intentar guardar en Supabase
+    // Intentar guardar en Supabase (todos los servidores disponibles)
     let cloudSaved = false;
-    try {
-      if (window.supabaseClient) {
-        const { error } = await window.supabaseClient
+    const clients = getActiveSupabaseClients();
+
+    for (const client of clients) {
+      try {
+        const { error } = await client
           .from('inventory_count_sessions')
           .insert([sessionData]);
 
-        if (error) {
-          console.error('[INV-SESSION] Error insertando en Supabase:', error);
-        } else {
+        if (!error) {
           cloudSaved = true;
           console.log('[INV-SESSION] ✅ Sesión guardada en Supabase con folio:', folio);
+        } else {
+          console.warn('[INV-SESSION] Aviso insertando sesión en un servidor:', error);
         }
+      } catch (err) {
+        console.warn('[INV-SESSION] Excepción guardando sesión en nube:', err);
       }
-    } catch (err) {
-      console.warn('[INV-SESSION] Advertencia guardando en nube:', err);
     }
 
     // Sincronizar cantidades maestras en inventory_products
-    try {
-      if (window.supabaseClient) {
+    for (const client of clients) {
+      try {
         for (const item of readyItems) {
-          await window.supabaseClient
+          await client
             .from('inventory_products')
             .update({
               cantidad_fisica: item.cantidad_fisica,
@@ -484,9 +518,9 @@
             })
             .eq('codigo', item.codigo);
         }
+      } catch (syncErr) {
+        console.warn('[INV-SESSION] Advertencia sincronizando cantidades físicas maestras:', syncErr);
       }
-    } catch (syncErr) {
-      console.warn('[INV-SESSION] Advertencia sincronizando cantidades físicas maestras:', syncErr);
     }
 
     // Limpiar listos de ese depósito tras envío exitoso
@@ -1315,27 +1349,28 @@
   // ============================================================
 
   async function fetchAllInventorySessions() {
-    let sessions = [];
+    let cloudSessions = [];
     const localSessions = getLocalSessionsBackup();
+    const clients = getActiveSupabaseClients();
 
-    try {
-      if (window.supabaseClient) {
-        const { data, error } = await window.supabaseClient
+    for (const client of clients) {
+      try {
+        const { data, error } = await client
           .from('inventory_count_sessions')
           .select('*')
           .order('created_at', { ascending: false });
 
         if (!error && data && data.length > 0) {
-          sessions = data;
+          cloudSessions = cloudSessions.concat(data);
         }
+      } catch (err) {
+        console.warn('[INV-AUDIT] Aviso cargando sesiones de Supabase:', err);
       }
-    } catch (err) {
-      console.warn('[INV-AUDIT] Aviso cargando sesiones de Supabase:', err);
     }
 
     const combinedMap = new Map();
     localSessions.forEach(s => { if (s.folio) combinedMap.set(s.folio, s); });
-    sessions.forEach(s => { if (s.folio) combinedMap.set(s.folio, s); });
+    cloudSessions.forEach(s => { if (s.folio) combinedMap.set(s.folio, s); });
 
     cachedSessions = Array.from(combinedMap.values());
     cachedSessions.sort((a, b) => new Date(b.created_at || b.fecha) - new Date(a.created_at || a.fecha));

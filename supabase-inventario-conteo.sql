@@ -1,16 +1,17 @@
 -- ============================================================
 -- SONIMAX MÓVIL - SCRIPT SQL PARA FILTROS Y AUDITORÍA DE INVENTARIO
 -- ============================================================
--- INSTRUCCIONES:
--- 1. Ve a tu panel de Supabase: https://supabase.com/dashboard/project/gvaitosnfotnkrpjojqn
--- 2. Entra en el menú izquierdo en "SQL Editor"
--- 3. Crea una "New query"
--- 4. Pega TODO este código y presiona "RUN"
+-- IMPORTANTE:
+-- En tu aplicación existen dos proyectos de Supabase configurados:
+-- 1. Servidor Principal: https://supabase.com/dashboard/project/gvaitosnfotnkrpjojqn
+-- 2. Servidor Plan Pro:  https://supabase.com/dashboard/project/tuqwzrsgczhgmfnfmryw
+--
+-- Por favor ejecuta este script en AMBOS proyectos (o en el que estés usando)
+-- en: Supabase Dashboard -> SQL Editor -> New Query -> Run.
 --
 -- NOTA DE SEGURIDAD:
 -- Este script es 100% SEGURO. NO borra productos, NO altera inventario físico,
--- NO elimina usuarios ni borra configuraciones previas.
--- Solo agrega columnas nuevas si no existen y crea la tabla de pedidos de inventario.
+-- NO elimina usuarios ni borra datos existentes.
 -- ============================================================
 
 -- 1. Asegurar columnas de configuración de filtros en inventory_config
@@ -24,7 +25,10 @@ ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS filter_deposits JSO
 ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS filter_settings JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
--- 2. Crear tabla de sesiones / pedidos de conteo de inventario (auditoría oficial)
+-- 2. Configurar permisos de inventory_config (deshabilitar RLS para permitir guardar filtros entre dispositivos)
+ALTER TABLE public.inventory_config DISABLE ROW LEVEL SECURITY;
+
+-- 3. Crear tabla de sesiones / pedidos de conteo de inventario (auditoría oficial)
 CREATE TABLE IF NOT EXISTS public.inventory_count_sessions (
   id                  UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
   folio               TEXT           UNIQUE NOT NULL,
@@ -45,38 +49,30 @@ CREATE TABLE IF NOT EXISTS public.inventory_count_sessions (
   updated_at          TIMESTAMPTZ    DEFAULT NOW()
 );
 
--- 3. Índices para búsqueda rápida y reportes por fecha, depósito, folio y usuario
+-- 4. Índices para búsqueda rápida y reportes por fecha, depósito, folio y usuario
 CREATE INDEX IF NOT EXISTS idx_inv_sessions_folio      ON public.inventory_count_sessions(folio);
 CREATE INDEX IF NOT EXISTS idx_inv_sessions_deposito   ON public.inventory_count_sessions(deposito);
 CREATE INDEX IF NOT EXISTS idx_inv_sessions_fecha      ON public.inventory_count_sessions(fecha);
 CREATE INDEX IF NOT EXISTS idx_inv_sessions_user_id    ON public.inventory_count_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_inv_sessions_created_at ON public.inventory_count_sessions(created_at);
 
--- 4. Habilitar Seguridad por Fila (RLS) y Políticas
+-- 5. Habilitar Seguridad por Fila (RLS) permisiva en sesiones de conteo
 ALTER TABLE public.inventory_count_sessions ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "inv_sessions_select_all" ON public.inventory_count_sessions;
-CREATE POLICY "inv_sessions_select_all" ON public.inventory_count_sessions 
-  FOR SELECT USING (true);
+DROP POLICY IF EXISTS "inv_sessions_all_policy" ON public.inventory_count_sessions;
+CREATE POLICY "inv_sessions_all_policy" ON public.inventory_count_sessions 
+  FOR ALL TO anon, authenticated, public USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "inv_sessions_insert_all" ON public.inventory_count_sessions;
-CREATE POLICY "inv_sessions_insert_all" ON public.inventory_count_sessions 
-  FOR INSERT WITH CHECK (true);
+-- 6. Otorgar permisos completos a anon, authenticated y service_role
+GRANT ALL ON TABLE public.inventory_config TO anon, authenticated, service_role, postgres;
+GRANT ALL ON TABLE public.inventory_count_sessions TO anon, authenticated, service_role, postgres;
 
-DROP POLICY IF EXISTS "inv_sessions_update_all" ON public.inventory_count_sessions;
-CREATE POLICY "inv_sessions_update_all" ON public.inventory_count_sessions 
-  FOR UPDATE USING (true);
-
--- Otorgar permisos completos a anon y authenticated
-GRANT ALL ON TABLE public.inventory_config TO anon, authenticated, service_role;
-GRANT ALL ON TABLE public.inventory_count_sessions TO anon, authenticated, service_role;
-
--- 5. Asegurar fila id=1 en inventory_config
+-- 7. Asegurar fila id=1 en inventory_config si no existe
 INSERT INTO public.inventory_config (id, edit_enabled, show_stock_enabled)
 VALUES (1, true, true)
 ON CONFLICT (id) DO NOTHING;
 
--- 6. Recargar caché de esquema de PostgREST para que detecte las nuevas columnas de inmediato
+-- 8. Recargar caché de esquema de PostgREST
 NOTIFY pgrst, 'reload schema';
 
 SELECT '✅ Estructura de filtros y pedidos de inventario lista exitosamente en Supabase' AS resultado;
