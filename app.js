@@ -27,15 +27,12 @@ Object.defineProperty(window, 'allProducts', {
   configurable: true
 });
 let filteredProducts = []
-window.filteredProducts = filteredProducts;
 let inventoryDataMap = new Map(); // [NUEVO] Mapa para datos de inventario (codigo -> datos)
-window.inventoryDataMap = inventoryDataMap;
 let cart = []
 let favorites = [] // [NUEVO] Para sistema de favoritos
 let priceSnapshotMap = new Map(); // [NUEVO] Para comparación de precios
 let fuse; // [NUEVO] Para búsqueda difusa
 let currentDepartment = "all"
-window.currentDepartment = "all"
 let selectedProductForQuantity = null
 
 let currentPage = 1
@@ -2400,12 +2397,6 @@ async function updateUIForRole() {
 
   // [CORREGIDO] Cargar la configuración de inventario para TODOS los roles, ya que afecta la visibilidad del stock para todos.
   await fetchInventoryConfig();
-  if (window.SonimaxInventoryConteo) {
-    await window.SonimaxInventoryConteo.loadConfig();
-    if (window.currentUserRole === 'inventario') {
-      window.SonimaxInventoryConteo.updateHeaderCounters();
-    }
-  }
 }
 
 document.getElementById("logout-button")?.addEventListener("click", async () => {
@@ -3224,46 +3215,30 @@ function renderDepartments() {
 
   // [NUEVO] Renderizado especial para ROL INVENTARIO
   if (window.currentUserRole === 'inventario') {
-      let inventoryTabs = [
-          { id: 'inv_unassigned', label: '⚠️ Por Asignar', icon: '⚠️', depName: 'unassigned' },
-          { id: 'inv_A', label: 'Depósito A', icon: '🏢', depName: 'A' },
-          { id: 'inv_B', label: 'Depósito B', icon: '🏢', depName: 'B' },
-          { id: 'inv_C', label: 'Depósito C', icon: '🏢', depName: 'C' },
-          { id: 'inv_D', label: 'Depósito D', icon: '🏢', depName: 'D' },
-          { id: 'inv_E', label: 'Depósito E', icon: '🏢', depName: 'E' },
-          { id: 'inv_PLANTA BAJA', label: 'Planta Baja', icon: '⬇️', depName: 'PLANTA BAJA' },
-          { id: 'inv_PISO VENTA', label: 'Piso Venta', icon: '⬆️', depName: 'PISO VENTA' }
+      const inventoryTabs = [
+          { id: 'inv_unassigned', label: '⚠️ Por Asignar', icon: '⚠️' },
+          { id: 'inv_A', label: 'Depósito A', icon: '🏢' },
+          { id: 'inv_B', label: 'Depósito B', icon: '🏢' },
+          { id: 'inv_C', label: 'Depósito C', icon: '🏢' },
+          { id: 'inv_D', label: 'Depósito D', icon: '🏢' },
+          { id: 'inv_E', label: 'Depósito E', icon: '🏢' },
+          { id: 'inv_PLANTA BAJA', label: 'Planta Baja', icon: '⬇️' },
+          { id: 'inv_PISO VENTA', label: 'Piso Venta', icon: '⬆️' }
       ];
 
-      // Si el filtro restrictivo de admin está activo, filtrar los depósitos habilitados
-      if (window.SonimaxInventoryConteo) {
-          const cfg = window.SonimaxInventoryConteo.getConfig();
-          if (cfg && cfg.active && Array.isArray(cfg.deposits) && cfg.deposits.length > 0) {
-              inventoryTabs = inventoryTabs.filter(t => t.id === 'inv_unassigned' || cfg.deposits.includes(t.depName));
-          }
-      }
-
       inventoryTabs.forEach(tab => {
-          let badgeHTML = '';
-          if (window.SonimaxInventoryConteo && tab.depName !== 'unassigned') {
-              const readyCount = window.SonimaxInventoryConteo.getReadyProducts(tab.depName).length;
-              if (readyCount > 0) {
-                  badgeHTML = ` <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-black shadow-sm">${readyCount}✓</span>`;
-              }
-          }
-
           // Botón Nav Superior
           const btn = document.createElement("button");
           btn.className = "dept-button whitespace-nowrap px-5 py-2.5 rounded-xl font-semibold transition-all text-sm";
-          btn.innerHTML = `${tab.icon} ${tab.label}${badgeHTML}`;
+          btn.innerHTML = `${tab.icon} ${tab.label}`;
           btn.dataset.dept = tab.id;
           btn.addEventListener("click", () => filterByDepartment(tab.id));
           navContainer.appendChild(btn);
 
           // Botón Sidebar
           const sidebarBtn = document.createElement("button");
-          sidebarBtn.className = "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold flex items-center justify-between";
-          sidebarBtn.innerHTML = `<span>${tab.icon} ${tab.label}</span>${badgeHTML}`;
+          sidebarBtn.className = "sidebar-dept-btn w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold";
+          sidebarBtn.innerHTML = `${tab.icon} ${tab.label}`;
           sidebarBtn.dataset.dept = tab.id;
           sidebarBtn.addEventListener("click", () => {
               filterByDepartment(tab.id);
@@ -3272,10 +3247,9 @@ function renderDepartments() {
           sidebarContainer.appendChild(sidebarBtn);
       });
       
-      // Seleccionar primer depósito disponible por defecto si no hay selección
-      if (currentDepartment === 'all' && inventoryTabs.length > 0) {
-          const defaultTab = inventoryTabs.length > 1 ? inventoryTabs[1].id : inventoryTabs[0].id;
-          setTimeout(() => filterByDepartment(defaultTab), 100);
+      // Seleccionar "Por Asignar" por defecto si no hay selección
+      if (currentDepartment === 'all') {
+          setTimeout(() => filterByDepartment('inv_unassigned'), 100);
       }
       return; // Salir para no renderizar departamentos normales
   }
@@ -3367,7 +3341,6 @@ function renderDepartments() {
 
 function filterByDepartment(dept, keepSearch = false) {
   currentDepartment = dept
-  window.currentDepartment = dept
 
   document.querySelectorAll(".dept-button, .sidebar-dept-btn").forEach((btn) => {
     btn.classList.remove("active")
@@ -3420,41 +3393,17 @@ function filterByDepartment(dept, keepSearch = false) {
           if (stock <= 0) return false;
 
           if (targetDeposit === 'unassigned') {
-              if (currentDep) return false; // Mostrar solo si no tiene depósito
+              return !currentDep; // Mostrar si no tiene depósito
           } else {
-              if (currentDep !== targetDeposit) return false; // Mostrar si coincide el depósito
+              return currentDep === targetDeposit; // Mostrar si coincide el depósito
           }
-
-          // [NUEVO] Aplicar filtros configurados por Admin (precio mínimo GMayor, stock, depósitos)
-          if (window.SonimaxInventoryConteo && !window.SonimaxInventoryConteo.isEligible(p)) {
-              return false;
-          }
-
-          // [NUEVO] Ocultar productos que ya están en el apartado de "Productos Listos" para este depósito
-          if (targetDeposit !== 'unassigned' && window.SonimaxInventoryConteo) {
-              const readyItems = window.SonimaxInventoryConteo.getReadyProducts(targetDeposit);
-              if (readyItems.some(it => it.codigo === pCode)) {
-                  return false;
-              }
-          }
-
-          return true;
       });
 
       // Aplicar filtro de búsqueda local si existe (usando Fuse o texto simple)
       // Nota: handleDeptSearch se encarga de refiltrar filteredProducts, así que aquí solo filtramos por depósito
       
       currentPage = 1;
-      window.filteredProducts = filteredProducts;
       renderProducts();
-      if (window.SonimaxInventoryConteo) {
-          const readyItems = window.SonimaxInventoryConteo.getReadyProducts(targetDeposit);
-          if (filteredProducts.length === 0 && readyItems.length > 0) {
-              window.SonimaxInventoryConteo.switchToReadyTab(targetDeposit);
-              return;
-          }
-          window.SonimaxInventoryConteo.renderViews();
-      }
       return;
   }
 
@@ -3715,57 +3664,39 @@ function createProductCard(product) {
             </div>
           `;
       } else {
-          // VISTA: EN DEPÓSITO (Input Cantidad con Bloqueo Manual + Botón Marcar Listo)
+          // VISTA: EN DEPÓSITO (Input Cantidad + Botones Cambiar Depósito)
+          // Lógica de bloqueo: Bloqueado si !inventoryEditMode Y ya tiene cantidad > 0
           const currentQty = invData ? (invData.cantidad_fisica || 0) : 0;
           const isLocked = !inventoryEditMode && currentQty > 0;
           
           actionButtonsHTML = `
-            <div class="mt-3 space-y-2">
+            <div class="mt-3">
                 <div class="flex justify-between items-center mb-1">
-                    <p class="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
-                      <span>Conteo Físico:</span>
-                    </p>
-                    <span class="text-xs font-mono bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 px-2 py-0.5 rounded font-bold">Dep: ${currentDep}</span>
+                    <p class="text-xs font-bold text-gray-500 uppercase">Conteo Físico:</p>
+                    <span class="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Dep: ${currentDep}</span>
                 </div>
-                
-                <!-- Input de Conteo con Bloqueo Manual -->
-                <div class="relative flex items-center">
+                <div class="relative">
                     <input type="number" 
-                        value="${currentQty > 0 ? currentQty : ''}" 
-                        placeholder="0"
+                        value="${currentQty}" 
                         min="0"
-                        data-input-code="${cleanCode}"
-                        class="w-full p-3 pr-12 text-center text-xl font-black border-2 rounded-xl outline-none transition-all ${isLocked ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-blue-600 border-blue-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20'}"
+                        class="w-full p-3 text-center text-xl font-bold border-2 rounded-xl outline-none transition-all ${isLocked ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-blue-600 border-blue-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20'}"
                         ${isLocked ? 'disabled' : ''}
-                        onkeydown="if(event.key==='Enter'){ event.preventDefault(); window.enviarProductoAListos('${cleanCode}', '${currentDep}'); }"
+                        onchange="window.updateInventoryQuantity('${product.codigo}', this)"
                         onfocus="this.select()"
                     >
-                    <button type="button" 
-                        data-lock-code="${cleanCode}"
-                        onclick="window.toggleInputLock('${cleanCode}')"
-                        class="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-lg hover:bg-gray-200/60 dark:hover:bg-gray-600 transition-colors ${isLocked ? 'text-gray-400' : 'text-blue-500'}"
-                        title="${isLocked ? 'Campo bloqueado. Clic para desbloquear y corregir.' : 'Campo desbloqueado. Clic para bloquear.'}">
-                        ${isLocked ? '🔒' : '🔓'}
-                    </button>
+                    ${isLocked ? '<div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></div>' : ''}
                 </div>
-
-                <!-- Botón de Envío a Listos -->
-                <button type="button" 
-                    class="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs sm:text-sm shadow-md hover:shadow-lg transition-all transform active:scale-95 flex items-center justify-center space-x-1.5"
-                    onclick="window.enviarProductoAListos('${cleanCode}', '${currentDep}')">
-                    <span>✅</span>
-                    <span>Marcar Listo (Enviar a Listos)</span>
-                </button>
+                ${!isLocked ? '<p class="text-[10px] text-center text-gray-400 mt-1">Ingresa la cantidad y presiona Enter o sal del campo</p>' : '<p class="text-[10px] text-center text-red-400 mt-1 font-medium">Edición bloqueada por Admin</p>'}
                 
-                <!-- Botones para cambiar depósito si fue clasificado erróneamente -->
-                <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <p class="text-[9px] font-bold text-gray-400 mb-1 text-center uppercase tracking-wider">Cambiar Depósito:</p>
-                    <div class="grid grid-cols-4 sm:grid-cols-7 gap-1">
+                <!-- [NUEVO] Botones para cambiar depósito -->
+                <div class="mt-3 pt-3 border-t border-gray-200">
+                    <p class="text-[10px] font-bold text-gray-400 mb-1.5 text-center uppercase tracking-wider">Cambiar Depósito:</p>
+                    <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-1">
                         ${['A','B','C','D','E','PLANTA BAJA','PISO VENTA'].map(d => `
-                            <button class="deposito-change-btn w-full h-auto min-h-[1.8rem] py-0.5 rounded-md font-bold text-[8px] sm:text-[9px] ${
+                            <button class="deposito-change-btn w-full h-auto min-h-[2rem] py-1 rounded-lg font-bold text-[9px] sm:text-[10px] ${
                                 d === currentDep 
-                                ? 'bg-blue-600 text-white border-blue-700 shadow-sm cursor-default' 
-                                : 'bg-gray-100 hover:bg-orange-500 hover:text-white border border-gray-200 transition-all text-gray-600'
+                                ? 'bg-blue-600 text-white border-blue-700 shadow-md cursor-default' 
+                                : 'bg-gray-100 hover:bg-orange-500 hover:text-white border border-gray-200 transition-all shadow-sm'
                             } flex items-center justify-center text-center leading-tight" 
                                 ${d === currentDep ? 'disabled' : ''}
                                 onclick="window.assignProductDeposit('${product.id}', '${product.codigo}', '${d}')">
@@ -3966,111 +3897,6 @@ window.updateInventoryQuantity = async function(productCode, inputElement) {
             inputElement.classList.add('bg-white', 'text-blue-600');
         }
     }, 500);
-};
-
-// [NUEVO] Función para Rol Inventario: Bloquear campo y enviar a "Productos Listos"
-window.enviarProductoAListos = async function (productCode, deposito) {
-    const pCode = (productCode || '').trim().toUpperCase();
-    const inputEl = document.querySelector(`input[data-input-code="${pCode}"]`);
-    const lockBtn = document.querySelector(`button[data-lock-code="${pCode}"]`);
-    if (!inputEl) return;
-
-    const rawVal = inputEl.value;
-    if (rawVal === '' || isNaN(parseInt(rawVal))) {
-        alert('⚠️ Por favor ingresa una cantidad numérica antes de marcar como listo.');
-        inputEl.focus();
-        return;
-    }
-
-    const val = parseInt(rawVal);
-    if (val < 0) {
-        alert('La cantidad no puede ser negativa.');
-        inputEl.focus();
-        return;
-    }
-
-    // 1. Bloquear input inmediatamente y cambiar icono a candado cerrado
-    inputEl.disabled = true;
-    inputEl.classList.remove('bg-white', 'text-blue-600');
-    inputEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
-    if (lockBtn) {
-        lockBtn.innerHTML = '🔒';
-        lockBtn.title = 'Campo bloqueado. Haz clic para desbloquear y editar.';
-        lockBtn.classList.remove('text-blue-500');
-        lockBtn.classList.add('text-gray-400');
-    }
-
-    // 2. Guardar en el módulo de inventario
-    if (window.SonimaxInventoryConteo) {
-        await window.SonimaxInventoryConteo.markAsReady(pCode, val, deposito);
-    }
-
-    // 3. Animación suave para trasladar de Pendientes a Listos
-    const productCard = document.querySelector(`.product-card[data-product-code="${pCode}"]`);
-    if (productCard) {
-        productCard.style.transition = 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-        productCard.style.opacity = '0';
-        productCard.style.transform = 'scale(0.85) translateY(-20px)';
-
-        setTimeout(() => {
-            productCard.remove();
-            // Quitar de filteredProducts en memoria para consistencia
-            const idx = filteredProducts.findIndex(p => (p.codigo || '').trim().toUpperCase() === pCode);
-            if (idx > -1) filteredProducts.splice(idx, 1);
-
-            const grid = document.getElementById("products-grid");
-            const remainingCards = grid ? grid.querySelectorAll('.product-card') : [];
-
-            if (window.SonimaxInventoryConteo) {
-                if (remainingCards.length === 0) {
-                    // Si ya no quedan productos pendientes por contar en este depósito, pasar directamente a Listos
-                    window.SonimaxInventoryConteo.switchToReadyTab(deposito);
-                } else {
-                    window.SonimaxInventoryConteo.renderViews();
-                }
-            }
-
-            // Para rol inventario, mantener no-products oculto (lo maneja renderViews)
-            if (window.currentUserRole !== 'inventario') {
-                if (grid && grid.children.length === 0) {
-                    document.getElementById("no-products")?.classList.remove("hidden");
-                }
-            }
-        }, 350);
-    }
-};
-
-// [NUEVO] Función para bloquear/desbloquear manualmente el input de cantidad
-window.toggleInputLock = function (productCode) {
-    const pCode = (productCode || '').trim().toUpperCase();
-    const inputEl = document.querySelector(`input[data-input-code="${pCode}"]`);
-    const lockBtn = document.querySelector(`button[data-lock-code="${pCode}"]`);
-    if (!inputEl) return;
-
-    const isCurrentlyDisabled = inputEl.disabled;
-    inputEl.disabled = !isCurrentlyDisabled;
-
-    if (inputEl.disabled) {
-        inputEl.classList.remove('bg-white', 'text-blue-600');
-        inputEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
-        if (lockBtn) {
-            lockBtn.innerHTML = '🔒';
-            lockBtn.title = 'Campo bloqueado. Haz clic para desbloquear y editar.';
-            lockBtn.classList.remove('text-blue-500');
-            lockBtn.classList.add('text-gray-400');
-        }
-    } else {
-        inputEl.classList.remove('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
-        inputEl.classList.add('bg-white', 'text-blue-600');
-        if (lockBtn) {
-            lockBtn.innerHTML = '🔓';
-            lockBtn.title = 'Campo desbloqueado para edición.';
-            lockBtn.classList.remove('text-gray-400');
-            lockBtn.classList.add('text-blue-500');
-        }
-        inputEl.focus();
-        inputEl.select();
-    }
 };
 
 function getPriceForRole(product) {
@@ -5983,20 +5809,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // NUEVO: Evento para el botón de Bajo Stock (1-5)
   document.getElementById("low-stock-button")?.addEventListener("click", () => {
     if (window.showLowStockModal) window.showLowStockModal();
-  });
-
-  // NUEVO: Evento para el botón de Filtros para Rol Inventario (Admin)
-  document.getElementById("admin-inventory-filter-btn")?.addEventListener("click", () => {
-    if (window.SonimaxInventoryConteo && window.SonimaxInventoryConteo.showFilterModal) {
-      window.SonimaxInventoryConteo.showFilterModal();
-    }
-  });
-
-  // NUEVO: Evento para el botón de Auditoría de Conteos / Pedidos de Inventario (Admin)
-  document.getElementById("admin-inventory-audit-btn")?.addEventListener("click", () => {
-    if (window.SonimaxInventoryConteo && window.SonimaxInventoryConteo.showAuditModal) {
-      window.SonimaxInventoryConteo.showAuditModal();
-    }
   });
 })
 
