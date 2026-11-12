@@ -27,7 +27,9 @@
     maxPrice: null,
     minStock: 1, // Por defecto filtrar agotados
     maxStock: null,
-    minTotalValue: 0, // [NUEVO] Sumatoria de cantidad * precio GMayor >= monto (ej. $700)
+    minTotalValue: 0, // Sumatoria de cantidad * precio GMayor >= monto (ej. $700)
+    sortByPrice: 'none',   // [NUEVO] 'none' | 'desc' (mayor a menor) | 'asc' (menor a mayor)
+    productLimit: 0,       // [NUEVO] 0 = sin límite, N = mostrar los primeros N productos
     deposits: ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA']
   };
 
@@ -126,6 +128,14 @@
               currentFilterConfig.deposits = data.filter_deposits;
               updated = true;
             }
+            if (typeof data.filter_sort_by_price !== 'undefined' && data.filter_sort_by_price !== null) {
+              currentFilterConfig.sortByPrice = data.filter_sort_by_price;
+              updated = true;
+            }
+            if (typeof data.filter_product_limit !== 'undefined' && data.filter_product_limit !== null) {
+              currentFilterConfig.productLimit = parseInt(data.filter_product_limit) || 0;
+              updated = true;
+            }
             if (data.filter_settings && typeof data.filter_settings === 'object') {
               currentFilterConfig = { ...currentFilterConfig, ...data.filter_settings };
               updated = true;
@@ -162,6 +172,8 @@
       filter_min_stock: currentFilterConfig.minStock !== null ? currentFilterConfig.minStock : null,
       filter_max_stock: currentFilterConfig.maxStock || null,
       filter_min_total_value: currentFilterConfig.minTotalValue || 0,
+      filter_sort_by_price: currentFilterConfig.sortByPrice || 'none',
+      filter_product_limit: currentFilterConfig.productLimit || 0,
       filter_deposits: currentFilterConfig.deposits,
       filter_settings: currentFilterConfig
     };
@@ -282,19 +294,80 @@
   }
 
   /**
-   * Obtiene la lista calculada de pendientes de un depósito
+   * Construye el Set de códigos elegibles del catálogo GLOBAL aplicando
+   * orden y límite antes de filtrar por depósito.
+   * Se recalcula solo cuando cambia la configuración (memoizado por referencia).
+   */
+  function getGlobalEligibleCodes() {
+    if (!window.allProducts || window.allProducts.length === 0) return null;
+
+    const sortByPrice   = currentFilterConfig.sortByPrice   || 'none';
+    const productLimit  = parseInt(currentFilterConfig.productLimit) || 0;
+
+    // 1. Partir del catálogo completo con stock > 0 que pase los filtros de precio/stock/valor
+    let globalPool = window.allProducts.filter(p => {
+      if (parseInt(p.stock || 0) <= 0) return false;
+      return isProductEligibleForInventory(p);
+    });
+
+    // 2. Ordenar globalmente por precio G.Mayor si está activo
+    if (sortByPrice === 'desc') {
+      globalPool.sort((a, b) => parseFloat(b.precio_gmayor || 0) - parseFloat(a.precio_gmayor || 0));
+    } else if (sortByPrice === 'asc') {
+      globalPool.sort((a, b) => parseFloat(a.precio_gmayor || 0) - parseFloat(b.precio_gmayor || 0));
+    }
+
+    // 3. Aplicar límite global (ej. los 200 más caros de TODO el catálogo)
+    if (productLimit > 0 && globalPool.length > productLimit) {
+      globalPool = globalPool.slice(0, productLimit);
+    }
+
+    // 4. Devolver un Set de códigos y el array ya ordenado para preservar el orden
+    return {
+      codes: new Set(globalPool.map(p => (p.codigo || '').trim().toUpperCase())),
+      ordered: globalPool
+    };
+  }
+
+  /**
+   * Obtiene la lista calculada de pendientes de un depósito.
+   * Cuando hay límite/orden global, primero selecciona del catálogo global
+   * (ej. los 200 más caros) y luego filtra los que pertenecen al depósito.
    */
   function getPendingProductsForDeposit(deposito) {
     if (!window.allProducts || window.allProducts.length === 0) return [];
     const currentDep = (deposito || '').trim().toUpperCase();
-    const readyList = getReadyProductsForDeposit(currentDep);
-    const readyCodes = new Set(readyList.map(it => it.codigo));
+    const readyList   = getReadyProductsForDeposit(currentDep);
+    const readyCodes  = new Set(readyList.map(it => it.codigo));
 
+    const globalScope = getGlobalEligibleCodes();
+
+    if (globalScope) {
+      // --- Modo con límite/orden global ---
+      // Usamos el array ya ordenado globalmente y filtramos por depósito
+      return globalScope.ordered.filter(p => {
+        const pCode  = (p.codigo || '').trim().toUpperCase();
+        const invData = window.inventoryDataMap ? window.inventoryDataMap.get(pCode) : null;
+        const itemDep = invData ? (invData.deposito || '').trim().toUpperCase() : null;
+
+        if (currentDep === 'UNASSIGNED') {
+          if (itemDep) return false;
+        } else {
+          if (itemDep !== currentDep) return false;
+        }
+
+        if (currentDep !== 'UNASSIGNED' && readyCodes.has(pCode)) return false;
+
+        return true;
+      });
+    }
+
+    // --- Modo sin límite/orden global (comportamiento original) ---
     return window.allProducts.filter(p => {
-      const pCode = (p.codigo || '').trim().toUpperCase();
+      const pCode   = (p.codigo || '').trim().toUpperCase();
       const invData = window.inventoryDataMap ? window.inventoryDataMap.get(pCode) : null;
       const itemDep = invData ? (invData.deposito || '').trim().toUpperCase() : null;
-      const stock = parseInt(p.stock || 0);
+      const stock   = parseInt(p.stock || 0);
 
       if (stock <= 0) return false;
 
@@ -568,17 +641,28 @@
     const allDeposits = ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA'];
 
     function calculateMatchingCount(testConfig) {
-      if (!window.allProducts || window.allProducts.length === 0) return 0;
-      return window.allProducts.filter(p => {
+      if (!window.allProducts || window.allProducts.length === 0) return { filtered: 0, afterLimit: 0 };
+      // 1. Filtrar por criterios de precio/stock/valor
+      let pool = window.allProducts.filter(p => {
         const precioG = parseFloat(p.precio_gmayor || 0);
-        const stock = parseInt(p.stock || 0);
+        const stock   = parseInt(p.stock || 0);
+        if (stock <= 0) return false;
         if (testConfig.minPrice > 0 && precioG < testConfig.minPrice) return false;
         if (testConfig.maxPrice > 0 && precioG > testConfig.maxPrice) return false;
         if (testConfig.minStock !== null && stock < testConfig.minStock) return false;
         if (testConfig.maxStock !== null && stock > testConfig.maxStock) return false;
         if (testConfig.minTotalValue > 0 && (stock * precioG) < testConfig.minTotalValue) return false;
         return true;
-      }).length;
+      });
+      const filtered = pool.length;
+      // 2. Ordenar globalmente (para que el límite tome los más caros)
+      const sort = testConfig.sortByPrice || 'none';
+      if (sort === 'desc') pool.sort((a, b) => parseFloat(b.precio_gmayor || 0) - parseFloat(a.precio_gmayor || 0));
+      else if (sort === 'asc') pool.sort((a, b) => parseFloat(a.precio_gmayor || 0) - parseFloat(b.precio_gmayor || 0));
+      // 3. Aplicar límite global
+      const lim = parseInt(testConfig.productLimit) || 0;
+      const afterLimit = lim > 0 ? Math.min(pool.length, lim) : pool.length;
+      return { filtered, afterLimit };
     }
 
     const initialMatch = calculateMatchingCount(config);
@@ -700,16 +784,66 @@
             </div>
           </div>
 
+          <!-- [NUEVO] Ordenar por Precio -->
+          <div class="space-y-3 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-violet-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>↕️</span> Ordenar por Precio G.Mayor:
+              </label>
+              <span class="text-xs text-violet-600 dark:text-violet-400 font-bold">Orden de aparición</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2" id="sort-price-options">
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'none' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="none" class="sr-only" ${(config.sortByPrice || 'none') === 'none' ? 'checked' : ''}>
+                <span class="text-xl">🔀</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Sin orden</span>
+              </label>
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'desc' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="desc" class="sr-only" ${(config.sortByPrice || 'none') === 'desc' ? 'checked' : ''}>
+                <span class="text-xl">⬆️</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Mayor a Menor</span>
+              </label>
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'asc' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="asc" class="sr-only" ${(config.sortByPrice || 'none') === 'asc' ? 'checked' : ''}>
+                <span class="text-xl">⬇️</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Menor a Mayor</span>
+              </label>
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Selecciona <strong>Mayor a Menor</strong> para que el rol inventario vea primero los productos más costosos.
+            </p>
+          </div>
+
+          <!-- [NUEVO] Límite de Productos a Mostrar -->
+          <div class="space-y-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-orange-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>🔢</span> Límite de Productos Visibles:
+              </label>
+              <span class="text-xs text-orange-600 dark:text-orange-400 font-bold">Primeros N productos</span>
+            </div>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">#</span>
+              <input type="number" id="inv-filter-product-limit" min="0" step="10"
+                value="${config.productLimit || 0}"
+                placeholder="0 = Sin límite"
+                class="w-full pl-9 pr-4 py-3 bg-white dark:bg-gray-700 border-2 border-orange-300 dark:border-gray-500 rounded-xl font-black text-gray-800 dark:text-white outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 text-lg transition-all">
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Si colocas <strong>200</strong>, el inventario solo verá los primeros 200 productos (según el orden seleccionado arriba). Coloca <strong>0</strong> para no limitar.
+            </p>
+          </div>
+
           <!-- Medidor en tiempo real de productos coincidentes -->
           <div class="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between">
             <div class="flex items-center space-x-3">
               <div class="w-8 h-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center font-bold">✓</div>
               <div>
-                <p class="text-xs text-emerald-800 dark:text-emerald-300 font-medium">Coincidencia en Catálogo:</p>
-                <p class="text-base font-black text-emerald-900 dark:text-emerald-200" id="inv-filter-match-count">${initialMatch} productos</p>
+                <p class="text-xs text-emerald-800 dark:text-emerald-300 font-medium">Productos del catálogo global que saldrán:</p>
+                <p class="text-base font-black text-emerald-900 dark:text-emerald-200" id="inv-filter-match-count">${initialMatch.afterLimit} productos${initialMatch.afterLimit !== initialMatch.filtered ? ` <span class="text-xs font-normal text-emerald-700">(de ${initialMatch.filtered} que cumplen filtros)</span>` : ''}</p>
               </div>
             </div>
-            <span class="text-xs font-bold px-2.5 py-1 bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-100 rounded-lg">En catálogo activo</span>
+            <span class="text-xs font-bold px-2.5 py-1 bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-100 rounded-lg">Total global</span>
           </div>
         </div>
 
@@ -740,23 +874,49 @@
     const matchCountSpan = modal.querySelector('#inv-filter-match-count');
     const depositCheckboxes = modal.querySelectorAll('.deposit-checkbox');
     const selectAllBtn = modal.querySelector('#select-all-deposits-btn');
+    const productLimitInput = modal.querySelector('#inv-filter-product-limit');
+    const sortPriceRadios = modal.querySelectorAll('input[name="inv-sort-price"]');
+
+    // Interactividad de las tarjetas de orden de precio
+    const sortLabels = modal.querySelectorAll('#sort-price-options label');
+    sortPriceRadios.forEach(radio => {
+      radio.addEventListener('change', () => {
+        sortLabels.forEach(lbl => {
+          lbl.classList.remove('border-violet-500', 'bg-violet-50', 'dark:bg-violet-900/30');
+          lbl.classList.add('border-gray-200', 'dark:border-gray-600');
+        });
+        const checkedRadio = modal.querySelector('input[name="inv-sort-price"]:checked');
+        if (checkedRadio) {
+          checkedRadio.closest('label').classList.add('border-violet-500', 'bg-violet-50', 'dark:bg-violet-900/30');
+          checkedRadio.closest('label').classList.remove('border-gray-200', 'dark:border-gray-600');
+        }
+      });
+    });
 
     function updateMatchMeter() {
       const testConfig = {
-        minPrice: parseFloat(minPriceInput.value) || 0,
-        maxPrice: null,
-        minStock: minStockInput.value !== '' ? parseInt(minStockInput.value) : null,
-        maxStock: maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null,
-        minTotalValue: parseFloat(minTotalValueInput.value) || 0
+        minPrice:      parseFloat(minPriceInput.value) || 0,
+        maxPrice:      null,
+        minStock:      minStockInput.value !== '' ? parseInt(minStockInput.value) : null,
+        maxStock:      maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null,
+        minTotalValue: parseFloat(minTotalValueInput.value) || 0,
+        sortByPrice:   (modal.querySelector('input[name="inv-sort-price"]:checked') || {}).value || 'none',
+        productLimit:  parseInt(productLimitInput.value) || 0
       };
-      const count = calculateMatchingCount(testConfig);
-      matchCountSpan.textContent = `${count} productos`;
+      const result = calculateMatchingCount(testConfig);
+      if (result.afterLimit !== result.filtered) {
+        matchCountSpan.innerHTML = `${result.afterLimit} productos <span class="text-xs font-normal text-emerald-700">(de ${result.filtered} que cumplen filtros)</span>`;
+      } else {
+        matchCountSpan.textContent = `${result.afterLimit} productos`;
+      }
     }
 
     minPriceInput.addEventListener('input', updateMatchMeter);
     minStockInput.addEventListener('input', updateMatchMeter);
     maxStockInput.addEventListener('input', updateMatchMeter);
     minTotalValueInput.addEventListener('input', updateMatchMeter);
+    productLimitInput.addEventListener('input', updateMatchMeter);
+    sortPriceRadios.forEach(r => r.addEventListener('change', updateMatchMeter));
 
     selectAllBtn.addEventListener('click', () => {
       const allChecked = Array.from(depositCheckboxes).every(cb => cb.checked);
@@ -773,6 +933,9 @@
         .filter(cb => cb.checked)
         .map(cb => cb.value);
 
+      const selectedSort = (modal.querySelector('input[name="inv-sort-price"]:checked') || {}).value || 'none';
+      const productLimit = parseInt(productLimitInput.value) || 0;
+
       const newConfig = {
         active: activeToggle.checked,
         minPrice: parseFloat(minPriceInput.value) || 0,
@@ -780,17 +943,22 @@
         minStock: minStockInput.value !== '' ? parseInt(minStockInput.value) : 1,
         maxStock: maxStockInput.value !== '' ? parseInt(maxStockInput.value) : null,
         minTotalValue: parseFloat(minTotalValueInput.value) || 0,
+        sortByPrice: selectedSort,
+        productLimit: productLimit,
         deposits: selectedDeposits.length > 0 ? selectedDeposits : allDeposits
       };
 
       const result = await saveInventoryFilterConfig(newConfig);
 
       if (result.success) {
+        const sortLabels = { none: 'Sin orden', desc: '⬆️ Mayor a Menor', asc: '⬇️ Menor a Mayor' };
         let msg = `✅ Configuración guardada exitosamente.\n\n` +
           `• Filtro Restrictivo: ${newConfig.active ? 'ACTIVADO' : 'DESACTIVADO'}\n` +
           `• Precio G.Mayor Mínimo: $${newConfig.minPrice}\n` +
           `• Valor Total Mínimo (Cant × Precio): $${newConfig.minTotalValue}\n` +
           `• Stock Mínimo: ${newConfig.minStock}\n` +
+          `• Ordenar por Precio: ${sortLabels[newConfig.sortByPrice] || 'Sin orden'}\n` +
+          `• Límite de Productos: ${newConfig.productLimit > 0 ? `${newConfig.productLimit} productos` : 'Sin límite'}\n` +
           `• Depósitos: ${newConfig.deposits.join(', ')}`;
         
         if (result.cloudSaved) {
@@ -932,6 +1100,9 @@
       if (currentFilterConfig.minTotalValue > 0) filterDescParts.push(`Valor Tot ≥ $${currentFilterConfig.minTotalValue}`);
       if (currentFilterConfig.minStock !== null) filterDescParts.push(`Stock ≥ ${currentFilterConfig.minStock}`);
     }
+    if (currentFilterConfig.sortByPrice === 'desc') filterDescParts.push(`Precio ↑ Mayor→Menor`);
+    if (currentFilterConfig.sortByPrice === 'asc') filterDescParts.push(`Precio ↓ Menor→Mayor`);
+    if (currentFilterConfig.productLimit > 0) filterDescParts.push(`Límite: ${currentFilterConfig.productLimit} productos`);
     const filterInfo = filterDescParts.length > 0
       ? `⚡ Filtro Admin: ${filterDescParts.join(' | ')}`
       : `📋 Todos los productos del depósito`;
