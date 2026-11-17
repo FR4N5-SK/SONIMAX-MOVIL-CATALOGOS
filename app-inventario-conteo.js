@@ -19,6 +19,7 @@
   const STORAGE_FILTER_KEY = 'sonimax_inv_filter_config_v1';
   const STORAGE_READY_PREFIX = 'sonimax_inv_ready_dep_';
   const STORAGE_VALERY_PREFIX = 'sonimax_inv_valery_dep_';
+  const STORAGE_SENT_PREFIX = 'sonimax_inv_sent_dep_';
   const STORAGE_SESSIONS_BACKUP = 'sonimax_inv_sessions_history_v1';
 
   // Configuración predeterminada de filtros y estado global de conteo
@@ -32,13 +33,14 @@
     sortByPrice: 'none',   // [NUEVO] 'none' | 'desc' (mayor a menor) | 'asc' (menor a mayor)
     productLimit: 0,       // [NUEVO] 0 = sin límite, N = mostrar los primeros N productos
     deposits: ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA'],
-    valeryProducts: {},    // [GLOBAL EN NUBE] { [deposito]: [items...] }
-    readyProducts: {}      // [GLOBAL EN NUBE] { [deposito]: [items...] }
+    valeryProducts: {},    // [GLOBAL EN NUBE] { [deposito]: [items nuevos...] }
+    readyProducts: {},     // [GLOBAL EN NUBE] { [deposito]: [items nuevos...] }
+    sentProducts: {}       // [GLOBAL EN NUBE] { [deposito]: [items ya enviados en pedidos...] }
   };
 
   // Estado en memoria
   let currentFilterConfig = { ...DEFAULT_FILTER_CONFIG };
-  let currentActiveTab = 'pending'; // 'pending' | 'ready' | 'valery'
+  let currentActiveTab = 'pending'; // 'pending' | 'ready' | 'valery' | 'sent'
   let cachedSessions = [];
 
   // ============================================================
@@ -166,6 +168,18 @@
                 }
               }
 
+              // Sincronizar listas globales de Ya Enviados en el almacenamiento local de este dispositivo
+              if (data.filter_settings.sentProducts && typeof data.filter_settings.sentProducts === 'object') {
+                currentFilterConfig.sentProducts = data.filter_settings.sentProducts;
+                for (const [dep, sList] of Object.entries(data.filter_settings.sentProducts)) {
+                  if (Array.isArray(sList)) {
+                    try {
+                      localStorage.setItem(getStorageSentKey(dep), JSON.stringify(sList));
+                    } catch (e) {}
+                  }
+                }
+              }
+
               updated = true;
             }
 
@@ -285,7 +299,7 @@
   }
 
   // ============================================================
-  // GESTIÓN DE PRODUCTOS LISTOS Y PASAR VALERY (ROL INVENTARIO)
+  // GESTIÓN DE PRODUCTOS LISTOS, VALERY Y YA ENVIADOS (ROL INVENTARIO)
   // ============================================================
 
   function getStorageReadyKey(deposito) {
@@ -296,6 +310,87 @@
   function getStorageValeryKey(deposito) {
     const cleanDep = (deposito || 'unassigned').trim().toUpperCase().replace(/\s+/g, '_');
     return STORAGE_VALERY_PREFIX + cleanDep;
+  }
+
+  function getStorageSentKey(deposito) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase().replace(/\s+/g, '_');
+    return STORAGE_SENT_PREFIX + cleanDep;
+  }
+
+  /**
+   * Obtiene la lista ACUMULADA de productos Ya Enviados (pedidos confirmados) para un depósito.
+   * Se acumula sesión a sesión — cada pedido enviado agrega sus ítems aquí.
+   */
+  function getSentProductsForDeposit(deposito) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    let list = [];
+    try {
+      const key = getStorageSentKey(cleanDep);
+      const data = localStorage.getItem(key);
+      list = data ? JSON.parse(data) : [];
+    } catch (e) {
+      list = [];
+    }
+    // Fusionar con datos globales de la nube
+    if (currentFilterConfig && currentFilterConfig.sentProducts && currentFilterConfig.sentProducts[cleanDep]) {
+      const cloudList = currentFilterConfig.sentProducts[cleanDep];
+      if (Array.isArray(cloudList) && cloudList.length > 0) {
+        const map = new Map();
+        cloudList.forEach(it => {
+          if (it && it.codigo) {
+            const k = (it.codigo || '') + '_' + (it.folio || '');
+            map.set(k, it);
+          }
+        });
+        list.forEach(it => {
+          if (it && it.codigo) {
+            const k = (it.codigo || '') + '_' + (it.folio || '');
+            if (!map.has(k)) map.set(k, it);
+          }
+        });
+        list = Array.from(map.values());
+      }
+    }
+    return list;
+  }
+
+  /**
+   * Guarda (acumula) la lista de productos Ya Enviados para un depósito.
+   * Nunca borra lo anterior; solo agrega los nuevos ítems de la sesión.
+   */
+  async function saveSentProductsForDeposit(deposito, newItems, syncCloud = true) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    // Acumular: leer existentes y mezclar
+    const existing = getSentProductsForDeposit(cleanDep);
+    const map = new Map();
+    existing.forEach(it => {
+      if (it && it.codigo) {
+        const k = (it.codigo || '') + '_' + (it.folio || '');
+        map.set(k, it);
+      }
+    });
+    newItems.forEach(it => {
+      if (it && it.codigo) {
+        const k = (it.codigo || '') + '_' + (it.folio || '');
+        map.set(k, it); // sobreescribe si mismo folio+codigo (actualización)
+      }
+    });
+    const merged = Array.from(map.values());
+
+    try {
+      localStorage.setItem(getStorageSentKey(cleanDep), JSON.stringify(merged));
+    } catch (e) {}
+
+    if (!currentFilterConfig.sentProducts) currentFilterConfig.sentProducts = {};
+    currentFilterConfig.sentProducts[cleanDep] = merged;
+
+    if (syncCloud) {
+      try {
+        await saveInventoryFilterConfig({ sentProducts: currentFilterConfig.sentProducts });
+      } catch (e) {
+        console.warn('[INV-SENT] Error sincronizando enviados:', e);
+      }
+    }
   }
 
   /**
@@ -1002,10 +1097,14 @@
       }
     }
 
-    // Limpiar listos y valery de ese depósito tras envío exitoso
+    // Mover todos los items enviados al historial "Ya Enviados" ANTES de limpiar
+    const sentItems = allItems.map(it => ({ ...it, folio: folio, fechaEnvio: now.toISOString() }));
+    await saveSentProductsForDeposit(currentDep, sentItems);
+
+    // Limpiar listos y valery de ese depósito tras envío exitoso (quedan en "Ya Enviados")
     clearReadyProductsForDeposit(currentDep);
     clearValeryProductsForDeposit(currentDep);
-    currentActiveTab = 'pending';
+    currentActiveTab = 'sent';
     if (window.filterByDepartment) {
       window.filterByDepartment(`inv_${currentDep}`);
     } else {
@@ -1476,6 +1575,10 @@
     const totalPiezas = readyPiezas + valeryPiezas;
     const totalCounted = readyCount + valeryCount;
 
+    // Calcular cuántos enviados hay en total este depósito
+    const sentProducts = getSentProductsForDeposit(currentDep);
+    const sentCount = sentProducts.length;
+
     // Calcular cuántos pendientes hay
     const pendingList = getPendingProductsForDeposit(currentDep);
     const pendingCount = pendingList.length;
@@ -1532,7 +1635,7 @@
             <h3 class="text-xl sm:text-2xl font-black text-gray-800 dark:text-white mt-1">Conteo Físico - Depósito ${currentDep}</h3>
           </div>
 
-          <!-- Pestañas de Vista: Pendientes vs Listos vs Pasar Cantidad Valery -->
+          <!-- Pestañas de Vista: Pendientes vs Listos vs Pasar Cantidad Valery vs Ya Enviados -->
           <div class="flex flex-wrap items-center gap-2 self-stretch md:self-auto">
             <button id="btn-inv-subview-pending" class="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-1.5 ${currentActiveTab === 'pending' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25 ring-2 ring-blue-600' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200'}">
               <span>📋 Pendientes</span>
@@ -1546,6 +1649,12 @@
               <span>⚡ Pasar a Valery</span>
               <span class="px-2 py-0.5 rounded-full text-xs font-extrabold ${currentActiveTab === 'valery' ? 'bg-white text-purple-800' : 'bg-purple-600 text-white'}">${valeryCount}</span>
             </button>
+            ${sentCount > 0 ? `
+            <button id="btn-inv-subview-sent" class="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-1.5 ${currentActiveTab === 'sent' ? 'bg-orange-600 text-white shadow-lg shadow-orange-500/25 ring-2 ring-orange-600' : 'bg-orange-50 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300 hover:bg-orange-100'}">
+              <span>📦 Ya Enviados</span>
+              <span class="px-2 py-0.5 rounded-full text-xs font-extrabold ${currentActiveTab === 'sent' ? 'bg-white text-orange-700' : 'bg-orange-600 text-white'}">${sentCount}</span>
+            </button>
+            ` : ''}
             ${totalCounted > 0 ? `
               <button id="btn-quick-submit-header" class="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs rounded-2xl shadow transition-all flex items-center justify-center space-x-1.5">
                 <span>📤</span>
@@ -1598,6 +1707,15 @@
       } catch (e) {}
     });
 
+    document.getElementById('btn-inv-subview-sent')?.addEventListener('click', async () => {
+      currentActiveTab = 'sent';
+      renderInventoryViews();
+      try {
+        await loadInventoryFilterConfig();
+        renderInventoryViews();
+      } catch (e) {}
+    });
+
     document.getElementById('btn-quick-submit-header')?.addEventListener('click', () => {
       showSubmitConfirmationModal(currentDep);
     });
@@ -1626,6 +1744,14 @@
       mainGrid.parentElement.insertBefore(valeryContainer, readyContainer ? readyContainer.nextSibling : mainGrid.nextSibling);
     }
 
+    let sentContainer = document.getElementById('inventory-sent-container');
+    if (!sentContainer) {
+      sentContainer = document.createElement('div');
+      sentContainer.id = 'inventory-sent-container';
+      sentContainer.className = 'container mx-auto px-4 py-4 space-y-4 hidden';
+      mainGrid.parentElement.insertBefore(sentContainer, valeryContainer ? valeryContainer.nextSibling : mainGrid.nextSibling);
+    }
+
     const currentDep = getCurrentDeposit();
     updateInventoryHeaderCounters();
 
@@ -1634,24 +1760,35 @@
     if (currentActiveTab === 'ready' && currentDep !== 'UNASSIGNED') {
       mainGrid.classList.add('hidden');
       valeryContainer.classList.add('hidden');
+      sentContainer.classList.add('hidden');
       if (noProductsDiv) noProductsDiv.classList.add('hidden');
       readyContainer.classList.remove('hidden');
       renderReadySectionContent(readyContainer, currentDep);
     } else if (currentActiveTab === 'valery' && currentDep !== 'UNASSIGNED') {
       mainGrid.classList.add('hidden');
       readyContainer.classList.add('hidden');
+      sentContainer.classList.add('hidden');
       if (noProductsDiv) noProductsDiv.classList.add('hidden');
       valeryContainer.classList.remove('hidden');
       renderValerySectionContent(valeryContainer, currentDep);
+    } else if (currentActiveTab === 'sent' && currentDep !== 'UNASSIGNED') {
+      mainGrid.classList.add('hidden');
+      readyContainer.classList.add('hidden');
+      valeryContainer.classList.add('hidden');
+      if (noProductsDiv) noProductsDiv.classList.add('hidden');
+      sentContainer.classList.remove('hidden');
+      renderSentSectionContent(sentContainer, currentDep);
     } else {
       readyContainer.classList.add('hidden');
       valeryContainer.classList.add('hidden');
+      sentContainer.classList.add('hidden');
       mainGrid.classList.remove('hidden');
 
       // Si estamos en un depósito específico y no quedan pendientes pero sí hay listos o valery
       const pendingList = getPendingProductsForDeposit(currentDep);
       const readyList = getReadyProductsForDeposit(currentDep);
       const valeryList = getValeryProductsForDeposit(currentDep);
+      const sentList = getSentProductsForDeposit(currentDep);
 
       if (currentDep !== 'UNASSIGNED' && pendingList.length === 0) {
         if (noProductsDiv) noProductsDiv.classList.add('hidden');
@@ -1659,6 +1796,7 @@
           currentActiveTab = 'ready';
           mainGrid.classList.add('hidden');
           valeryContainer.classList.add('hidden');
+          sentContainer.classList.add('hidden');
           readyContainer.classList.remove('hidden');
           renderReadySectionContent(readyContainer, currentDep);
           return;
@@ -1666,8 +1804,17 @@
           currentActiveTab = 'valery';
           mainGrid.classList.add('hidden');
           readyContainer.classList.add('hidden');
+          sentContainer.classList.add('hidden');
           valeryContainer.classList.remove('hidden');
           renderValerySectionContent(valeryContainer, currentDep);
+          return;
+        } else if (sentList.length > 0) {
+          currentActiveTab = 'sent';
+          mainGrid.classList.add('hidden');
+          readyContainer.classList.add('hidden');
+          valeryContainer.classList.add('hidden');
+          sentContainer.classList.remove('hidden');
+          renderSentSectionContent(sentContainer, currentDep);
           return;
         } else {
           mainGrid.innerHTML = `
@@ -2109,6 +2256,165 @@
 
     const fileName = `Valery_Ajuste_Dep_${currentDep}_${fecha}.xlsx`;
     window.XLSX.writeFile(wb, fileName);
+  }
+
+  // ============================================================
+  // UI: APARTADO "YA ENVIADOS" — HISTORIAL DE PEDIDOS ENVIADOS
+  // ============================================================
+
+  /**
+   * Renderiza la vista de productos Ya Enviados en pedidos anteriores para este depósito
+   */
+  function renderSentSectionContent(container, deposito) {
+    const sentItems = getSentProductsForDeposit(deposito);
+
+    // Agrupar por folio para mostrar pedidos separados
+    const folioMap = new Map();
+    sentItems.forEach(it => {
+      const folio = it.folio || 'SIN_FOLIO';
+      if (!folioMap.has(folio)) {
+        folioMap.set(folio, { folio, fechaEnvio: it.fechaEnvio, items: [] });
+      }
+      folioMap.get(folio).items.push(it);
+    });
+    const pedidos = Array.from(folioMap.values())
+      .sort((a, b) => (b.fechaEnvio || '').localeCompare(a.fechaEnvio || ''));
+
+    if (sentItems.length === 0) {
+      container.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-3xl p-10 text-center shadow-xl border border-gray-100 dark:border-gray-700 space-y-4">
+          <div class="w-16 h-16 rounded-2xl bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center text-3xl mx-auto">📭</div>
+          <h3 class="text-xl font-bold text-gray-800 dark:text-white">No hay pedidos enviados aún para Depósito ${deposito}</h3>
+          <p class="text-sm text-gray-500 max-w-md mx-auto">
+            Cuando envíes un conteo con <strong>"📤 Enviar del Día"</strong>, los productos aparecerán aquí separados del flujo de pendientes.
+          </p>
+          <button id="go-back-to-pending-from-sent-btn" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-md">
+            ← Volver a Pendientes
+          </button>
+        </div>
+      `;
+      container.querySelector('#go-back-to-pending-from-sent-btn')?.addEventListener('click', () => {
+        currentActiveTab = 'pending';
+        renderInventoryViews();
+      });
+      return;
+    }
+
+    const totalPiezas = sentItems.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+    const totalValor = sentItems.reduce((acc, it) => acc + (parseFloat(it.subtotal_gmayor) || 0), 0);
+    const totalProductos = sentItems.length;
+
+    container.innerHTML = `
+      <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-orange-500 to-amber-600 p-5 text-white">
+          <div class="flex items-center justify-between flex-wrap gap-3">
+            <div class="flex items-center space-x-3">
+              <div class="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-2xl shadow-inner">📦</div>
+              <div>
+                <h3 class="text-xl font-black">Ya Enviados — Depósito ${deposito}</h3>
+                <p class="text-orange-100 text-xs">${pedidos.length} pedido(s) • ${totalProductos} productos • ${totalPiezas} piezas</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="return-to-pending-from-sent-top-btn" class="px-3.5 py-2 bg-white/20 hover:bg-white/30 text-white font-bold text-xs rounded-xl transition-all flex items-center space-x-1.5">
+                <span>📋</span><span>Volver a Pendientes</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Resumen financiero -->
+          <div class="mt-4 grid grid-cols-3 gap-3">
+            <div class="bg-white/15 rounded-xl p-3 text-center">
+              <p class="text-xs text-orange-100 font-bold uppercase">Pedidos</p>
+              <p class="text-2xl font-black">${pedidos.length}</p>
+            </div>
+            <div class="bg-white/15 rounded-xl p-3 text-center">
+              <p class="text-xs text-orange-100 font-bold uppercase">Productos</p>
+              <p class="text-2xl font-black">${totalProductos}</p>
+            </div>
+            <div class="bg-white/15 rounded-xl p-3 text-center">
+              <p class="text-xs text-orange-100 font-bold uppercase">Valor G.Mayor</p>
+              <p class="text-lg font-black">$${totalValor.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lista de pedidos agrupados por folio -->
+        <div class="divide-y divide-gray-100 dark:divide-gray-700/60" id="sent-pedidos-list">
+          ${pedidos.map((pedido, pIdx) => {
+            const pItems = pedido.items;
+            const pPiezas = pItems.reduce((a, it) => a + (parseInt(it.cantidad_fisica) || 0), 0);
+            const pValor = pItems.reduce((a, it) => a + (parseFloat(it.subtotal_gmayor) || 0), 0);
+            const fechaStr = pedido.fechaEnvio ? new Date(pedido.fechaEnvio).toLocaleString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+            const hasValery = pItems.some(it => it.modo === 'valery');
+            return `
+              <details class="group" ${pIdx === 0 ? 'open' : ''}>
+                <summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950/20 select-none gap-3 flex-wrap">
+                  <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl ${hasValery ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'} flex items-center justify-center text-lg font-black">
+                      ${hasValery ? '⚡' : '✅'}
+                    </div>
+                    <div>
+                      <p class="font-black text-sm text-gray-800 dark:text-white font-mono">${pedido.folio}</p>
+                      <p class="text-[11px] text-gray-400">${fechaStr} • ${pItems.length} productos • ${pPiezas} piezas</p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-emerald-600">$${pValor.toFixed(2)}</span>
+                    <span class="text-gray-400 group-open:rotate-180 transition-transform text-lg">▾</span>
+                  </div>
+                </summary>
+                <div class="overflow-x-auto bg-gray-50 dark:bg-gray-900/30 border-t border-gray-100 dark:border-gray-700/40">
+                  <table class="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr class="bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold uppercase">
+                        <th class="p-2.5 pl-4">Código</th>
+                        <th class="p-2.5">Descripción</th>
+                        <th class="p-2.5 text-center">Modo</th>
+                        <th class="p-2.5 text-center">Cant.</th>
+                        <th class="p-2.5 text-right pr-4">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                      ${pItems.map(it => `
+                        <tr class="hover:bg-white dark:hover:bg-gray-800/50">
+                          <td class="p-2.5 pl-4 font-mono font-bold text-gray-700 dark:text-gray-300">${it.codigo}</td>
+                          <td class="p-2.5 text-gray-600 dark:text-gray-400 max-w-[180px] truncate">${it.descripcion || it.codigo}</td>
+                          <td class="p-2.5 text-center">
+                            ${it.modo === 'valery'
+                              ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 font-black rounded text-[10px]">⚡ Valery</span>'
+                              : '<span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 font-bold rounded text-[10px]">✅ Normal</span>'}
+                          </td>
+                          <td class="p-2.5 text-center font-bold text-blue-600">${it.cantidad_fisica || 0}</td>
+                          <td class="p-2.5 text-right font-mono font-bold text-emerald-600 pr-4">$${(parseFloat(it.subtotal_gmayor) || 0).toFixed(2)}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            `;
+          }).join('')}
+        </div>
+
+        <!-- Footer -->
+        <div class="p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-700">
+          <button id="return-to-pending-from-sent-bottom-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-md text-sm">
+            ← Volver a Pendientes
+          </button>
+        </div>
+      </div>
+    `;
+
+    container.querySelector('#return-to-pending-from-sent-top-btn')?.addEventListener('click', () => {
+      currentActiveTab = 'pending';
+      renderInventoryViews();
+    });
+    container.querySelector('#return-to-pending-from-sent-bottom-btn')?.addEventListener('click', () => {
+      currentActiveTab = 'pending';
+      renderInventoryViews();
+    });
   }
 
   /**
@@ -2876,6 +3182,24 @@
     } catch (e) {}
   }
 
+  async function switchToSentTab(dep) {
+    if (dep) {
+      window.currentDepartment = `inv_${dep}`;
+      document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.dept === `inv_${dep}`) {
+          btn.classList.add('active');
+        }
+      });
+    }
+    currentActiveTab = 'sent';
+    renderInventoryViews();
+    try {
+      await loadInventoryFilterConfig();
+      renderInventoryViews();
+    } catch (e) {}
+  }
+
   // ============================================================
   // SINCRONIZACIÓN MULTI-DISPOSITIVO EN TIEMPO REAL / FONDO
   // ============================================================
@@ -2912,13 +3236,15 @@
       try {
         const prevV = JSON.stringify(currentFilterConfig.valeryProducts || {});
         const prevR = JSON.stringify(currentFilterConfig.readyProducts || {});
+        const prevS = JSON.stringify(currentFilterConfig.sentProducts || {});
         
         await loadInventoryFilterConfig();
 
         const newV = JSON.stringify(currentFilterConfig.valeryProducts || {});
         const newR = JSON.stringify(currentFilterConfig.readyProducts || {});
+        const newS = JSON.stringify(currentFilterConfig.sentProducts || {});
 
-        if (prevV !== newV || prevR !== newR) {
+        if (prevV !== newV || prevR !== newR || prevS !== newS) {
           console.log('[INV-SYNC] 🔄 Sincronización en segundo plano: actualización recibida de otro dispositivo');
           updateInventoryHeaderCounters();
           if (window.currentUserRole === 'inventario') {
@@ -2944,6 +3270,7 @@
     getReadyProducts: getReadyProductsForDeposit,
     getValeryProducts: getValeryProductsForDeposit,
     getPendingProducts: getPendingProductsForDeposit,
+    getSentProducts: getSentProductsForDeposit,
     markAsReady: markProductAsReady,
     markAsValery: markProductAsValery,
     unmarkReady: unmarkProductReady,
@@ -2958,6 +3285,7 @@
     switchToReadyTab: switchToReadyTab,
     switchToPendingTab: switchToPendingTab,
     switchToValeryTab: switchToValeryTab,
+    switchToSentTab: switchToSentTab,
     exportValeryExcel: exportValeryExcel,
     openSubmitModal: (dep) => {
       const currentDep = (dep || getCurrentDeposit()).trim().toUpperCase();
