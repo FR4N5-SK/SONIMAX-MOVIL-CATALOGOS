@@ -25,6 +25,9 @@ ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS filter_deposits JSO
 ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS filter_settings JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE public.inventory_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
+-- 1.1 Asegurar columna opcional de modo_conteo en inventory_products
+ALTER TABLE public.inventory_products ADD COLUMN IF NOT EXISTS modo_conteo TEXT DEFAULT 'normal';
+
 -- 2. Configurar permisos de inventory_config (deshabilitar RLS para permitir guardar filtros entre dispositivos)
 ALTER TABLE public.inventory_config DISABLE ROW LEVEL SECURITY;
 

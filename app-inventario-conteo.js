@@ -21,7 +21,7 @@
   const STORAGE_VALERY_PREFIX = 'sonimax_inv_valery_dep_';
   const STORAGE_SESSIONS_BACKUP = 'sonimax_inv_sessions_history_v1';
 
-  // Configuración predeterminada de filtros
+  // Configuración predeterminada de filtros y estado global de conteo
   const DEFAULT_FILTER_CONFIG = {
     active: false,
     minPrice: 0, // Sobre precio_gmayor
@@ -31,7 +31,9 @@
     minTotalValue: 0, // Sumatoria de cantidad * precio GMayor >= monto (ej. $700)
     sortByPrice: 'none',   // [NUEVO] 'none' | 'desc' (mayor a menor) | 'asc' (menor a mayor)
     productLimit: 0,       // [NUEVO] 0 = sin límite, N = mostrar los primeros N productos
-    deposits: ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA']
+    deposits: ['A', 'B', 'C', 'D', 'E', 'PLANTA BAJA', 'PISO VENTA'],
+    valeryProducts: {},    // [GLOBAL EN NUBE] { [deposito]: [items...] }
+    readyProducts: {}      // [GLOBAL EN NUBE] { [deposito]: [items...] }
   };
 
   // Estado en memoria
@@ -139,6 +141,31 @@
             }
             if (data.filter_settings && typeof data.filter_settings === 'object') {
               currentFilterConfig = { ...currentFilterConfig, ...data.filter_settings };
+
+              // Sincronizar listas globales de Valery en el almacenamiento local de este dispositivo
+              if (data.filter_settings.valeryProducts && typeof data.filter_settings.valeryProducts === 'object') {
+                currentFilterConfig.valeryProducts = data.filter_settings.valeryProducts;
+                for (const [dep, vList] of Object.entries(data.filter_settings.valeryProducts)) {
+                  if (Array.isArray(vList)) {
+                    try {
+                      localStorage.setItem(getStorageValeryKey(dep), JSON.stringify(vList));
+                    } catch (e) {}
+                  }
+                }
+              }
+
+              // Sincronizar listas globales de Listos en el almacenamiento local de este dispositivo
+              if (data.filter_settings.readyProducts && typeof data.filter_settings.readyProducts === 'object') {
+                currentFilterConfig.readyProducts = data.filter_settings.readyProducts;
+                for (const [dep, rList] of Object.entries(data.filter_settings.readyProducts)) {
+                  if (Array.isArray(rList)) {
+                    try {
+                      localStorage.setItem(getStorageReadyKey(dep), JSON.stringify(rList));
+                    } catch (e) {}
+                  }
+                }
+              }
+
               updated = true;
             }
 
@@ -274,6 +301,10 @@
   /**
    * Obtiene la lista de productos en modo "Pasar Cantidad Valery" para un depósito
    */
+  /**
+   * Obtiene la lista de productos en modo "Pasar Cantidad Valery" para un depósito
+   * Sincronizado globalmente entre dispositivos
+   */
   function getValeryProductsForDeposit(deposito) {
     const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
     let list = [];
@@ -282,48 +313,24 @@
       const data = localStorage.getItem(key);
       list = data ? JSON.parse(data) : [];
     } catch (e) {
-      console.error('[INV-VALERY] Error leyendo productos valery:', e);
       list = [];
     }
 
-    // Sincronizar automáticamente si en inventoryDataMap algún producto está marcado como modo valery
-    if (window.inventoryDataMap && window.allProducts && cleanDep !== 'UNASSIGNED') {
-      const existingCodes = new Set(list.map(it => it.codigo));
-      let modified = false;
-
-      window.inventoryDataMap.forEach((invData, pCode) => {
-        const itemDep = (invData.deposito || '').trim().toUpperCase();
-        const isValeryMode = invData.modo_conteo === 'valery' || invData.pasar_valery === true || invData.modo === 'valery';
-        if (itemDep === cleanDep && isValeryMode && !existingCodes.has(pCode)) {
-          const qty = parseInt(invData.cantidad_fisica || 0);
-          const product = window.allProducts.find(p => (p.codigo || '').trim().toUpperCase() === pCode);
-          const stockSistema = product ? parseInt(product.stock || 0) : 0;
-          const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
-          const descripcion = product ? (product.nombre || product.descripcion || pCode) : pCode;
-
-          list.push({
-            codigo: pCode,
-            descripcion: descripcion,
-            deposito: cleanDep,
-            cantidad_fisica: qty,
-            stock_sistema: stockSistema,
-            diferencia: qty - stockSistema,
-            precio_gmayor: precioGMayor,
-            subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
-            timestamp: new Date().toISOString(),
-            hora: '--:--',
-            modo: 'valery'
-          });
-          existingCodes.add(pCode);
-          modified = true;
-        }
-      });
-
-      if (modified) {
-        try {
-          const key = getStorageValeryKey(cleanDep);
-          localStorage.setItem(key, JSON.stringify(list));
-        } catch (e) {}
+    // Sincronizar y fusionar con datos globales de la nube en memoria
+    if (currentFilterConfig && currentFilterConfig.valeryProducts && currentFilterConfig.valeryProducts[cleanDep]) {
+      const cloudList = currentFilterConfig.valeryProducts[cleanDep];
+      if (Array.isArray(cloudList) && cloudList.length > 0) {
+        const map = new Map();
+        cloudList.forEach(it => {
+          if (it && it.codigo) map.set(it.codigo.trim().toUpperCase(), it);
+        });
+        list.forEach(it => {
+          if (it && it.codigo) {
+            const c = it.codigo.trim().toUpperCase();
+            if (!map.has(c)) map.set(c, it);
+          }
+        });
+        list = Array.from(map.values());
       }
     }
 
@@ -331,21 +338,53 @@
   }
 
   /**
-   * Guarda la lista de productos valery para un depósito
+   * Guarda la lista de productos valery para un depósito tanto local como en la nube global
    */
-  function saveValeryProductsForDeposit(deposito, list) {
+  async function saveValeryProductsForDeposit(deposito, list, syncCloud = true) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
     try {
-      const key = getStorageValeryKey(deposito);
+      const key = getStorageValeryKey(cleanDep);
       localStorage.setItem(key, JSON.stringify(list));
-      if (window.renderDepartments) window.renderDepartments();
-      updateInventoryHeaderCounters();
     } catch (e) {
       console.error('[INV-VALERY] Error guardando productos valery:', e);
+    }
+
+    if (!currentFilterConfig.valeryProducts) currentFilterConfig.valeryProducts = {};
+    currentFilterConfig.valeryProducts[cleanDep] = list;
+
+    if (window.renderDepartments) window.renderDepartments();
+    updateInventoryHeaderCounters();
+
+    // Sincronizar en la nube global (Supabase) para que aparezca en TODOS los dispositivos
+    if (syncCloud) {
+      try {
+        const clients = getActiveSupabaseClients();
+        for (const client of clients) {
+          try {
+            const { data } = await client
+              .from('inventory_config')
+              .select('filter_settings')
+              .eq('id', 1)
+              .maybeSingle();
+            if (data && data.filter_settings && data.filter_settings.valeryProducts) {
+              currentFilterConfig.valeryProducts = {
+                ...data.filter_settings.valeryProducts,
+                [cleanDep]: list
+              };
+            }
+            break;
+          } catch (rErr) {}
+        }
+        await saveInventoryFilterConfig({ valeryProducts: currentFilterConfig.valeryProducts });
+      } catch (e) {
+        console.warn('[INV-VALERY] Aviso sincronizando valery a Supabase:', e);
+      }
     }
   }
 
   /**
    * Obtiene la lista de productos listos para un depósito en la jornada actual
+   * Sincronizado globalmente entre dispositivos
    */
   function getReadyProductsForDeposit(deposito) {
     const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
@@ -355,49 +394,24 @@
       const data = localStorage.getItem(key);
       list = data ? JSON.parse(data) : [];
     } catch (e) {
-      console.error('[INV-READY] Error leyendo productos listos:', e);
       list = [];
     }
 
-    // Sincronizar automáticamente con productos que ya tienen cantidad física registrada en la base de datos
-    if (window.inventoryDataMap && window.allProducts && cleanDep !== 'UNASSIGNED') {
-      const existingCodes = new Set(list.map(it => it.codigo));
-      const valeryCodes = new Set(getValeryProductsForDeposit(cleanDep).map(it => it.codigo));
-      let modified = false;
-
-      window.inventoryDataMap.forEach((invData, pCode) => {
-        const itemDep = (invData.deposito || '').trim().toUpperCase();
-        const qty = parseInt(invData.cantidad_fisica || 0);
-        const isValeryMode = invData.modo_conteo === 'valery' || invData.pasar_valery === true || invData.modo === 'valery';
-        if (itemDep === cleanDep && qty > 0 && !isValeryMode && !existingCodes.has(pCode) && !valeryCodes.has(pCode)) {
-          const product = window.allProducts.find(p => (p.codigo || '').trim().toUpperCase() === pCode);
-          const stockSistema = product ? parseInt(product.stock || 0) : 0;
-          const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
-          const descripcion = product ? (product.nombre || product.descripcion || pCode) : pCode;
-
-          list.push({
-            codigo: pCode,
-            descripcion: descripcion,
-            deposito: cleanDep,
-            cantidad_fisica: qty,
-            stock_sistema: stockSistema,
-            diferencia: qty - stockSistema,
-            precio_gmayor: precioGMayor,
-            subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
-            timestamp: new Date().toISOString(),
-            hora: '--:--',
-            modo: 'normal'
-          });
-          existingCodes.add(pCode);
-          modified = true;
-        }
-      });
-
-      if (modified) {
-        try {
-          const key = getStorageReadyKey(cleanDep);
-          localStorage.setItem(key, JSON.stringify(list));
-        } catch (e) {}
+    // Sincronizar y fusionar con datos globales de la nube en memoria
+    if (currentFilterConfig && currentFilterConfig.readyProducts && currentFilterConfig.readyProducts[cleanDep]) {
+      const cloudList = currentFilterConfig.readyProducts[cleanDep];
+      if (Array.isArray(cloudList) && cloudList.length > 0) {
+        const map = new Map();
+        cloudList.forEach(it => {
+          if (it && it.codigo) map.set(it.codigo.trim().toUpperCase(), it);
+        });
+        list.forEach(it => {
+          if (it && it.codigo) {
+            const c = it.codigo.trim().toUpperCase();
+            if (!map.has(c)) map.set(c, it);
+          }
+        });
+        list = Array.from(map.values());
       }
     }
 
@@ -405,16 +419,47 @@
   }
 
   /**
-   * Guarda la lista de productos listos para un depósito
+   * Guarda la lista de productos listos para un depósito tanto local como en la nube global
    */
-  function saveReadyProductsForDeposit(deposito, list) {
+  async function saveReadyProductsForDeposit(deposito, list, syncCloud = true) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
     try {
-      const key = getStorageReadyKey(deposito);
+      const key = getStorageReadyKey(cleanDep);
       localStorage.setItem(key, JSON.stringify(list));
-      if (window.renderDepartments) window.renderDepartments();
-      updateInventoryHeaderCounters();
     } catch (e) {
       console.error('[INV-READY] Error guardando productos listos:', e);
+    }
+
+    if (!currentFilterConfig.readyProducts) currentFilterConfig.readyProducts = {};
+    currentFilterConfig.readyProducts[cleanDep] = list;
+
+    if (window.renderDepartments) window.renderDepartments();
+    updateInventoryHeaderCounters();
+
+    // Sincronizar en la nube global (Supabase) para que aparezca en TODOS los dispositivos
+    if (syncCloud) {
+      try {
+        const clients = getActiveSupabaseClients();
+        for (const client of clients) {
+          try {
+            const { data } = await client
+              .from('inventory_config')
+              .select('filter_settings')
+              .eq('id', 1)
+              .maybeSingle();
+            if (data && data.filter_settings && data.filter_settings.readyProducts) {
+              currentFilterConfig.readyProducts = {
+                ...data.filter_settings.readyProducts,
+                [cleanDep]: list
+              };
+            }
+            break;
+          } catch (rErr) {}
+        }
+        await saveInventoryFilterConfig({ readyProducts: currentFilterConfig.readyProducts });
+      } catch (e) {
+        console.warn('[INV-READY] Aviso sincronizando listos a Supabase:', e);
+      }
     }
   }
 
@@ -462,16 +507,17 @@
     if (!window.allProducts || window.allProducts.length === 0) return [];
     const currentDep = (deposito || '').trim().toUpperCase();
     const readyList   = getReadyProductsForDeposit(currentDep);
-    const readyCodes  = new Set(readyList.map(it => it.codigo));
+    const readyCodes  = new Set(readyList.map(it => (it.codigo || '').trim().toUpperCase()));
     const valeryList  = getValeryProductsForDeposit(currentDep);
-    const valeryCodes = new Set(valeryList.map(it => it.codigo));
+    const valeryCodes = new Set(valeryList.map(it => (it.codigo || '').trim().toUpperCase()));
 
     // Determina si un producto ya fue contado / listo / valery
     const isAlreadyCounted = (pCode) => {
-      if (readyCodes.has(pCode) || valeryCodes.has(pCode)) return true;
+      const clean = (pCode || '').trim().toUpperCase();
+      if (readyCodes.has(clean) || valeryCodes.has(clean)) return true;
       if (window.inventoryDataMap) {
-        const inv = window.inventoryDataMap.get(pCode);
-        if (inv && parseInt(inv.cantidad_fisica || 0) > 0) return true;
+        const inv = window.inventoryDataMap.get(clean);
+        if (inv && (parseInt(inv.cantidad_fisica || 0) > 0 || inv.pasar_valery)) return true;
       }
       return false;
     };
@@ -491,7 +537,7 @@
           if (itemDep !== currentDep) return false;
         }
 
-        if (currentDep !== 'UNASSIGNED' && isAlreadyCounted(pCode)) return false;
+        if (isAlreadyCounted(pCode)) return false;
 
         return true;
       });
@@ -514,7 +560,7 @@
 
       if (!isProductEligibleForInventory(p)) return false;
 
-      if (currentDep !== 'UNASSIGNED' && isAlreadyCounted(pCode)) return false;
+      if (isAlreadyCounted(pCode)) return false;
 
       return true;
     });
@@ -581,7 +627,7 @@
       if (window.supabaseClient) {
         await window.supabaseClient
           .from('inventory_products')
-          .update({ cantidad_fisica: qty, deposito: currentDep, modo_conteo: 'normal' })
+          .update({ cantidad_fisica: qty, deposito: currentDep })
           .eq('codigo', cleanCode);
       }
     } catch (err) {
@@ -662,8 +708,7 @@
           .from('inventory_products')
           .update({
             cantidad_fisica: qty,
-            deposito: currentDep,
-            modo_conteo: 'valery'
+            deposito: currentDep
           })
           .eq('codigo', cleanCode);
       }
@@ -765,7 +810,7 @@
       if (window.supabaseClient) {
         await window.supabaseClient
           .from('inventory_products')
-          .update({ cantidad_fisica: 0, modo_conteo: null })
+          .update({ cantidad_fisica: 0 })
           .eq('codigo', cleanCode);
       }
     } catch (e) {}
@@ -781,7 +826,7 @@
     const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
     let list = getValeryProductsForDeposit(currentDep);
     list = list.filter(item => item.codigo !== cleanCode);
-    saveValeryProductsForDeposit(currentDep, list);
+    saveValeryProductsForDeposit(currentDep, list, true);
 
     if (window.inventoryDataMap) {
       const itemData = window.inventoryDataMap.get(cleanCode);
@@ -796,7 +841,7 @@
       if (window.supabaseClient) {
         await window.supabaseClient
           .from('inventory_products')
-          .update({ cantidad_fisica: 0, modo_conteo: null })
+          .update({ cantidad_fisica: 0 })
           .eq('codigo', cleanCode);
       }
     } catch (e) {}
@@ -834,8 +879,12 @@
    * Vacía los productos listos de un depósito tras el envío de la jornada
    */
   function clearReadyProductsForDeposit(deposito) {
-    const key = getStorageReadyKey(deposito);
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    const key = getStorageReadyKey(cleanDep);
     localStorage.removeItem(key);
+    if (!currentFilterConfig.readyProducts) currentFilterConfig.readyProducts = {};
+    currentFilterConfig.readyProducts[cleanDep] = [];
+    saveInventoryFilterConfig({ readyProducts: currentFilterConfig.readyProducts }).catch(() => {});
     if (window.renderDepartments) window.renderDepartments();
     updateInventoryHeaderCounters();
   }
@@ -844,8 +893,12 @@
    * Vacía los productos valery de un depósito tras el envío de la jornada
    */
   function clearValeryProductsForDeposit(deposito) {
-    const key = getStorageValeryKey(deposito);
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    const key = getStorageValeryKey(cleanDep);
     localStorage.removeItem(key);
+    if (!currentFilterConfig.valeryProducts) currentFilterConfig.valeryProducts = {};
+    currentFilterConfig.valeryProducts[cleanDep] = [];
+    saveInventoryFilterConfig({ valeryProducts: currentFilterConfig.valeryProducts }).catch(() => {});
     if (window.renderDepartments) window.renderDepartments();
     updateInventoryHeaderCounters();
   }
@@ -940,8 +993,7 @@
             .from('inventory_products')
             .update({
               cantidad_fisica: item.cantidad_fisica,
-              deposito: currentDep,
-              modo_conteo: item.modo
+              deposito: currentDep
             })
             .eq('codigo', item.codigo);
         }
@@ -1516,19 +1568,34 @@
       </div>
     `;
 
-    document.getElementById('btn-inv-subview-pending')?.addEventListener('click', () => {
+    document.getElementById('btn-inv-subview-pending')?.addEventListener('click', async () => {
       currentActiveTab = 'pending';
       renderInventoryViews();
+      try {
+        await loadInventoryFilterConfig();
+        renderInventoryViews();
+        if (window.renderDepartments) window.renderDepartments();
+      } catch (e) {}
     });
 
-    document.getElementById('btn-inv-subview-ready')?.addEventListener('click', () => {
+    document.getElementById('btn-inv-subview-ready')?.addEventListener('click', async () => {
       currentActiveTab = 'ready';
       renderInventoryViews();
+      try {
+        await loadInventoryFilterConfig();
+        renderInventoryViews();
+        if (window.renderDepartments) window.renderDepartments();
+      } catch (e) {}
     });
 
-    document.getElementById('btn-inv-subview-valery')?.addEventListener('click', () => {
+    document.getElementById('btn-inv-subview-valery')?.addEventListener('click', async () => {
       currentActiveTab = 'valery';
       renderInventoryViews();
+      try {
+        await loadInventoryFilterConfig();
+        renderInventoryViews();
+        if (window.renderDepartments) window.renderDepartments();
+      } catch (e) {}
     });
 
     document.getElementById('btn-quick-submit-header')?.addEventListener('click', () => {
@@ -2755,7 +2822,7 @@
   // ============================================================
   // MÉTODOS PÚBLICOS DE NAVEGACIÓN
   // ============================================================
-  function switchToReadyTab(dep) {
+  async function switchToReadyTab(dep) {
     if (dep) {
       window.currentDepartment = `inv_${dep}`;
       document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
@@ -2767,9 +2834,13 @@
     }
     currentActiveTab = 'ready';
     renderInventoryViews();
+    try {
+      await loadInventoryFilterConfig();
+      renderInventoryViews();
+    } catch (e) {}
   }
 
-  function switchToPendingTab(dep) {
+  async function switchToPendingTab(dep) {
     if (dep) {
       window.currentDepartment = `inv_${dep}`;
       document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
@@ -2781,9 +2852,13 @@
     }
     currentActiveTab = 'pending';
     renderInventoryViews();
+    try {
+      await loadInventoryFilterConfig();
+      renderInventoryViews();
+    } catch (e) {}
   }
 
-  function switchToValeryTab(dep) {
+  async function switchToValeryTab(dep) {
     if (dep) {
       window.currentDepartment = `inv_${dep}`;
       document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
@@ -2795,6 +2870,66 @@
     }
     currentActiveTab = 'valery';
     renderInventoryViews();
+    try {
+      await loadInventoryFilterConfig();
+      renderInventoryViews();
+    } catch (e) {}
+  }
+
+  // ============================================================
+  // SINCRONIZACIÓN MULTI-DISPOSITIVO EN TIEMPO REAL / FONDO
+  // ============================================================
+  function initMultiDeviceSync() {
+    const clients = getActiveSupabaseClients();
+    clients.forEach((client, idx) => {
+      try {
+        if (client && typeof client.channel === 'function') {
+          client
+            .channel(`inventory_sync_realtime_${idx}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_config' }, async (payload) => {
+              console.log('[INV-SYNC] ⚡ Cambio en tiempo real detectado desde otro dispositivo:', payload);
+              await loadInventoryFilterConfig();
+              updateInventoryHeaderCounters();
+              if (window.currentUserRole === 'inventario') {
+                renderInventoryViews();
+                if (window.renderDepartments) window.renderDepartments();
+              }
+            })
+            .subscribe((status) => {
+              console.log(`[INV-SYNC] Canal realtime #${idx} estado:`, status);
+            });
+        }
+      } catch (subErr) {
+        console.warn('[INV-SYNC] No se pudo inicializar canal realtime:', subErr);
+      }
+    });
+
+    // Polling inteligente cada 6 segundos para garantizar sincronización en redes móviles
+    setInterval(async () => {
+      if (document.hidden) return; // Ahorrar datos y batería si la pestaña está en segundo plano
+      if (window.currentUserRole !== 'inventario' && window.currentUserRole !== 'admin') return;
+
+      try {
+        const prevV = JSON.stringify(currentFilterConfig.valeryProducts || {});
+        const prevR = JSON.stringify(currentFilterConfig.readyProducts || {});
+        
+        await loadInventoryFilterConfig();
+
+        const newV = JSON.stringify(currentFilterConfig.valeryProducts || {});
+        const newR = JSON.stringify(currentFilterConfig.readyProducts || {});
+
+        if (prevV !== newV || prevR !== newR) {
+          console.log('[INV-SYNC] 🔄 Sincronización en segundo plano: actualización recibida de otro dispositivo');
+          updateInventoryHeaderCounters();
+          if (window.currentUserRole === 'inventario') {
+            renderInventoryViews();
+            if (window.renderDepartments) window.renderDepartments();
+          }
+        }
+      } catch (pollErr) {
+        // Silenciar fallos de red esporádicos en móviles
+      }
+    }, 6000);
   }
 
   // ============================================================
@@ -2830,9 +2965,17 @@
     }
   };
 
-  // Carga inicial de configuración
+  // Carga inicial de configuración y activación de sincronización multi-dispositivo
   document.addEventListener('DOMContentLoaded', () => {
-    loadInventoryFilterConfig();
+    loadInventoryFilterConfig().then(() => {
+      initMultiDeviceSync();
+    });
   });
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(() => {
+      initMultiDeviceSync();
+    }, 1500);
+  }
 
 })();
