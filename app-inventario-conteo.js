@@ -18,6 +18,7 @@
   // ============================================================
   const STORAGE_FILTER_KEY = 'sonimax_inv_filter_config_v1';
   const STORAGE_READY_PREFIX = 'sonimax_inv_ready_dep_';
+  const STORAGE_VALERY_PREFIX = 'sonimax_inv_valery_dep_';
   const STORAGE_SESSIONS_BACKUP = 'sonimax_inv_sessions_history_v1';
 
   // Configuración predeterminada de filtros
@@ -35,7 +36,7 @@
 
   // Estado en memoria
   let currentFilterConfig = { ...DEFAULT_FILTER_CONFIG };
-  let currentActiveTab = 'pending'; // 'pending' | 'ready'
+  let currentActiveTab = 'pending'; // 'pending' | 'ready' | 'valery'
   let cachedSessions = [];
 
   // ============================================================
@@ -257,7 +258,7 @@
   }
 
   // ============================================================
-  // GESTIÓN DE PRODUCTOS LISTOS (ROL INVENTARIO)
+  // GESTIÓN DE PRODUCTOS LISTOS Y PASAR VALERY (ROL INVENTARIO)
   // ============================================================
 
   function getStorageReadyKey(deposito) {
@@ -265,18 +266,142 @@
     return STORAGE_READY_PREFIX + cleanDep;
   }
 
+  function getStorageValeryKey(deposito) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase().replace(/\s+/g, '_');
+    return STORAGE_VALERY_PREFIX + cleanDep;
+  }
+
+  /**
+   * Obtiene la lista de productos en modo "Pasar Cantidad Valery" para un depósito
+   */
+  function getValeryProductsForDeposit(deposito) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    let list = [];
+    try {
+      const key = getStorageValeryKey(cleanDep);
+      const data = localStorage.getItem(key);
+      list = data ? JSON.parse(data) : [];
+    } catch (e) {
+      console.error('[INV-VALERY] Error leyendo productos valery:', e);
+      list = [];
+    }
+
+    // Sincronizar automáticamente si en inventoryDataMap algún producto está marcado como modo valery
+    if (window.inventoryDataMap && window.allProducts && cleanDep !== 'UNASSIGNED') {
+      const existingCodes = new Set(list.map(it => it.codigo));
+      let modified = false;
+
+      window.inventoryDataMap.forEach((invData, pCode) => {
+        const itemDep = (invData.deposito || '').trim().toUpperCase();
+        const isValeryMode = invData.modo_conteo === 'valery' || invData.pasar_valery === true || invData.modo === 'valery';
+        if (itemDep === cleanDep && isValeryMode && !existingCodes.has(pCode)) {
+          const qty = parseInt(invData.cantidad_fisica || 0);
+          const product = window.allProducts.find(p => (p.codigo || '').trim().toUpperCase() === pCode);
+          const stockSistema = product ? parseInt(product.stock || 0) : 0;
+          const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
+          const descripcion = product ? (product.nombre || product.descripcion || pCode) : pCode;
+
+          list.push({
+            codigo: pCode,
+            descripcion: descripcion,
+            deposito: cleanDep,
+            cantidad_fisica: qty,
+            stock_sistema: stockSistema,
+            diferencia: qty - stockSistema,
+            precio_gmayor: precioGMayor,
+            subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
+            timestamp: new Date().toISOString(),
+            hora: '--:--',
+            modo: 'valery'
+          });
+          existingCodes.add(pCode);
+          modified = true;
+        }
+      });
+
+      if (modified) {
+        try {
+          const key = getStorageValeryKey(cleanDep);
+          localStorage.setItem(key, JSON.stringify(list));
+        } catch (e) {}
+      }
+    }
+
+    return list;
+  }
+
+  /**
+   * Guarda la lista de productos valery para un depósito
+   */
+  function saveValeryProductsForDeposit(deposito, list) {
+    try {
+      const key = getStorageValeryKey(deposito);
+      localStorage.setItem(key, JSON.stringify(list));
+      if (window.renderDepartments) window.renderDepartments();
+      updateInventoryHeaderCounters();
+    } catch (e) {
+      console.error('[INV-VALERY] Error guardando productos valery:', e);
+    }
+  }
+
   /**
    * Obtiene la lista de productos listos para un depósito en la jornada actual
    */
   function getReadyProductsForDeposit(deposito) {
+    const cleanDep = (deposito || 'unassigned').trim().toUpperCase();
+    let list = [];
     try {
-      const key = getStorageReadyKey(deposito);
+      const key = getStorageReadyKey(cleanDep);
       const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : [];
+      list = data ? JSON.parse(data) : [];
     } catch (e) {
       console.error('[INV-READY] Error leyendo productos listos:', e);
-      return [];
+      list = [];
     }
+
+    // Sincronizar automáticamente con productos que ya tienen cantidad física registrada en la base de datos
+    if (window.inventoryDataMap && window.allProducts && cleanDep !== 'UNASSIGNED') {
+      const existingCodes = new Set(list.map(it => it.codigo));
+      const valeryCodes = new Set(getValeryProductsForDeposit(cleanDep).map(it => it.codigo));
+      let modified = false;
+
+      window.inventoryDataMap.forEach((invData, pCode) => {
+        const itemDep = (invData.deposito || '').trim().toUpperCase();
+        const qty = parseInt(invData.cantidad_fisica || 0);
+        const isValeryMode = invData.modo_conteo === 'valery' || invData.pasar_valery === true || invData.modo === 'valery';
+        if (itemDep === cleanDep && qty > 0 && !isValeryMode && !existingCodes.has(pCode) && !valeryCodes.has(pCode)) {
+          const product = window.allProducts.find(p => (p.codigo || '').trim().toUpperCase() === pCode);
+          const stockSistema = product ? parseInt(product.stock || 0) : 0;
+          const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
+          const descripcion = product ? (product.nombre || product.descripcion || pCode) : pCode;
+
+          list.push({
+            codigo: pCode,
+            descripcion: descripcion,
+            deposito: cleanDep,
+            cantidad_fisica: qty,
+            stock_sistema: stockSistema,
+            diferencia: qty - stockSistema,
+            precio_gmayor: precioGMayor,
+            subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
+            timestamp: new Date().toISOString(),
+            hora: '--:--',
+            modo: 'normal'
+          });
+          existingCodes.add(pCode);
+          modified = true;
+        }
+      });
+
+      if (modified) {
+        try {
+          const key = getStorageReadyKey(cleanDep);
+          localStorage.setItem(key, JSON.stringify(list));
+        } catch (e) {}
+      }
+    }
+
+    return list;
   }
 
   /**
@@ -296,7 +421,6 @@
   /**
    * Construye el Set de códigos elegibles del catálogo GLOBAL aplicando
    * orden y límite antes de filtrar por depósito.
-   * Se recalcula solo cuando cambia la configuración (memoizado por referencia).
    */
   function getGlobalEligibleCodes() {
     if (!window.allProducts || window.allProducts.length === 0) return null;
@@ -331,20 +455,31 @@
 
   /**
    * Obtiene la lista calculada de pendientes de un depósito.
-   * Cuando hay límite/orden global, primero selecciona del catálogo global
-   * (ej. los 200 más caros) y luego filtra los que pertenecen al depósito.
+   * EXCLUYE permanentemente productos que ya tienen cantidad física colocada,
+   * que estén en "Productos Listos" o en "Pasar Cantidad Valery".
    */
   function getPendingProductsForDeposit(deposito) {
     if (!window.allProducts || window.allProducts.length === 0) return [];
     const currentDep = (deposito || '').trim().toUpperCase();
     const readyList   = getReadyProductsForDeposit(currentDep);
     const readyCodes  = new Set(readyList.map(it => it.codigo));
+    const valeryList  = getValeryProductsForDeposit(currentDep);
+    const valeryCodes = new Set(valeryList.map(it => it.codigo));
+
+    // Determina si un producto ya fue contado / listo / valery
+    const isAlreadyCounted = (pCode) => {
+      if (readyCodes.has(pCode) || valeryCodes.has(pCode)) return true;
+      if (window.inventoryDataMap) {
+        const inv = window.inventoryDataMap.get(pCode);
+        if (inv && parseInt(inv.cantidad_fisica || 0) > 0) return true;
+      }
+      return false;
+    };
 
     const globalScope = getGlobalEligibleCodes();
 
     if (globalScope) {
       // --- Modo con límite/orden global ---
-      // Usamos el array ya ordenado globalmente y filtramos por depósito
       return globalScope.ordered.filter(p => {
         const pCode  = (p.codigo || '').trim().toUpperCase();
         const invData = window.inventoryDataMap ? window.inventoryDataMap.get(pCode) : null;
@@ -356,13 +491,13 @@
           if (itemDep !== currentDep) return false;
         }
 
-        if (currentDep !== 'UNASSIGNED' && readyCodes.has(pCode)) return false;
+        if (currentDep !== 'UNASSIGNED' && isAlreadyCounted(pCode)) return false;
 
         return true;
       });
     }
 
-    // --- Modo sin límite/orden global (comportamiento original) ---
+    // --- Modo sin límite/orden global ---
     return window.allProducts.filter(p => {
       const pCode   = (p.codigo || '').trim().toUpperCase();
       const invData = window.inventoryDataMap ? window.inventoryDataMap.get(pCode) : null;
@@ -379,7 +514,7 @@
 
       if (!isProductEligibleForInventory(p)) return false;
 
-      if (currentDep !== 'UNASSIGNED' && readyCodes.has(pCode)) return false;
+      if (currentDep !== 'UNASSIGNED' && isAlreadyCounted(pCode)) return false;
 
       return true;
     });
@@ -392,6 +527,14 @@
     const cleanCode = (productCode || '').trim().toUpperCase();
     const qty = parseInt(cantidadFisica) || 0;
     const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+
+    // 1. Si estaba en Valery, retirarlo de allí para evitar duplicados
+    let valList = getValeryProductsForDeposit(currentDep);
+    const inValIdx = valList.findIndex(it => it.codigo === cleanCode);
+    if (inValIdx > -1) {
+      valList.splice(inValIdx, 1);
+      saveValeryProductsForDeposit(currentDep, valList);
+    }
 
     // Buscar datos maestros del producto
     const product = (window.allProducts || []).find(p => (p.codigo || '').trim().toUpperCase() === cleanCode);
@@ -412,7 +555,8 @@
       precio_gmayor: precioGMayor,
       subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
       timestamp: new Date().toISOString(),
-      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+      modo: 'normal'
     };
 
     if (existingIndex > -1) {
@@ -428,6 +572,8 @@
       const itemData = window.inventoryDataMap.get(cleanCode) || { codigo: cleanCode, deposito: currentDep };
       itemData.cantidad_fisica = qty;
       itemData.deposito = currentDep;
+      itemData.modo_conteo = 'normal';
+      delete itemData.pasar_valery;
       window.inventoryDataMap.set(cleanCode, itemData);
     }
 
@@ -435,7 +581,7 @@
       if (window.supabaseClient) {
         await window.supabaseClient
           .from('inventory_products')
-          .update({ cantidad_fisica: qty, deposito: currentDep })
+          .update({ cantidad_fisica: qty, deposito: currentDep, modo_conteo: 'normal' })
           .eq('codigo', cleanCode);
       }
     } catch (err) {
@@ -446,6 +592,85 @@
     showReadyToast(cleanCode, qty, currentDep, list.length);
 
     return readyItem;
+  }
+
+  /**
+   * Agrega o actualiza un producto en el apartado especial "Pasar Cantidad Valery"
+   */
+  async function markProductAsValery(productCode, cantidadFisica, deposito) {
+    const cleanCode = (productCode || '').trim().toUpperCase();
+    const qty = parseInt(cantidadFisica) || 0;
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+
+    // 1. Si estaba en la lista de listos normales, retirarlo para evitar duplicados
+    let readyList = getReadyProductsForDeposit(currentDep);
+    const inReadyIdx = readyList.findIndex(it => it.codigo === cleanCode);
+    if (inReadyIdx > -1) {
+      readyList.splice(inReadyIdx, 1);
+      saveReadyProductsForDeposit(currentDep, readyList);
+    }
+
+    // Buscar maestro del producto
+    const product = (window.allProducts || []).find(p => (p.codigo || '').trim().toUpperCase() === cleanCode);
+    const stockSistema = product ? parseInt(product.stock || 0) : 0;
+    const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
+    const descripcion = product ? (product.nombre || product.descripcion || cleanCode) : cleanCode;
+
+    const valeryList = getValeryProductsForDeposit(currentDep);
+    const existingIndex = valeryList.findIndex(item => item.codigo === cleanCode);
+
+    const valeryItem = {
+      codigo: cleanCode,
+      descripcion: descripcion,
+      deposito: currentDep,
+      cantidad_fisica: qty,
+      stock_sistema: stockSistema,
+      diferencia: qty - stockSistema,
+      precio_gmayor: precioGMayor,
+      subtotal_gmayor: Math.round(qty * precioGMayor * 100) / 100,
+      timestamp: new Date().toISOString(),
+      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+      modo: 'valery'
+    };
+
+    if (existingIndex > -1) {
+      valeryList[existingIndex] = valeryItem;
+    } else {
+      valeryList.push(valeryItem);
+    }
+
+    saveValeryProductsForDeposit(currentDep, valeryList);
+
+    // Actualizar mapa en memoria
+    if (window.inventoryDataMap) {
+      const itemData = window.inventoryDataMap.get(cleanCode) || { codigo: cleanCode, deposito: currentDep };
+      itemData.cantidad_fisica = qty;
+      itemData.deposito = currentDep;
+      itemData.modo_conteo = 'valery';
+      itemData.pasar_valery = true;
+      window.inventoryDataMap.set(cleanCode, itemData);
+    }
+
+    // Guardar en Supabase
+    try {
+      if (window.supabaseClient) {
+        await window.supabaseClient
+          .from('inventory_products')
+          .update({
+            cantidad_fisica: qty,
+            deposito: currentDep,
+            modo_conteo: 'valery'
+          })
+          .eq('codigo', cleanCode);
+      }
+    } catch (err) {
+      console.warn('[INV-VALERY] Advertencia actualizando inventory_products:', err);
+    }
+
+    // Mostrar aviso flotante interactivo
+    showValeryToast(cleanCode, qty, currentDep, valeryList.length);
+
+    return valeryItem;
   }
 
   function showReadyToast(code, qty, dep, totalReady) {
@@ -481,15 +706,123 @@
     }, 4000);
   }
 
+  function showValeryToast(code, qty, dep, totalValery) {
+    let toast = document.getElementById('inventory-valery-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'inventory-valery-toast';
+      toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 transform translate-y-20 opacity-0';
+      document.body.appendChild(toast);
+    }
+
+    toast.innerHTML = `
+      <div class="bg-gray-900/95 backdrop-blur text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-purple-500/50 flex items-center space-x-3 text-sm">
+        <span class="text-xl">⚡</span>
+        <div>
+          <p class="font-bold"><code class="font-mono text-purple-300">${code}</code> añadido a <span class="text-purple-400 font-black">Pasar Cantidad Valery</span> (${qty} pzs)</p>
+          <p class="text-[11px] text-gray-300">Depósito ${dep} • ${totalValery} productos en modo Valery</p>
+        </div>
+        <button onclick="window.SonimaxInventoryConteo.switchToValeryTab('${dep}')" class="ml-2 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow">
+          Ver Valery ➔
+        </button>
+      </div>
+    `;
+
+    toast.classList.remove('translate-y-20', 'opacity-0');
+    toast.classList.add('translate-y-0', 'opacity-100');
+
+    setTimeout(() => {
+      if (toast) {
+        toast.classList.add('translate-y-20', 'opacity-0');
+        toast.classList.remove('translate-y-0', 'opacity-100');
+      }
+    }, 4000);
+  }
+
   /**
    * Devuelve un producto de "Listos" a "Pendientes"
    */
-  function unmarkProductReady(productCode, deposito) {
+  async function unmarkProductReady(productCode, deposito) {
     const cleanCode = (productCode || '').trim().toUpperCase();
     const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
     let list = getReadyProductsForDeposit(currentDep);
     list = list.filter(item => item.codigo !== cleanCode);
     saveReadyProductsForDeposit(currentDep, list);
+
+    if (window.inventoryDataMap) {
+      const itemData = window.inventoryDataMap.get(cleanCode);
+      if (itemData) {
+        itemData.cantidad_fisica = 0;
+        itemData.modo_conteo = 'normal';
+      }
+    }
+
+    try {
+      if (window.supabaseClient) {
+        await window.supabaseClient
+          .from('inventory_products')
+          .update({ cantidad_fisica: 0, modo_conteo: null })
+          .eq('codigo', cleanCode);
+      }
+    } catch (e) {}
+
+    renderInventoryViews();
+  }
+
+  /**
+   * Devuelve un producto de "Pasar Cantidad Valery" a "Pendientes"
+   */
+  async function unmarkProductValery(productCode, deposito) {
+    const cleanCode = (productCode || '').trim().toUpperCase();
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+    let list = getValeryProductsForDeposit(currentDep);
+    list = list.filter(item => item.codigo !== cleanCode);
+    saveValeryProductsForDeposit(currentDep, list);
+
+    if (window.inventoryDataMap) {
+      const itemData = window.inventoryDataMap.get(cleanCode);
+      if (itemData) {
+        itemData.cantidad_fisica = 0;
+        delete itemData.modo_conteo;
+        delete itemData.pasar_valery;
+      }
+    }
+
+    try {
+      if (window.supabaseClient) {
+        await window.supabaseClient
+          .from('inventory_products')
+          .update({ cantidad_fisica: 0, modo_conteo: null })
+          .eq('codigo', cleanCode);
+      }
+    } catch (e) {}
+
+    renderInventoryViews();
+  }
+
+  /**
+   * Traslada un producto de "Pasar Cantidad Valery" a "Listos Normal"
+   */
+  async function transferValeryToReady(productCode, deposito) {
+    const cleanCode = (productCode || '').trim().toUpperCase();
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+    const valList = getValeryProductsForDeposit(currentDep);
+    const item = valList.find(it => it.codigo === cleanCode);
+    const qty = item ? item.cantidad_fisica : 0;
+    await markProductAsReady(cleanCode, qty, currentDep);
+    renderInventoryViews();
+  }
+
+  /**
+   * Traslada un producto de "Listos Normal" a "Pasar Cantidad Valery"
+   */
+  async function transferReadyToValery(productCode, deposito) {
+    const cleanCode = (productCode || '').trim().toUpperCase();
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+    const readyList = getReadyProductsForDeposit(currentDep);
+    const item = readyList.find(it => it.codigo === cleanCode);
+    const qty = item ? item.cantidad_fisica : 0;
+    await markProductAsValery(cleanCode, qty, currentDep);
     renderInventoryViews();
   }
 
@@ -503,20 +836,32 @@
     updateInventoryHeaderCounters();
   }
 
+  /**
+   * Vacía los productos valery de un depósito tras el envío de la jornada
+   */
+  function clearValeryProductsForDeposit(deposito) {
+    const key = getStorageValeryKey(deposito);
+    localStorage.removeItem(key);
+    if (window.renderDepartments) window.renderDepartments();
+    updateInventoryHeaderCounters();
+  }
+
   // ============================================================
   // ENVÍO FINAL DE JORNADA: GUARDAR COMO PEDIDO / SESIÓN
   // ============================================================
 
   /**
-   * Envía las cantidades acumuladas del depósito y las guarda en la base de datos
+   * Envía las cantidades acumuladas del depósito (Listos Normal + Pasar Valery) y las guarda en la base de datos
    */
   async function submitInventorySession(deposito, notas = '') {
     const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
-    const readyItems = getReadyProductsForDeposit(currentDep);
+    const readyItems = getReadyProductsForDeposit(currentDep).map(it => ({ ...it, modo: 'normal' }));
+    const valeryItems = getValeryProductsForDeposit(currentDep).map(it => ({ ...it, modo: 'valery' }));
+    const allItems = [...readyItems, ...valeryItems];
 
-    if (readyItems.length === 0) {
-      alert('⚠️ No hay productos en el apartado de "Listos" para enviar en este depósito.');
-      return { success: false, message: 'Sin productos listos' };
+    if (allItems.length === 0) {
+      alert('⚠️ No hay productos en "Listos" ni en "Pasar Cantidad Valery" para enviar en este depósito.');
+      return { success: false, message: 'Sin productos para enviar' };
     }
 
     const currentUser = window.currentUser || {};
@@ -524,11 +869,13 @@
     const userName = currentUser.name || 'Personal de Inventario';
     const userUsername = currentUser.username || currentUser.email || 'inventario';
 
-    // Calcular totales
-    const totalItems = readyItems.length;
-    const totalPiezas = readyItems.reduce((acc, item) => acc + (parseInt(item.cantidad_fisica) || 0), 0);
-    const totalValorGMayor = readyItems.reduce((acc, item) => acc + (parseFloat(item.subtotal_gmayor) || 0), 0);
-    const diferenciaTotal = readyItems.reduce((acc, item) => acc + (parseInt(item.diferencia) || 0), 0);
+    // Calcular totales combinados
+    const totalItems = allItems.length;
+    const totalReadyItems = readyItems.length;
+    const totalValeryItems = valeryItems.length;
+    const totalPiezas = allItems.reduce((acc, item) => acc + (parseInt(item.cantidad_fisica) || 0), 0);
+    const totalValorGMayor = allItems.reduce((acc, item) => acc + (parseFloat(item.subtotal_gmayor) || 0), 0);
+    const diferenciaTotal = allItems.reduce((acc, item) => acc + (parseInt(item.diferencia) || 0), 0);
 
     const now = new Date();
     const fecha = now.toISOString().split('T')[0];
@@ -543,10 +890,12 @@
       user_username: userUsername,
       deposito: currentDep,
       total_items: totalItems,
+      total_ready_items: totalReadyItems,
+      total_valery_items: totalValeryItems,
       total_piezas: totalPiezas,
       total_valor_gmayor: Math.round(totalValorGMayor * 100) / 100,
       diferencia_total: diferenciaTotal,
-      items: readyItems,
+      items: allItems,
       notas: notas,
       estado: 'enviado',
       fecha: fecha,
@@ -582,12 +931,13 @@
     // Sincronizar cantidades maestras en inventory_products
     for (const client of clients) {
       try {
-        for (const item of readyItems) {
+        for (const item of allItems) {
           await client
             .from('inventory_products')
             .update({
               cantidad_fisica: item.cantidad_fisica,
-              deposito: currentDep
+              deposito: currentDep,
+              modo_conteo: item.modo
             })
             .eq('codigo', item.codigo);
         }
@@ -596,8 +946,9 @@
       }
     }
 
-    // Limpiar listos de ese depósito tras envío exitoso
+    // Limpiar listos y valery de ese depósito tras envío exitoso
     clearReadyProductsForDeposit(currentDep);
+    clearValeryProductsForDeposit(currentDep);
     currentActiveTab = 'pending';
     if (window.filterByDepartment) {
       window.filterByDepartment(`inv_${currentDep}`);
@@ -1060,16 +1411,23 @@
 
     const readyProducts = getReadyProductsForDeposit(currentDep);
     const readyCount = readyProducts.length;
-    const totalPiezas = readyProducts.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+    const readyPiezas = readyProducts.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+
+    const valeryProducts = getValeryProductsForDeposit(currentDep);
+    const valeryCount = valeryProducts.length;
+    const valeryPiezas = valeryProducts.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+
+    const totalPiezas = readyPiezas + valeryPiezas;
+    const totalCounted = readyCount + valeryCount;
 
     // Calcular cuántos pendientes hay
     const pendingList = getPendingProductsForDeposit(currentDep);
     const pendingCount = pendingList.length;
-    const totalDeposit = pendingCount + readyCount;
-    const percent = totalDeposit > 0 ? Math.round((readyCount / totalDeposit) * 100) : 0;
+    const totalDeposit = pendingCount + totalCounted;
+    const percent = totalDeposit > 0 ? Math.round((totalCounted / totalDeposit) * 100) : 0;
 
     // Actualizar barra flotante inferior fija
-    renderInventoryFloatingBar(currentDep, readyCount, totalPiezas);
+    renderInventoryFloatingBar(currentDep, totalCounted, totalPiezas);
 
     if (!headerBar) {
       headerBar = document.createElement('div');
@@ -1118,20 +1476,24 @@
             <h3 class="text-xl sm:text-2xl font-black text-gray-800 dark:text-white mt-1">Conteo Físico - Depósito ${currentDep}</h3>
           </div>
 
-          <!-- Pestañas de Vista: Pendientes vs Listos -->
+          <!-- Pestañas de Vista: Pendientes vs Listos vs Pasar Cantidad Valery -->
           <div class="flex flex-wrap items-center gap-2 self-stretch md:self-auto">
-            <button id="btn-inv-subview-pending" class="flex-1 sm:flex-none px-5 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-2 ${currentActiveTab === 'pending' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25 ring-2 ring-blue-600' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200'}">
+            <button id="btn-inv-subview-pending" class="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-1.5 ${currentActiveTab === 'pending' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25 ring-2 ring-blue-600' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200'}">
               <span>📋 Pendientes</span>
               <span class="px-2 py-0.5 rounded-full text-xs ${currentActiveTab === 'pending' ? 'bg-white text-blue-600' : 'bg-gray-200 text-gray-700'}">${pendingCount}</span>
             </button>
-            <button id="btn-inv-subview-ready" class="flex-1 sm:flex-none px-5 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-2 ${currentActiveTab === 'ready' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-600' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100'}">
-              <span>✅ Productos Listos</span>
+            <button id="btn-inv-subview-ready" class="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-1.5 ${currentActiveTab === 'ready' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-600' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100'}">
+              <span>✅ Listos</span>
               <span class="px-2 py-0.5 rounded-full text-xs font-extrabold ${currentActiveTab === 'ready' ? 'bg-white text-emerald-700' : 'bg-emerald-600 text-white'}">${readyCount}</span>
             </button>
-            ${readyCount > 0 ? `
+            <button id="btn-inv-subview-valery" class="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl font-black text-xs sm:text-sm transition-all flex items-center justify-center space-x-1.5 ${currentActiveTab === 'valery' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/25 ring-2 ring-purple-600' : 'bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-300 hover:bg-purple-100'}">
+              <span>⚡ Pasar a Valery</span>
+              <span class="px-2 py-0.5 rounded-full text-xs font-extrabold ${currentActiveTab === 'valery' ? 'bg-white text-purple-800' : 'bg-purple-600 text-white'}">${valeryCount}</span>
+            </button>
+            ${totalCounted > 0 ? `
               <button id="btn-quick-submit-header" class="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs rounded-2xl shadow transition-all flex items-center justify-center space-x-1.5">
                 <span>📤</span>
-                <span>Enviar (${readyCount})</span>
+                <span>Enviar (${totalCounted})</span>
               </button>
             ` : ''}
           </div>
@@ -1141,7 +1503,7 @@
         <div class="space-y-1.5 pt-1 border-t border-gray-100 dark:border-gray-700/60">
           <div class="flex justify-between text-xs font-extrabold text-gray-500">
             <span>Progreso del Depósito</span>
-            <span class="text-blue-600 dark:text-blue-400 font-mono">${readyCount} de ${totalDeposit} listos (${percent}%)</span>
+            <span class="text-blue-600 dark:text-blue-400 font-mono">${totalCounted} de ${totalDeposit} listos (${percent}%) • Normal: ${readyCount} | Valery: ${valeryCount}</span>
           </div>
           <div class="w-full h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden p-0.5">
             <div class="h-full bg-gradient-to-r from-blue-500 via-teal-500 to-emerald-500 transition-all duration-500 rounded-full" style="width: ${percent}%"></div>
@@ -1160,14 +1522,18 @@
       renderInventoryViews();
     });
 
+    document.getElementById('btn-inv-subview-valery')?.addEventListener('click', () => {
+      currentActiveTab = 'valery';
+      renderInventoryViews();
+    });
+
     document.getElementById('btn-quick-submit-header')?.addEventListener('click', () => {
-      const readyItems = getReadyProductsForDeposit(currentDep);
-      showSubmitConfirmationModal(currentDep, readyItems);
+      showSubmitConfirmationModal(currentDep);
     });
   }
 
   /**
-   * Renderiza la vista correspondiente (Pendientes o Productos Listos)
+   * Renderiza la vista correspondiente (Pendientes, Productos Listos o Pasar Cantidad Valery)
    */
   function renderInventoryViews() {
     const mainGrid = document.getElementById('products-grid');
@@ -1181,6 +1547,14 @@
       mainGrid.parentElement.insertBefore(readyContainer, mainGrid.nextSibling);
     }
 
+    let valeryContainer = document.getElementById('inventory-valery-container');
+    if (!valeryContainer) {
+      valeryContainer = document.createElement('div');
+      valeryContainer.id = 'inventory-valery-container';
+      valeryContainer.className = 'container mx-auto px-4 py-4 space-y-4 hidden';
+      mainGrid.parentElement.insertBefore(valeryContainer, readyContainer ? readyContainer.nextSibling : mainGrid.nextSibling);
+    }
+
     const currentDep = getCurrentDeposit();
     updateInventoryHeaderCounters();
 
@@ -1188,31 +1562,47 @@
 
     if (currentActiveTab === 'ready' && currentDep !== 'UNASSIGNED') {
       mainGrid.classList.add('hidden');
+      valeryContainer.classList.add('hidden');
       if (noProductsDiv) noProductsDiv.classList.add('hidden');
       readyContainer.classList.remove('hidden');
       renderReadySectionContent(readyContainer, currentDep);
+    } else if (currentActiveTab === 'valery' && currentDep !== 'UNASSIGNED') {
+      mainGrid.classList.add('hidden');
+      readyContainer.classList.add('hidden');
+      if (noProductsDiv) noProductsDiv.classList.add('hidden');
+      valeryContainer.classList.remove('hidden');
+      renderValerySectionContent(valeryContainer, currentDep);
     } else {
       readyContainer.classList.add('hidden');
+      valeryContainer.classList.add('hidden');
       mainGrid.classList.remove('hidden');
 
-      // Si estamos en un depósito específico y no quedan pendientes pero sí hay listos, cambiar a listos
+      // Si estamos en un depósito específico y no quedan pendientes pero sí hay listos o valery
       const pendingList = getPendingProductsForDeposit(currentDep);
       const readyList = getReadyProductsForDeposit(currentDep);
+      const valeryList = getValeryProductsForDeposit(currentDep);
 
       if (currentDep !== 'UNASSIGNED' && pendingList.length === 0) {
         if (noProductsDiv) noProductsDiv.classList.add('hidden');
         if (readyList.length > 0) {
-          // Cambiar automáticamente a la vista de Listos para que vean sus conteos y puedan enviar
           currentActiveTab = 'ready';
           mainGrid.classList.add('hidden');
+          valeryContainer.classList.add('hidden');
           readyContainer.classList.remove('hidden');
           renderReadySectionContent(readyContainer, currentDep);
+          return;
+        } else if (valeryList.length > 0) {
+          currentActiveTab = 'valery';
+          mainGrid.classList.add('hidden');
+          readyContainer.classList.add('hidden');
+          valeryContainer.classList.remove('hidden');
+          renderValerySectionContent(valeryContainer, currentDep);
           return;
         } else {
           mainGrid.innerHTML = `
             <div class="col-span-full bg-white dark:bg-gray-800 rounded-3xl p-10 text-center shadow border border-gray-100 dark:border-gray-700 space-y-3">
               <p class="text-3xl">📦</p>
-              <h4 class="text-lg font-bold text-gray-800 dark:text-white">No hay productos en Depósito ${currentDep} con los filtros actuales</h4>
+              <h4 class="text-lg font-bold text-gray-800 dark:text-white">No hay productos pendientes en Depósito ${currentDep} con los filtros actuales</h4>
               <p class="text-xs text-gray-500 max-w-sm mx-auto">
                 Revisa los filtros fijados por el Administrador o asigna productos desde <strong>"⚠️ Por Asignar"</strong>.
               </p>
@@ -1288,7 +1678,7 @@
         <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
           <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800/80">
             <h3 class="font-bold text-gray-800 dark:text-white text-base">Detalle de Productos Verificados (${readyItems.length})</h3>
-            <span class="text-xs text-gray-500">Puedes desbloquear para corregir antes del envío</span>
+            <span class="text-xs text-gray-500">Puedes corregir, pasar a Valery o regresar a pendientes</span>
           </div>
 
           <div class="divide-y divide-gray-100 dark:divide-gray-700" id="ready-items-list-container">
@@ -1337,6 +1727,9 @@
                       <button class="btn-edit-ready p-2 rounded-xl text-blue-600 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors" title="Modificar cantidad" data-code="${item.codigo}" data-qty="${item.cantidad_fisica}">
                         ✏️
                       </button>
+                      <button class="btn-transfer-to-valery p-2 rounded-xl text-purple-600 hover:bg-purple-50 dark:hover:bg-gray-700 transition-colors" title="Pasar a Modo Valery" data-code="${item.codigo}">
+                        ⚡
+                      </button>
                       <button class="btn-return-pending p-2 rounded-xl text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-gray-700 transition-colors" title="Regresar a Pendientes" data-code="${item.codigo}">
                         ↩️
                       </button>
@@ -1356,7 +1749,7 @@
     });
 
     container.querySelector('#btn-submit-day-inventory')?.addEventListener('click', () => {
-      showSubmitConfirmationModal(deposito, readyItems);
+      showSubmitConfirmationModal(deposito);
     });
 
     container.querySelectorAll('.btn-edit-ready').forEach(btn => {
@@ -1376,6 +1769,15 @@
       });
     });
 
+    container.querySelectorAll('.btn-transfer-to-valery').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.code;
+        if (confirm(`¿Pasar el producto ${code} al apartado "Pasar Cantidad Valery"?`)) {
+          await transferReadyToValery(code, deposito);
+        }
+      });
+    });
+
     container.querySelectorAll('.btn-return-pending').forEach(btn => {
       btn.addEventListener('click', () => {
         const code = btn.dataset.code;
@@ -1387,24 +1789,286 @@
   }
 
   /**
-   * Modal de confirmación para el envío final de jornada
+   * Renderiza el contenido del apartado especial "Pasar Cantidad Valery - Depósito [X]"
    */
-  function showSubmitConfirmationModal(deposito, readyItems) {
+  function renderValerySectionContent(container, deposito) {
+    const valeryItems = getValeryProductsForDeposit(deposito);
+    const totalPiezas = valeryItems.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+    const totalGMayor = valeryItems.reduce((acc, it) => acc + (parseFloat(it.subtotal_gmayor) || 0), 0);
+
+    if (valeryItems.length === 0) {
+      container.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-3xl p-10 text-center shadow-xl border border-gray-100 dark:border-gray-700 space-y-4">
+          <div class="w-16 h-16 rounded-2xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 flex items-center justify-center text-3xl mx-auto">
+            ⚡
+          </div>
+          <h3 class="text-xl font-bold text-gray-800 dark:text-white">Aún no hay productos en "Pasar Cantidad Valery" para Depósito ${deposito}</h3>
+          <p class="text-sm text-gray-500 max-w-md mx-auto">
+            Este apartado es para productos donde la mercancía nueva no se toca y se requiere transferir o actualizar el conteo en Valery.
+            En <strong>"📋 Pendientes"</strong>, coloca la cantidad y presiona <strong>"⚡ Pasar a Valery"</strong>.
+          </p>
+          <button id="go-back-to-pending-from-valery-btn" class="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-2xl transition-all shadow-md">
+            Ir a Productos Pendientes
+          </button>
+        </div>
+      `;
+      container.querySelector('#go-back-to-pending-from-valery-btn')?.addEventListener('click', () => {
+        currentActiveTab = 'pending';
+        renderInventoryViews();
+      });
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="space-y-4 animate-fade-in">
+        <!-- Banner Encabezado Valery con Gradiente Púrpura/Índigo -->
+        <div class="bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-800 rounded-3xl p-6 text-white shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div class="space-y-2">
+            <div class="flex items-center space-x-2">
+              <span class="px-3 py-1 bg-white/20 rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-1">
+                <span>⚡</span>
+                <span>Apartado Especial: Pasar Cantidad Valery</span>
+              </span>
+              <button id="return-to-pending-top-valery-btn" class="text-xs bg-white/10 hover:bg-white/30 px-3 py-1 rounded-full font-bold transition-colors">
+                ⬅ Volver a Pendientes
+              </button>
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-black">Pasar Cantidad Valery - Depósito ${deposito}</h2>
+            <p class="text-xs text-purple-200">Mercancía nueva no se toca • Productos destinados para actualización de inventario en el sistema Valery</p>
+            <div class="flex flex-wrap items-center gap-4 text-sm font-semibold text-purple-100 pt-1">
+              <span>📋 <strong>${valeryItems.length}</strong> productos</span>
+              <span>•</span>
+              <span>🔢 <strong>${totalPiezas}</strong> piezas para Valery</span>
+              <span>•</span>
+              <span>💵 <strong>$${totalGMayor.toFixed(2)}</strong> valor G.Mayor</span>
+            </div>
+          </div>
+
+          <!-- Botones de Acción para Valery -->
+          <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <button id="btn-export-valery-excel" class="w-full sm:w-auto px-5 py-3.5 bg-white/15 hover:bg-white/25 border border-white/30 text-white rounded-2xl font-black text-xs shadow transition-all flex items-center justify-center space-x-2">
+              <span>📥</span>
+              <span>Descargar Excel Valery</span>
+            </button>
+            <button id="btn-submit-day-valery" class="w-full sm:w-auto px-6 py-3.5 bg-white text-purple-900 hover:bg-purple-50 rounded-2xl font-black text-sm shadow-xl transition-all transform active:scale-95 flex items-center justify-center space-x-2">
+              <span>📤</span>
+              <span>Finalizar Conteo</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabla / Lista de Productos en Modo Valery -->
+        <div class="bg-white dark:bg-gray-800 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+          <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-purple-50/60 dark:bg-gray-800/80">
+            <div>
+              <h3 class="font-bold text-gray-800 dark:text-white text-base flex items-center gap-2">
+                <span>⚡</span>
+                <span>Productos Seleccionados para Valery (${valeryItems.length})</span>
+              </h3>
+              <p class="text-[11px] text-gray-500">Se exportarán con la etiqueta "PASAR CANTIDAD VALERY"</p>
+            </div>
+            <button id="btn-export-valery-excel-table" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow transition-colors flex items-center space-x-1">
+              <span>📥 Excel Valery</span>
+            </button>
+          </div>
+
+          <div class="divide-y divide-gray-100 dark:divide-gray-700" id="valery-items-list-container">
+            ${valeryItems.map(item => {
+              const diff = item.diferencia || 0;
+              let diffBadge = '';
+              if (diff === 0) {
+                diffBadge = '<span class="text-xs font-bold px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 rounded-lg">✓ Exacto (0)</span>';
+              } else if (diff < 0) {
+                diffBadge = `<span class="text-xs font-bold px-2.5 py-1 bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 rounded-lg">⚠️ Faltan ${Math.abs(diff)}</span>`;
+              } else {
+                diffBadge = `<span class="text-xs font-bold px-2.5 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 rounded-lg">➕ Sobran ${diff}</span>`;
+              }
+
+              return `
+                <div class="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-purple-50/30 dark:hover:bg-gray-700/50 transition-colors" data-code="${item.codigo}">
+                  <div class="flex items-center space-x-3 flex-1 min-w-0">
+                    <div class="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 flex items-center justify-center text-xl font-bold flex-shrink-0">
+                      ⚡
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <p class="font-bold text-gray-800 dark:text-white text-sm truncate">${item.descripcion}</p>
+                        <span class="text-[10px] font-black uppercase px-2 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 rounded-md">Modo Valery</span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 pt-0.5">
+                        <span class="font-mono font-semibold text-gray-700 dark:text-gray-300">${item.codigo}</span>
+                        <span>•</span>
+                        <span>Stock Sist: <strong>${item.stock_sistema}</strong></span>
+                        <span>•</span>
+                        <span>G.Mayor: <strong>$${item.precio_gmayor.toFixed(2)}</strong></span>
+                        <span>•</span>
+                        <span>Hora: ${item.hora || ''}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center space-x-3 self-end sm:self-center">
+                    <div class="text-right">
+                      <div class="flex items-center justify-end space-x-2">
+                        <span class="text-xs text-purple-600 dark:text-purple-400 uppercase font-black">Valery:</span>
+                        <span class="text-xl font-black text-purple-700 dark:text-purple-300 font-mono">${item.cantidad_fisica}</span>
+                      </div>
+                      <div class="pt-0.5">${diffBadge}</div>
+                    </div>
+
+                    <!-- Botones de Acción para el Producto en Modo Valery -->
+                    <div class="flex items-center space-x-1 pl-2 border-l border-gray-200 dark:border-gray-700">
+                      <button class="btn-edit-valery p-2 rounded-xl text-purple-600 hover:bg-purple-50 dark:hover:bg-gray-700 transition-colors" title="Modificar cantidad" data-code="${item.codigo}" data-qty="${item.cantidad_fisica}">
+                        ✏️
+                      </button>
+                      <button class="btn-transfer-to-ready p-2 rounded-xl text-emerald-600 hover:bg-emerald-50 dark:hover:bg-gray-700 transition-colors" title="Mover a Listos Normal" data-code="${item.codigo}">
+                        🔄
+                      </button>
+                      <button class="btn-return-pending-valery p-2 rounded-xl text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-gray-700 transition-colors" title="Regresar a Pendientes" data-code="${item.codigo}">
+                        ↩️
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.querySelector('#return-to-pending-top-valery-btn')?.addEventListener('click', () => {
+      currentActiveTab = 'pending';
+      renderInventoryViews();
+    });
+
+    const exportBtn1 = container.querySelector('#btn-export-valery-excel');
+    const exportBtn2 = container.querySelector('#btn-export-valery-excel-table');
+    const triggerExport = () => exportValeryExcel(deposito);
+    exportBtn1?.addEventListener('click', triggerExport);
+    exportBtn2?.addEventListener('click', triggerExport);
+
+    container.querySelector('#btn-submit-day-valery')?.addEventListener('click', () => {
+      showSubmitConfirmationModal(deposito);
+    });
+
+    container.querySelectorAll('.btn-edit-valery').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.code;
+        const currentQ = btn.dataset.qty;
+        const newQtyStr = prompt(`Ingresa la nueva cantidad para ${code} (Modo Valery):`, currentQ);
+        if (newQtyStr !== null && newQtyStr.trim() !== '') {
+          const val = parseInt(newQtyStr);
+          if (!isNaN(val) && val >= 0) {
+            await markProductAsValery(code, val, deposito);
+            renderInventoryViews();
+          } else {
+            alert('Por favor ingresa un número válido.');
+          }
+        }
+      });
+    });
+
+    container.querySelectorAll('.btn-transfer-to-ready').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.code;
+        if (confirm(`¿Mover el producto ${code} de "Valery" al apartado de "Listos Normal"?`)) {
+          await transferValeryToReady(code, deposito);
+        }
+      });
+    });
+
+    container.querySelectorAll('.btn-return-pending-valery').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const code = btn.dataset.code;
+        if (confirm(`¿Regresar el producto ${code} a la lista de pendientes?`)) {
+          unmarkProductValery(code, deposito);
+        }
+      });
+    });
+  }
+
+  /**
+   * Exporta a Excel (.xlsx) únicamente los productos en modo "Pasar Cantidad Valery"
+   */
+  function exportValeryExcel(deposito) {
+    if (!window.XLSX) {
+      alert('Error: Librería de Excel no cargada.');
+      return;
+    }
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+    const valeryItems = getValeryProductsForDeposit(currentDep);
+    if (valeryItems.length === 0) {
+      alert(`No hay productos en "Pasar Cantidad Valery" para el depósito ${currentDep}.`);
+      return;
+    }
+
+    const now = new Date();
+    const fecha = now.toISOString().split('T')[0];
+    const hora = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const currentUser = window.currentUser || {};
+    const userName = currentUser.name || 'Personal de Inventario';
+
+    const rows = valeryItems.map(it => {
+      const diff = it.diferencia || 0;
+      let estadoDiff = 'EXACTO';
+      if (diff < 0) estadoDiff = `FALTANTE (${Math.abs(diff)})`;
+      if (diff > 0) estadoDiff = `SOBRANTE (+${diff})`;
+
+      return {
+        'Modo / Destino': 'PASAR CANTIDAD VALERY',
+        'Depósito': currentDep,
+        'Código Producto': it.codigo,
+        'Descripción': it.descripcion,
+        'Stock Sistema Actual': it.stock_sistema || 0,
+        'Cantidad Física (Ajuste Valery)': it.cantidad_fisica || 0,
+        'Diferencia': diff,
+        'Estado': estadoDiff,
+        'Precio G.Mayor ($)': parseFloat(it.precio_gmayor) || 0,
+        'Total Valor G.Mayor ($)': parseFloat(it.subtotal_gmayor) || 0,
+        'Usuario': userName,
+        'Fecha Conteo': fecha,
+        'Hora': it.hora || hora
+      };
+    });
+
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, "Pasar Valery");
+
+    const fileName = `Valery_Ajuste_Dep_${currentDep}_${fecha}.xlsx`;
+    window.XLSX.writeFile(wb, fileName);
+  }
+
+  /**
+   * Modal de confirmación para el envío final de jornada (Listos Normal + Valery)
+   */
+  function showSubmitConfirmationModal(deposito) {
     const existing = document.getElementById('submit-inventory-modal');
     if (existing) existing.remove();
+
+    const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
+    const readyItems = getReadyProductsForDeposit(currentDep);
+    const valeryItems = getValeryProductsForDeposit(currentDep);
+    const allItems = [...readyItems, ...valeryItems];
+
+    if (allItems.length === 0) {
+      alert('⚠️ No hay productos en "Listos" ni en "Pasar Cantidad Valery" para enviar en este depósito.');
+      return;
+    }
 
     const currentUser = window.currentUser || {};
     const userName = currentUser.name || 'Personal de Inventario';
     const userRole = window.currentUserRole || 'inventario';
-    const totalPiezas = readyItems.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
-    const totalValor = readyItems.reduce((acc, it) => acc + (parseFloat(it.subtotal_gmayor) || 0), 0);
+    const totalPiezas = allItems.reduce((acc, it) => acc + (parseInt(it.cantidad_fisica) || 0), 0);
+    const totalValor = allItems.reduce((acc, it) => acc + (parseFloat(it.subtotal_gmayor) || 0), 0);
 
     const modal = document.createElement('div');
     modal.id = 'submit-inventory-modal';
     modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4';
     modal.innerHTML = `
       <div class="bg-white dark:bg-gray-800 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-fade-in border border-gray-100 dark:border-gray-700">
-        <div class="bg-gradient-to-r from-emerald-600 to-teal-700 p-6 text-white text-center">
+        <div class="bg-gradient-to-r from-emerald-600 via-teal-700 to-indigo-800 p-6 text-white text-center">
           <div class="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center text-3xl mx-auto mb-3 shadow-inner">
             📤
           </div>
@@ -1420,11 +2084,19 @@
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500 font-medium">Depósito:</span>
-              <span class="font-bold text-blue-600 dark:text-blue-400">Depósito ${deposito}</span>
+              <span class="font-bold text-blue-600 dark:text-blue-400">Depósito ${currentDep}</span>
             </div>
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500 font-medium">Productos contados:</span>
-              <span class="font-bold text-gray-800 dark:text-white">${readyItems.length} ítems</span>
+              <span class="text-gray-500 font-medium">Total Productos Contados:</span>
+              <span class="font-bold text-gray-800 dark:text-white">${allItems.length} ítems</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 py-1 text-xs font-semibold">
+              <div class="bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-xl text-emerald-800 dark:text-emerald-300">
+                ✅ Conteo Normal: <strong>${readyItems.length}</strong>
+              </div>
+              <div class="bg-purple-50 dark:bg-purple-950/40 p-2 rounded-xl text-purple-800 dark:text-purple-300">
+                ⚡ Pasar Valery: <strong>${valeryItems.length}</strong>
+              </div>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500 font-medium">Total unidades contadas:</span>
@@ -1442,12 +2114,12 @@
           </div>
 
           <div class="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl text-[11px] text-amber-800 dark:text-amber-300">
-            ⚠️ Al confirmar, las cantidades se guardarán en la base de datos de administración y se reiniciará la lista de listos de este depósito para una nueva jornada.
+            ⚠️ Al confirmar, las cantidades se guardarán en la base de datos de administración y se reiniciará la lista de listos y Valery de este depósito para una nueva jornada.
           </div>
         </div>
 
         <div class="p-6 bg-gray-50 dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
-          <button id="confirm-submit-session-btn" class="flex-1 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold rounded-2xl transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center space-x-2">
+          <button id="confirm-submit-session-btn" class="flex-1 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-700 to-indigo-700 hover:from-emerald-700 hover:to-indigo-800 text-white font-bold rounded-2xl transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center space-x-2">
             <span>✅</span>
             <span>Confirmar y Enviar</span>
           </button>
@@ -1468,12 +2140,12 @@
       btn.innerHTML = '<span class="loading-spinner"></span> Registrando pedido...';
 
       const notas = modal.querySelector('#session-notes-input').value;
-      const res = await submitInventorySession(deposito, notas);
+      const res = await submitInventorySession(currentDep, notas);
 
       modal.remove();
 
       if (res.success) {
-        showSuccessModal(res.folio, deposito, totalPiezas, res.sessionData);
+        showSuccessModal(res.folio, currentDep, totalPiezas, res.sessionData);
       } else {
         alert('Error al enviar cantidades: ' + (res.message || ''));
       }
@@ -1912,6 +2584,7 @@
                 <tr class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold uppercase border-b border-gray-200 dark:border-gray-700">
                   <th class="p-3">Código</th>
                   <th class="p-3">Descripción</th>
+                  <th class="p-3 text-center">Modo</th>
                   <th class="p-3 text-center">Stock Sist.</th>
                   <th class="p-3 text-center">Conteo Físico</th>
                   <th class="p-3 text-center">Diferencia</th>
@@ -1927,10 +2600,17 @@
                   if (diff > 0) diffColor = 'text-blue-600 font-bold';
                   if (diff === 0) diffColor = 'text-emerald-600 font-bold';
 
+                  const isValery = it.modo === 'valery';
+
                   return `
                     <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                       <td class="p-3 font-mono font-bold text-gray-800 dark:text-gray-200">${it.codigo}</td>
                       <td class="p-3 font-medium text-gray-700 dark:text-gray-300 max-w-xs truncate">${it.descripcion}</td>
+                      <td class="p-3 text-center">
+                        ${isValery 
+                          ? '<span class="px-2 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 font-black rounded text-[10px]">⚡ VALERY</span>' 
+                          : '<span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 font-bold rounded text-[10px]">NORMAL</span>'}
+                      </td>
                       <td class="p-3 text-center font-bold text-gray-500">${it.stock_sistema || 0}</td>
                       <td class="p-3 text-center font-bold text-blue-600 text-sm">${it.cantidad_fisica || 0}</td>
                       <td class="p-3 text-center ${diffColor}">${diff > 0 ? `+${diff}` : diff}</td>
@@ -1978,6 +2658,7 @@
         'Usuario': session.user_name,
         'Username': session.user_username,
         'Depósito': session.deposito,
+        'Modo / Destino': (it.modo === 'valery' ? 'PASAR CANTIDAD VALERY' : 'CONTEO NORMAL / LISTO'),
         'Código Producto': it.codigo,
         'Descripción': it.descripcion,
         'Stock Sistema': it.stock_sistema || 0,
@@ -2020,6 +2701,8 @@
         'Username': s.user_username,
         'Depósito': s.deposito,
         'Total Ítems': s.total_items,
+        'Ítems Normal': s.total_ready_items || (s.items ? s.items.filter(it => it.modo !== 'valery').length : 0),
+        'Ítems Valery': s.total_valery_items || (s.items ? s.items.filter(it => it.modo === 'valery').length : 0),
         'Total Piezas': s.total_piezas,
         'Diferencia Total': s.diferencia_total,
         'Total Valor G.Mayor ($)': parseFloat(s.total_valor_gmayor) || 0,
@@ -2039,6 +2722,7 @@
           'Usuario': s.user_name,
           'Username': s.user_username,
           'Depósito': s.deposito,
+          'Modo / Destino': (it.modo === 'valery' ? 'PASAR CANTIDAD VALERY' : 'CONTEO NORMAL / LISTO'),
           'Código': it.codigo,
           'Descripción': it.descripcion,
           'Stock Sistema': it.stock_sistema || 0,
@@ -2095,6 +2779,20 @@
     renderInventoryViews();
   }
 
+  function switchToValeryTab(dep) {
+    if (dep) {
+      window.currentDepartment = `inv_${dep}`;
+      document.querySelectorAll('.dept-button, .sidebar-dept-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.dept === `inv_${dep}`) {
+          btn.classList.add('active');
+        }
+      });
+    }
+    currentActiveTab = 'valery';
+    renderInventoryViews();
+  }
+
   // ============================================================
   // EXPONER MÓDULO GLOBALMENTE
   // ============================================================
@@ -2105,9 +2803,14 @@
     isEligible: isProductEligibleForInventory,
     getCurrentDeposit: getCurrentDeposit,
     getReadyProducts: getReadyProductsForDeposit,
+    getValeryProducts: getValeryProductsForDeposit,
     getPendingProducts: getPendingProductsForDeposit,
     markAsReady: markProductAsReady,
+    markAsValery: markProductAsValery,
     unmarkReady: unmarkProductReady,
+    unmarkValery: unmarkProductValery,
+    transferValeryToReady: transferValeryToReady,
+    transferReadyToValery: transferReadyToValery,
     showFilterModal: showInventoryFilterModal,
     showAuditModal: showInventoryAuditModal,
     updateHeaderCounters: updateInventoryHeaderCounters,
@@ -2115,10 +2818,11 @@
     submitSession: submitInventorySession,
     switchToReadyTab: switchToReadyTab,
     switchToPendingTab: switchToPendingTab,
+    switchToValeryTab: switchToValeryTab,
+    exportValeryExcel: exportValeryExcel,
     openSubmitModal: (dep) => {
       const currentDep = (dep || getCurrentDeposit()).trim().toUpperCase();
-      const readyItems = getReadyProductsForDeposit(currentDep);
-      showSubmitConfirmationModal(currentDep, readyItems);
+      showSubmitConfirmationModal(currentDep);
     }
   };
 

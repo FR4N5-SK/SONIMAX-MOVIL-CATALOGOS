@@ -3439,9 +3439,15 @@ function filterByDepartment(dept, keepSearch = false) {
       renderProducts();
       if (window.SonimaxInventoryConteo) {
           const readyItems = window.SonimaxInventoryConteo.getReadyProducts(targetDeposit);
-          if (filteredProducts.length === 0 && readyItems.length > 0) {
-              window.SonimaxInventoryConteo.switchToReadyTab(targetDeposit);
-              return;
+          const valeryItems = window.SonimaxInventoryConteo.getValeryProducts ? window.SonimaxInventoryConteo.getValeryProducts(targetDeposit) : [];
+          if (filteredProducts.length === 0) {
+              if (readyItems.length > 0) {
+                  window.SonimaxInventoryConteo.switchToReadyTab(targetDeposit);
+                  return;
+              } else if (valeryItems.length > 0) {
+                  window.SonimaxInventoryConteo.switchToValeryTab(targetDeposit);
+                  return;
+              }
           }
           window.SonimaxInventoryConteo.renderViews();
       }
@@ -3739,13 +3745,23 @@ function createProductCard(product) {
                     </button>
                 </div>
 
-                <!-- Botón de Envío a Listos -->
-                <button type="button" 
-                    class="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs sm:text-sm shadow-md hover:shadow-lg transition-all transform active:scale-95 flex items-center justify-center space-x-1.5"
-                    onclick="window.enviarProductoAListos('${cleanCode}', '${currentDep}')">
-                    <span>✅</span>
-                    <span>Marcar Listo (Enviar a Listos)</span>
-                </button>
+                <!-- Botones de Envío a Listos y Pasar a Valery -->
+                <div class="grid grid-cols-2 gap-2">
+                    <button type="button" 
+                        class="py-2.5 px-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs shadow-md hover:shadow-lg transition-all transform active:scale-95 flex items-center justify-center space-x-1"
+                        onclick="window.enviarProductoAListos('${cleanCode}', '${currentDep}')"
+                        title="Marcar como producto contado y listo">
+                        <span>✅</span>
+                        <span class="truncate">Marcar Listo</span>
+                    </button>
+                    <button type="button" 
+                        class="py-2.5 px-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-xl text-xs shadow-md hover:shadow-lg transition-all transform active:scale-95 flex items-center justify-center space-x-1"
+                        onclick="window.enviarProductoAValery('${cleanCode}', '${currentDep}')"
+                        title="Pasar a apartado especial Pasar Cantidad Valery">
+                        <span>⚡</span>
+                        <span class="truncate">Pasar a Valery</span>
+                    </button>
+                </div>
                 
                 <!-- Botones para cambiar depósito si fue clasificado erróneamente -->
                 <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -4015,6 +4031,78 @@ window.enviarProductoAListos = async function (productCode, deposito) {
                 if (remainingCards.length === 0) {
                     // Si ya no quedan productos pendientes por contar en este depósito, pasar directamente a Listos
                     window.SonimaxInventoryConteo.switchToReadyTab(deposito);
+                } else {
+                    window.SonimaxInventoryConteo.renderViews();
+                }
+            }
+
+            // Para rol inventario, mantener no-products oculto (lo maneja renderViews)
+            if (window.currentUserRole !== 'inventario') {
+                if (grid && grid.children.length === 0) {
+                    document.getElementById("no-products")?.classList.remove("hidden");
+                }
+            }
+        }, 350);
+    }
+};
+
+// [NUEVO] Función para Rol Inventario: Bloquear campo y enviar a "Pasar Cantidad Valery"
+window.enviarProductoAValery = async function (productCode, deposito) {
+    const pCode = (productCode || '').trim().toUpperCase();
+    const inputEl = document.querySelector(`input[data-input-code="${pCode}"]`);
+    const lockBtn = document.querySelector(`button[data-lock-code="${pCode}"]`);
+    if (!inputEl) return;
+
+    const rawVal = inputEl.value;
+    if (rawVal === '' || isNaN(parseInt(rawVal))) {
+        alert('⚠️ Por favor ingresa una cantidad numérica antes de pasar a Valery.');
+        inputEl.focus();
+        return;
+    }
+
+    const val = parseInt(rawVal);
+    if (val < 0) {
+        alert('La cantidad no puede ser negativa.');
+        inputEl.focus();
+        return;
+    }
+
+    // 1. Bloquear input inmediatamente y cambiar icono a candado cerrado
+    inputEl.disabled = true;
+    inputEl.classList.remove('bg-white', 'text-blue-600');
+    inputEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+    if (lockBtn) {
+        lockBtn.innerHTML = '🔒';
+        lockBtn.title = 'Campo bloqueado. Haz clic para desbloquear y editar.';
+        lockBtn.classList.remove('text-blue-500');
+        lockBtn.classList.add('text-gray-400');
+    }
+
+    // 2. Guardar en el módulo de inventario bajo modo Valery
+    if (window.SonimaxInventoryConteo && window.SonimaxInventoryConteo.markAsValery) {
+        await window.SonimaxInventoryConteo.markAsValery(pCode, val, deposito);
+    }
+
+    // 3. Animación suave para trasladar de Pendientes a Valery
+    const productCard = document.querySelector(`.product-card[data-product-code="${pCode}"]`);
+    if (productCard) {
+        productCard.style.transition = 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+        productCard.style.opacity = '0';
+        productCard.style.transform = 'scale(0.85) translateY(-20px)';
+
+        setTimeout(() => {
+            productCard.remove();
+            // Quitar de filteredProducts en memoria para consistencia
+            const idx = filteredProducts.findIndex(p => (p.codigo || '').trim().toUpperCase() === pCode);
+            if (idx > -1) filteredProducts.splice(idx, 1);
+
+            const grid = document.getElementById("products-grid");
+            const remainingCards = grid ? grid.querySelectorAll('.product-card') : [];
+
+            if (window.SonimaxInventoryConteo) {
+                if (remainingCards.length === 0) {
+                    // Si ya no quedan productos pendientes por contar en este depósito, pasar directamente a Valery
+                    window.SonimaxInventoryConteo.switchToValeryTab(deposito);
                 } else {
                     window.SonimaxInventoryConteo.renderViews();
                 }
@@ -4885,6 +4973,11 @@ function handleGlobalSearch(e) {
   const searchLoading = document.getElementById("search-loading")
 
   if (query === "") {
+    if (window.currentUserRole === "inventario" && currentDepartment && currentDepartment.startsWith("inv_")) {
+      filterByDepartment(currentDepartment);
+      if (searchLoading) searchLoading.classList.add("hidden");
+      return;
+    }
     filteredProducts = allProducts
     currentPage = 1
     renderProducts()
@@ -4940,9 +5033,18 @@ function handleGlobalSearch(e) {
 
       filteredProducts = matches
 
-      // Filtrar agotados para rol inventario en búsqueda global
+      // Para rol inventario: filtrar por el depósito activo y excluir productos ya contados / listos / valery
       if (window.currentUserRole === "inventario") {
-        filteredProducts = filteredProducts.filter((p) => (p.stock || 0) > 0)
+        if (currentDepartment && currentDepartment.startsWith("inv_")) {
+          const targetDep = currentDepartment.replace('inv_', '');
+          const pendingPool = window.SonimaxInventoryConteo
+            ? window.SonimaxInventoryConteo.getPendingProducts(targetDep)
+            : [];
+          const pendingCodes = new Set(pendingPool.map(p => (p.codigo || '').trim().toUpperCase()));
+          filteredProducts = matches.filter(p => pendingCodes.has((p.codigo || '').trim().toUpperCase()));
+        } else {
+          filteredProducts = filteredProducts.filter((p) => (p.stock || 0) > 0);
+        }
       }
 
       console.log(`[SEARCH] Resultados: ${filteredProducts.length} de ${allProducts.length} productos`)
@@ -5041,7 +5143,16 @@ function handleDeptSearch(e) {
       filteredProducts = matches
 
       if (window.currentUserRole === "inventario") {
-        filteredProducts = filteredProducts.filter((p) => (p.stock || 0) > 0)
+        if (currentDepartment && currentDepartment.startsWith("inv_")) {
+          const targetDep = currentDepartment.replace('inv_', '');
+          const pendingPool = window.SonimaxInventoryConteo
+            ? window.SonimaxInventoryConteo.getPendingProducts(targetDep)
+            : [];
+          const pendingCodes = new Set(pendingPool.map(p => (p.codigo || '').trim().toUpperCase()));
+          filteredProducts = matches.filter(p => pendingCodes.has((p.codigo || '').trim().toUpperCase()));
+        } else {
+          filteredProducts = filteredProducts.filter((p) => (p.stock || 0) > 0);
+        }
       }
 
       console.log(`[SEARCH] Resultados en ${currentDepartment}: ${filteredProducts.length} productos`)
