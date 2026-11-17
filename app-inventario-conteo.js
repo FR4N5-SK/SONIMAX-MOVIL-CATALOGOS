@@ -599,7 +599,6 @@
    */
   async function markProductAsValery(productCode, cantidadFisica, deposito) {
     const cleanCode = (productCode || '').trim().toUpperCase();
-    const qty = parseInt(cantidadFisica) || 0;
     const currentDep = (deposito || getCurrentDeposit()).trim().toUpperCase();
 
     // 1. Si estaba en la lista de listos normales, retirarlo para evitar duplicados
@@ -615,6 +614,11 @@
     const stockSistema = product ? parseInt(product.stock || 0) : 0;
     const precioGMayor = product ? parseFloat(product.precio_gmayor || 0) : 0;
     const descripcion = product ? (product.nombre || product.descripcion || cleanCode) : cleanCode;
+
+    // Si el usuario no ingresó cantidad (mercancía nueva no se toca), toma automáticamente la existencia del sistema
+    const qty = (cantidadFisica !== undefined && cantidadFisica !== null && !isNaN(parseInt(cantidadFisica)))
+      ? parseInt(cantidadFisica)
+      : stockSistema;
 
     const valeryList = getValeryProductsForDeposit(currentDep);
     const existingIndex = valeryList.findIndex(item => item.codigo === cleanCode);

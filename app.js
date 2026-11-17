@@ -4051,26 +4051,25 @@ window.enviarProductoAValery = async function (productCode, deposito) {
     const pCode = (productCode || '').trim().toUpperCase();
     const inputEl = document.querySelector(`input[data-input-code="${pCode}"]`);
     const lockBtn = document.querySelector(`button[data-lock-code="${pCode}"]`);
-    if (!inputEl) return;
 
-    const rawVal = inputEl.value;
-    if (rawVal === '' || isNaN(parseInt(rawVal))) {
-        alert('⚠️ Por favor ingresa una cantidad numérica antes de pasar a Valery.');
-        inputEl.focus();
-        return;
+    // Buscar datos maestros del producto
+    const product = (window.allProducts || []).find(p => (p.codigo || '').trim().toUpperCase() === pCode);
+    const stockSistema = product ? parseInt(product.stock || 0) : 0;
+
+    // Si el usuario escribió una cantidad, usarla. Si está vacío (mercancía nueva no se toca), usar stock del sistema
+    let val = stockSistema;
+    if (inputEl && inputEl.value !== '' && !isNaN(parseInt(inputEl.value))) {
+        val = parseInt(inputEl.value);
     }
+    if (val < 0) val = 0;
 
-    const val = parseInt(rawVal);
-    if (val < 0) {
-        alert('La cantidad no puede ser negativa.');
-        inputEl.focus();
-        return;
+    // Reflejar cantidad en el input
+    if (inputEl) {
+        inputEl.value = val;
+        inputEl.disabled = true;
+        inputEl.classList.remove('bg-white', 'text-blue-600');
+        inputEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
     }
-
-    // 1. Bloquear input inmediatamente y cambiar icono a candado cerrado
-    inputEl.disabled = true;
-    inputEl.classList.remove('bg-white', 'text-blue-600');
-    inputEl.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
     if (lockBtn) {
         lockBtn.innerHTML = '🔒';
         lockBtn.title = 'Campo bloqueado. Haz clic para desbloquear y editar.';
