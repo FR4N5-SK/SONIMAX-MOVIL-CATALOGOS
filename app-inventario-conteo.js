@@ -1252,105 +1252,191 @@
     modal.id = 'inventory-filter-modal';
     modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4';
     modal.innerHTML = `
-      <div class="bg-white dark:bg-gray-900 rounded-3xl max-w-6xl w-full h-[90vh] shadow-2xl overflow-hidden flex flex-col border border-gray-100 dark:border-gray-800">
-        <!-- Encabezado -->
-        <div class="bg-gradient-to-r from-teal-700 via-emerald-700 to-teal-800 p-5 sm:p-6 text-white flex justify-between items-center flex-shrink-0">
+      <div class="bg-white dark:bg-gray-800 rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden animate-fade-in border border-gray-100 dark:border-gray-700">
+        <!-- Encabezado con gradiente llamativo -->
+        <div class="bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 p-6 text-white flex justify-between items-center">
           <div class="flex items-center space-x-3">
-            <div class="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-2xl shadow-inner">
-              📋
+            <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl shadow-inner">
+              ⚙️
             </div>
             <div>
-              <h2 class="text-xl sm:text-2xl font-black">Auditoría de Conteos y Pedidos de Inventario</h2>
-              <p class="text-xs text-teal-100">Filtra por día, fecha, mes, depósito y usuario. Descarga en Excel.</p>
+              <h2 class="text-xl font-black">Filtros para Rol Inventario</h2>
+              <p class="text-xs text-blue-100">Controla qué productos saldrán en la jornada de conteo</p>
             </div>
           </div>
-          <div class="flex items-center space-x-2">
-            <button id="refresh-audit-sessions-btn" class="px-3.5 py-2 bg-teal-800/80 hover:bg-teal-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow transition-all flex items-center space-x-1.5" title="Recargar pedidos desde la nube">
-              <span>🔄</span>
-              <span>Actualizar</span>
-            </button>
-            <button id="export-all-audit-excel-btn" class="px-4 py-2 bg-white text-teal-800 hover:bg-teal-50 rounded-xl font-bold text-xs sm:text-sm shadow transition-all flex items-center space-x-1.5">
-              <span>📥</span>
-              <span>Exportar Excel</span>
-            </button>
-            <button class="modal-close-btn text-white/80 hover:text-white hover:bg-white/20 rounded-xl p-2 transition-colors">✕</button>
+          <button class="modal-close-btn text-white/80 hover:text-white hover:bg-white/20 rounded-xl p-2 transition-colors">✕</button>
+        </div>
+
+        <div class="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          <!-- Switch Principal: Activar / Desactivar Filtro -->
+          <div class="bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 p-4 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="font-bold text-gray-800 dark:text-white text-sm">Filtro Restrictivo de Conteo</p>
+              <p class="text-xs text-gray-500 dark:text-gray-300">Si está activo, Inventario solo verá productos que cumplan estos criterios.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="inv-filter-active-toggle" class="sr-only peer" ${config.active ? 'checked' : ''}>
+              <div class="w-12 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+
+          <!-- Filtro por Precio GMayor -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                <span>💰</span> Precio Mínimo Unitario (G.Mayor):
+              </label>
+              <span class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold">Productos más caros</span>
+            </div>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-lg">$</span>
+              <input type="number" id="inv-filter-min-price" min="0" step="1" 
+                value="${config.minPrice || 0}" 
+                placeholder="Ej. 50"
+                class="w-full pl-9 pr-4 py-3 bg-gray-50 dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl font-bold text-gray-800 dark:text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-lg transition-all">
+            </div>
+            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+              Ejemplo: Si colocas <strong>$50.00</strong>, todos los productos de $50 hacia arriba saldrán al rol de inventario y los económicos quedarán ocultos.
+            </p>
+          </div>
+
+          <!-- [NUEVO] Filtro por Sumatoria / Valor Total del Producto (Stock x Precio GMayor) -->
+          <div class="space-y-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-blue-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>💎</span> Valor Total Mínimo en Inventario (Stock × Precio G.Mayor):
+              </label>
+              <span class="text-xs text-blue-600 dark:text-blue-400 font-bold">Sumatoria total</span>
+            </div>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-lg">$</span>
+              <input type="number" id="inv-filter-min-total-value" min="0" step="10" 
+                value="${config.minTotalValue || 0}" 
+                placeholder="Ej. 700"
+                class="w-full pl-9 pr-4 py-3 bg-white dark:bg-gray-700 border-2 border-blue-300 dark:border-gray-500 rounded-xl font-black text-gray-800 dark:text-white outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 text-lg transition-all">
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Si colocas <strong>$700</strong>, solo saldrán productos cuyo valor total acumulado (existencia actual × precio G.Mayor) sea igual o mayor a $700. Los de menor valor quedarán ocultos.
+            </p>
+          </div>
+
+          <!-- Filtro por Cantidad / Existencia (Stock) -->
+          <div class="space-y-3">
+            <label class="font-bold text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+              <span>📦</span> Filtro por Cantidad (Stock en Sistema):
+            </label>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-500 mb-1 block">Stock Mínimo:</label>
+                <input type="number" id="inv-filter-min-stock" min="0" step="1" 
+                  value="${config.minStock !== null ? config.minStock : 1}" 
+                  class="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl font-bold text-gray-800 dark:text-white outline-none focus:border-indigo-500 text-sm">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-500 mb-1 block">Stock Máximo (Opcional):</label>
+                <input type="number" id="inv-filter-max-stock" min="0" step="1" 
+                  value="${config.maxStock !== null ? config.maxStock : ''}" 
+                  placeholder="Sin límite"
+                  class="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl font-bold text-gray-800 dark:text-white outline-none focus:border-indigo-500 text-sm">
+              </div>
+            </div>
+            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+              Coloca <strong>1</strong> en Stock Mínimo para ocultar automáticamente productos con stock 0 (agotados).
+            </p>
+          </div>
+
+          <!-- Filtro por Depósitos Asignados -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-sm text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                <span>🏢</span> Depósitos Habilitados para Conteo:
+              </label>
+              <button type="button" id="select-all-deposits-btn" class="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline">
+                Seleccionar Todos
+              </button>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2" id="filter-deposits-checkboxes">
+              ${allDeposits.map(d => `
+                <label class="flex items-center space-x-2 p-2 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer hover:bg-indigo-50/50 transition-colors">
+                  <input type="checkbox" value="${d}" class="deposit-checkbox rounded text-indigo-600 focus:ring-indigo-500" ${config.deposits.includes(d) ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">${d}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- [NUEVO] Ordenar por Precio -->
+          <div class="space-y-3 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-violet-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>↕️</span> Ordenar por Precio G.Mayor:
+              </label>
+              <span class="text-xs text-violet-600 dark:text-violet-400 font-bold">Orden de aparición</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2" id="sort-price-options">
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'none' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="none" class="sr-only" ${(config.sortByPrice || 'none') === 'none' ? 'checked' : ''}>
+                <span class="text-xl">🔀</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Sin orden</span>
+              </label>
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'desc' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="desc" class="sr-only" ${(config.sortByPrice || 'none') === 'desc' ? 'checked' : ''}>
+                <span class="text-xl">⬆️</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Mayor a Menor</span>
+              </label>
+              <label class="flex flex-col items-center gap-1 p-3 bg-white dark:bg-gray-700 rounded-xl border-2 cursor-pointer transition-all ${(config.sortByPrice || 'none') === 'asc' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-violet-300'}">
+                <input type="radio" name="inv-sort-price" value="asc" class="sr-only" ${(config.sortByPrice || 'none') === 'asc' ? 'checked' : ''}>
+                <span class="text-xl">⬇️</span>
+                <span class="text-xs font-bold text-gray-700 dark:text-gray-200 text-center">Menor a Mayor</span>
+              </label>
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Selecciona <strong>Mayor a Menor</strong> para que el rol inventario vea primero los productos más costosos.
+            </p>
+          </div>
+
+          <!-- [NUEVO] Límite de Productos a Mostrar -->
+          <div class="space-y-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-gray-700/60 dark:to-gray-700/30 p-4 rounded-2xl border border-orange-200 dark:border-gray-600">
+            <div class="flex items-center justify-between">
+              <label class="font-black text-sm text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                <span>🔢</span> Límite de Productos Visibles:
+              </label>
+              <span class="text-xs text-orange-600 dark:text-orange-400 font-bold">Primeros N productos</span>
+            </div>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">#</span>
+              <input type="number" id="inv-filter-product-limit" min="0" step="10" 
+                value="${config.productLimit || 0}" 
+                placeholder="0 = Sin límite" 
+                class="w-full pl-9 pr-4 py-3 bg-white dark:bg-gray-700 border-2 border-orange-300 dark:border-gray-500 rounded-xl font-black text-gray-800 dark:text-white outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 text-lg transition-all">
+            </div>
+            <p class="text-[11px] text-gray-600 dark:text-gray-300">
+              <strong>Ejemplo:</strong> Si colocas <strong>200</strong>, el inventario solo verá los primeros 200 productos (según el orden seleccionado arriba). Coloca <strong>0</strong> para no limitar.
+            </p>
+          </div>
+
+          <!-- Medidor en tiempo real de productos coincidentes -->
+          <div class="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center font-bold">✓</div>
+              <div>
+                <p class="text-xs text-emerald-800 dark:text-emerald-300 font-medium">Coincidencia en Catálogo:</p>
+                <p class="text-base font-black text-emerald-900 dark:text-emerald-200" id="inv-filter-match-count">${initialMatch.afterLimit} productos</p>
+              </div>
+            </div>
+            <span class="text-xs font-bold px-2.5 py-1 bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-100 rounded-lg">En catálogo activo</span>
           </div>
         </div>
 
-        <!-- Barra de Filtros Multifunción -->
-        <div class="p-4 sm:p-5 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <div>
-              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Fecha Desde:</label>
-              <input type="date" id="audit-filter-date-from" class="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-semibold">
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Fecha Hasta:</label>
-              <input type="date" id="audit-filter-date-to" class="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-semibold">
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Depósito:</label>
-              <select id="audit-filter-deposit" class="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200">
-                <option value="ALL">Todos los Depósitos</option>
-                <option value="A">Depósito A</option>
-                <option value="B">Depósito B</option>
-                <option value="C">Depósito C</option>
-                <option value="D">Depósito D</option>
-                <option value="E">Depósito E</option>
-                <option value="PLANTA BAJA">Planta Baja</option>
-                <option value="PISO VENTA">Piso Venta</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Usuario / Inventarista:</label>
-              <select id="audit-filter-user" class="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-200">
-                <option value="ALL">Todos los Usuarios</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Buscar (Folio / Producto):</label>
-              <input type="text" id="audit-filter-search" placeholder="🔍 Código, nombre, folio..." class="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-xs">
-            </div>
-          </div>
-
-          <!-- Botones Rápidos de Fecha -->
-          <div class="flex flex-wrap items-center gap-2 pt-1 text-xs">
-            <span class="text-gray-400 font-bold uppercase text-[10px]">Rango rápido:</span>
-            <button class="quick-date-btn px-2.5 py-1 bg-teal-600 text-white rounded-lg border font-bold" data-range="today">Hoy</button>
-            <button class="quick-date-btn px-2.5 py-1 bg-white dark:bg-gray-700 rounded-lg border text-gray-600 dark:text-gray-300 hover:bg-teal-50 font-semibold" data-range="yesterday">Ayer</button>
-            <button class="quick-date-btn px-2.5 py-1 bg-white dark:bg-gray-700 rounded-lg border text-gray-600 dark:text-gray-300 hover:bg-teal-50 font-semibold" data-range="week">Esta Semana</button>
-            <button class="quick-date-btn px-2.5 py-1 bg-white dark:bg-gray-700 rounded-lg border text-gray-600 dark:text-gray-300 hover:bg-teal-50 font-semibold" data-range="month">Este Mes</button>
-            <button class="quick-date-btn px-2.5 py-1 bg-white dark:bg-gray-700 rounded-lg border text-gray-600 dark:text-gray-300 hover:bg-teal-50 font-semibold" data-range="all">Histórico Completo</button>
-          </div>
-        </div>
-
-        <!-- Tarjetas de Métricas Resumen -->
-        <div class="px-5 py-3 bg-white dark:bg-gray-900 grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0" id="audit-kpis-container">
-          <div class="p-3 bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 rounded-xl">
-            <p class="text-[10px] font-bold text-teal-700 dark:text-teal-400 uppercase">Sesiones / Pedidos</p>
-            <p class="text-xl font-black text-teal-900 dark:text-teal-200" id="kpi-sessions-count">0</p>
-          </div>
-          <div class="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl">
-            <p class="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase">Total Piezas Contadas</p>
-            <p class="text-xl font-black text-blue-900 dark:text-blue-200" id="kpi-pieces-count">0</p>
-          </div>
-          <div class="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl">
-            <p class="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">Diferencia Total</p>
-            <p class="text-xl font-black text-amber-900 dark:text-amber-200" id="kpi-diff-count">0</p>
-          </div>
-          <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-            <p class="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">Total Valor G.Mayor</p>
-            <p class="text-xl font-black text-emerald-900 dark:text-emerald-200" id="kpi-value-count">$0.00</p>
-          </div>
-        </div>
-
-        <!-- Listado de Sesiones con Scroll -->
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6" id="audit-sessions-table-container">
-          <div class="text-center py-12"><div class="loading-spinner mx-auto"></div><p class="text-xs text-gray-500 mt-2">Cargando registros...</p></div>
+        <!-- Botones de Acción -->
+        <div class="p-6 bg-gray-50 dark:bg-gray-900 border-t border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
+          <button id="save-inv-filter-btn" class="flex-1 py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-500/25 flex items-center justify-center space-x-2">
+            <span>💾</span>
+            <span>Guardar y Sincronizar Filtros</span>
+          </button>
+          <button class="modal-close-btn px-6 py-3.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold rounded-2xl hover:bg-gray-300 transition-colors">
+            Cancelar
+          </button>
         </div>
       </div>
     `;
